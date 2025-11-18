@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>TrayIcon_Y_orange.ico</ApplicationIcon>
+	<AssemblyTitle>YEJI_AW_Client</AssemblyTitle>
+	<Company>YEJISOLUTION</Company>
+	<Product>YEJI_AW 클라이언트</Product>
+	<Description>사내근태솔루션</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="TrayIcon_Y_orange.ico" />
+  </ItemGroup>
+
+</Project>
