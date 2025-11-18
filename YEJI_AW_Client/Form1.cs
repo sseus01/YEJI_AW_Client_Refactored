@@ -1,0 +1,763 @@
+﻿#nullable enable
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using Microsoft.Win32;          // 전원(절전/복귀) 이벤트용
+
+// Timer 혼동 방지를 위해 Windows Forms Timer만 사용
+using Timer = System.Windows.Forms.Timer;
+
+namespace YEJI_AW_Client
+{
+    public partial class Form1 : Form
+    {
+        private ContextMenuStrip? trayMenu;
+
+        // idleTimer 는 Form1.Designer.cs 에 있다고 가정 (디자이너 타이머)
+        // private Timer idleTimer;
+
+        private Timer popupTimer;    // 팝업 시간 체크용
+        private Timer configTimer;   // 서버 client_config 1시간마다 갱신
+
+        private TimeSpan workStartTime;
+        private TimeSpan workEndTime;
+        private TimeSpan lunchStartTime;
+        private TimeSpan lunchEndTime;
+
+        private DateTime lastInputTime;
+        private DateTime idleStartTime;
+        private bool isIdle = false;
+        private bool hasShownPopup = false;
+
+        // 자리비움 기준 시간 (서버에서 가져와 덮어씀, 기본 10분)
+        private TimeSpan idleThreshold = TimeSpan.FromMinutes(10);
+
+        private string employeeName;
+        private string employeeId;
+        private string computerName = Environment.MachineName;
+        private string computerIP;
+
+        private readonly string pendingIdleEventsFile =
+            Path.Combine(@"C:\ProgramData\YEJI_AW", "pending_idle_events.json");
+
+        // client_config.json 저장 위치
+        private readonly string clientConfigFile =
+            Path.Combine(@"C:\ProgramData\YEJI_AW", "client_config.json");
+
+        private const string ServerBaseUrl = "http://175.106.99.157:3000";
+
+        private bool isPopupShowing = false;
+        private HashSet<string> shownPopupTimes = new HashSet<string>();
+
+        private DateTime suspendStartTime;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+        private struct LASTINPUTINFO
+        {
+            public uint cbSize;
+            public uint dwTime;
+        }
+
+        // 서버에서 받아오는 팝업 스케줄 데이터
+        public class PopupSchedule
+        {
+            [JsonPropertyName("id")]
+            public int Id { get; set; }
+
+            [JsonPropertyName("scheduled_time")]
+            public string ScheduledTime { get; set; } = "";
+
+            [JsonPropertyName("image_url")]
+            public string ImageUrl { get; set; } = "";
+
+            [JsonPropertyName("message")]
+            public string Message { get; set; } = "";
+
+            [JsonPropertyName("created_at")]
+            public DateTime CreatedAt { get; set; }
+        }
+
+        public Form1(string employeeName, string employeeId)
+        {
+            InitializeComponent();
+
+            this.employeeName = employeeName ?? "";
+            this.employeeId = employeeId ?? "";
+            this.computerIP = GetLocalIPAddress();
+
+            // 자리비움 감지 타이머 (디자이너에 있는 idleTimer 사용)
+            idleTimer.Interval = 1000;
+            idleTimer.Tick += IdleTimer_Tick;
+            idleTimer.Start();
+
+            lastInputTime = GetLastInputTime();
+
+            // 팝업 스케줄 체크 타이머 (1분 간격)
+            popupTimer = new Timer();
+            popupTimer.Interval = 60 * 1000;
+            popupTimer.Tick += async (s, e) => await CheckAndShowPopupAsync();
+            popupTimer.Start();
+
+            // 설정(client_config) 갱신 타이머 (1시간 간격)
+            configTimer = new Timer();
+            configTimer.Interval = 60 * 60 * 1000; // 1시간
+            configTimer.Tick += async (s, e) => await FetchWorkTimeFromServerAsync();
+            configTimer.Start();
+
+            this.Load += async (s, e) =>
+            {
+                this.Hide();
+                this.ShowInTaskbar = false;
+                await ResendPendingIdleEventsAsync();
+            };
+
+            InitializeTrayMenu();
+
+            // 시작 시 한 번 서버에서 업무시간/점심시간/자리비움 기준분 가져오기
+            _ = FetchWorkTimeFromServerAsync();
+
+            // 종료 시 SHUTDOWN 이벤트 전송
+            this.FormClosing += Form1_FormClosing;
+            // 프로그램 시작 시 BOOT 이벤트 전송
+            _ = SendPcEventAsync("BOOT");
+
+            // 전원(절전/복귀) 이벤트 구독
+            SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
+        }
+
+        // 폼 완전 종료 시 전원 이벤트 구독 해제
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
+            base.OnFormClosed(e);
+        }
+
+        // -----------------------------
+        // 서버에서 업무시간/점심시간/자리비움 기준 가져오기
+        // -----------------------------
+        private async Task FetchWorkTimeFromServerAsync()
+        {
+            try
+            {
+                using HttpClient client = new();
+                string url = ServerBaseUrl + "/api/client-config";
+                string json = await client.GetStringAsync(url);
+                var workTimeInfo = JsonSerializer.Deserialize<WorkTimeInfo>(json);
+
+                if (workTimeInfo != null)
+                {
+                    // 1) 서버 값 적용
+                    ApplyWorkTimeInfo(workTimeInfo);
+
+                    // 2) 서버 값 로컬 파일에 저장
+                    SaveClientConfig(workTimeInfo);
+                    return;
+                }
+            }
+            catch
+            {
+                // 서버 호출 실패 시 아래에서 로컬 파일/기본값으로 처리
+            }
+
+            // 3) 서버 실패하면 로컬 파일에서 시도
+            var localInfo = LoadClientConfig();
+            if (localInfo != null)
+            {
+                ApplyWorkTimeInfo(localInfo);
+            }
+            else
+            {
+                // 4) 그것도 없으면 기본값
+                SetDefaultWorkTime();
+            }
+        }
+
+        // WorkTimeInfo 하나를 받아서 실제 변수들에 적용하는 공통 함수
+        private void ApplyWorkTimeInfo(WorkTimeInfo info)
+        {
+            workStartTime = TimeSpan.Parse(info.WorkStart);
+            workEndTime = TimeSpan.Parse(info.WorkEnd);
+            lunchStartTime = TimeSpan.Parse(info.LunchStart);
+            lunchEndTime = TimeSpan.Parse(info.LunchEnd);
+            idleThreshold = TimeSpan.FromMinutes(info.IdleThresholdMinutes);
+        }
+
+        private void SetDefaultWorkTime()
+        {
+            workStartTime = new TimeSpan(9, 30, 0);
+            workEndTime = new TimeSpan(17, 30, 0);
+            lunchStartTime = new TimeSpan(12, 30, 0);
+            lunchEndTime = new TimeSpan(13, 30, 0);
+            idleThreshold = TimeSpan.FromMinutes(10);
+        }
+
+        // 서버에서 받은 설정을 로컬 JSON 파일에 저장
+        private void SaveClientConfig(WorkTimeInfo info)
+        {
+            try
+            {
+                string? folder = Path.GetDirectoryName(clientConfigFile);
+                if (!Directory.Exists(folder))
+                    Directory.CreateDirectory(folder!);
+
+                string json = JsonSerializer.Serialize(info, new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+
+                File.WriteAllText(clientConfigFile, json, Encoding.UTF8);
+            }
+            catch
+            {
+                // 저장 실패는 조용히 무시
+            }
+        }
+
+        // 로컬 JSON 파일에서 마지막 설정을 읽어오기
+        private WorkTimeInfo? LoadClientConfig()
+        {
+            try
+            {
+                if (!File.Exists(clientConfigFile))
+                    return null;
+
+                string json = File.ReadAllText(clientConfigFile, Encoding.UTF8);
+                var info = JsonSerializer.Deserialize<WorkTimeInfo>(json);
+                return info;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        // -----------------------------
+        // 팝업 스케줄 체크 (각 시간 1회)
+        // -----------------------------
+        private async Task CheckAndShowPopupAsync()
+        {
+            if (isPopupShowing) return;
+
+            var popups = await FetchPopupSchedulesAsync();
+            if (popups == null || popups.Count == 0) return;
+
+            DateTime now = DateTime.Now;
+
+            foreach (var popup in popups)
+            {
+                if (string.IsNullOrWhiteSpace(popup.ScheduledTime))
+                    continue;
+
+                if (!TimeSpan.TryParse(popup.ScheduledTime.Trim(), out var scheduledTimeSpan))
+                    continue;
+
+                DateTime scheduledDateTime = DateTime.Today.Add(scheduledTimeSpan);
+
+                // 2분 이상 지나버린 팝업은 무시
+                if (now - scheduledDateTime > TimeSpan.FromMinutes(2))
+                    continue;
+
+                string popupKey = scheduledDateTime.ToString("yyyyMMddHHmmss");
+                var diff = now - scheduledDateTime;
+
+                // 예약시간 기준 -1분 ~ +1분 사이 & 아직 안 띄운 경우만
+                if (diff >= TimeSpan.FromMinutes(-1) &&
+                    diff <= TimeSpan.FromMinutes(1) &&
+                    !shownPopupTimes.Contains(popupKey))
+                {
+                    shownPopupTimes.Add(popupKey);
+                    isPopupShowing = true;
+                    ShowPopup(popup);
+                    break;
+                }
+            }
+        }
+
+        // 팝업 표시 (항상 최상단 유지)
+        private void ShowPopup(PopupSchedule popup)
+        {
+            var popupForm = new Form
+            {
+                StartPosition = FormStartPosition.CenterScreen,
+                Width = 1048,
+                Height = 814,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                TopMost = true,
+                ShowInTaskbar = false
+            };
+
+            var pictureBox = new PictureBox
+            {
+                Dock = DockStyle.Fill,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Cursor = Cursors.Hand
+            };
+
+            try
+            {
+                pictureBox.Load(ServerBaseUrl + popup.ImageUrl);
+            }
+            catch
+            {
+                pictureBox.Image = null;
+            }
+
+            // 더블클릭으로 닫기
+            pictureBox.DoubleClick += (s, e) => popupForm.Close();
+
+            // 포커스를 잃어도 다시 최상단으로 끌어올리기
+            popupForm.Deactivate += (s, e) =>
+            {
+                popupForm.TopMost = true;
+                popupForm.BringToFront();
+                popupForm.Activate();
+            };
+
+            popupForm.FormClosed += (s, e) => { isPopupShowing = false; };
+
+            popupForm.Controls.Add(pictureBox);
+            popupForm.Show();
+        }
+
+        private async Task<List<PopupSchedule>> FetchPopupSchedulesAsync()
+        {
+            try
+            {
+                using var client = new HttpClient();
+                string url = ServerBaseUrl + "/api/scheduled-popups";
+                string json = await client.GetStringAsync(url);
+
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                };
+
+                var popups = JsonSerializer.Deserialize<List<PopupSchedule>>(json, options);
+                return popups ?? new List<PopupSchedule>();
+            }
+            catch
+            {
+                return new List<PopupSchedule>();
+            }
+        }
+
+        // -----------------------------
+        // 자리비움 감지 (퇴근 이후는 자동 기록)
+        // -----------------------------
+        private async void IdleTimer_Tick(object? sender, EventArgs e)
+        {
+            try
+            {
+                var nowTime = DateTime.Now.TimeOfDay;
+
+                bool isWorkingTime =
+                    nowTime >= workStartTime &&
+                    nowTime <= workEndTime &&
+                    !(nowTime >= lunchStartTime && nowTime < lunchEndTime);
+
+                bool isAfterWork = nowTime > workEndTime;
+
+                DateTime currentInputTime = GetLastInputTime();
+                bool inputDetected = (currentInputTime - lastInputTime).TotalSeconds > 1;
+
+                // 1) 근무시간: 기존 팝업 방식
+                if (!isAfterWork && isWorkingTime)
+                {
+                    if (inputDetected)
+                    {
+                        if (isIdle && !hasShownPopup)
+                        {
+                            hasShownPopup = true;
+                            DateTime idleEndTime = currentInputTime;
+                            await ShowIdleReasonPopupAsync(idleStartTime, idleEndTime);
+                            isIdle = false;
+                        }
+                        lastInputTime = currentInputTime;
+                    }
+                    else
+                    {
+                        if (!isIdle && (DateTime.Now - lastInputTime) > idleThreshold)
+                        {
+                            isIdle = true;
+                            hasShownPopup = false;
+                            idleStartTime = lastInputTime;
+                        }
+                    }
+
+                    return;
+                }
+
+                // 2) 근무시간도 아니고 퇴근 후도 아닌 구간(점심 등): 무시
+                if (!isAfterWork && !isWorkingTime)
+                {
+                    lastInputTime = currentInputTime;
+                    return;
+                }
+
+                // 3) 퇴근 이후: 팝업 없이 자동 기록 (업무종료 / 업무외시간)
+                if (isAfterWork)
+                {
+                    if (inputDetected)
+                    {
+                        if (isIdle)
+                        {
+                            DateTime idleEndTime = currentInputTime;
+                            await SendAfterWorkIdleAsync(idleStartTime, idleEndTime);
+                            isIdle = false;
+                        }
+                        lastInputTime = currentInputTime;
+                    }
+                    else
+                    {
+                        if (!isIdle && (DateTime.Now - lastInputTime) > idleThreshold)
+                        {
+                            isIdle = true;
+                            idleStartTime = lastInputTime;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // 예외 무시
+            }
+        }
+
+        private DateTime GetLastInputTime()
+        {
+            LASTINPUTINFO lii = new LASTINPUTINFO();
+            lii.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO));
+
+            if (!GetLastInputInfo(ref lii))
+                return DateTime.Now;
+
+            uint envTicks = (uint)Environment.TickCount;
+            uint lastInputTicks = lii.dwTime;
+            uint idleTicks = envTicks >= lastInputTicks
+                ? envTicks - lastInputTicks
+                : (uint.MaxValue - lastInputTicks) + envTicks;
+
+            return DateTime.Now.AddMilliseconds(-idleTicks);
+        }
+
+        // -----------------------------
+        // 절전(Sleep) / 복귀 처리
+        // -----------------------------
+        private async void SystemEvents_PowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+        {
+            if (e.Mode == PowerModes.Suspend)
+            {
+                // 절전 들어갈 때 (노트북 덮개 닫음 등)
+                suspendStartTime = DateTime.Now;
+            }
+            else if (e.Mode == PowerModes.Resume)
+            {
+                // 절전에서 다시 깨어날 때
+                DateTime resumeTime = DateTime.Now;
+
+                var t = resumeTime.TimeOfDay;
+                bool isWorkingTime =
+                    t >= workStartTime &&
+                    t <= workEndTime &&
+                    !(t >= lunchStartTime && t < lunchEndTime);
+
+                if (isWorkingTime)
+                {
+                    // 근무시간 안에서 덮개를 닫고 있었다면 전체 구간을 자리비움으로 팝업 처리
+                    await ShowIdleReasonPopupAsync(suspendStartTime, resumeTime);
+                }
+
+                lastInputTime = resumeTime;
+                isIdle = false;
+                hasShownPopup = false;
+            }
+        }
+
+        private async Task ShowIdleReasonPopupAsync(DateTime start, DateTime end)
+        {
+            using IdleReasonForm form = new IdleReasonForm(start, end);
+            var result = form.ShowDialog();
+
+            if (result == DialogResult.OK)
+            {
+                var idleEvent = new IdleEventData
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    EmployeeId = employeeId,
+                    EmployeeName = employeeName,
+                    ComputerName = computerName,
+                    ComputerIP = computerIP,
+                    IdleStartTime = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                    IdleEndTime = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                    ReasonCategory = form.SelectedReason ?? "",
+                    ReasonDetail = form.DetailReason ?? ""
+                };
+
+                bool success = await SendIdleEventAsync(idleEvent);
+                if (!success)
+                {
+                    SavePendingIdleEvent(idleEvent);
+                    MessageBox.Show("서버 전송에 실패했습니다. 데이터를 로컬에 저장했습니다.");
+                }
+            }
+        }
+
+        // 퇴근 이후 자동 기록용 (업무종료 / 업무외시간)
+        private async Task SendAfterWorkIdleAsync(DateTime start, DateTime end)
+        {
+            var idleEvent = new IdleEventData
+            {
+                Id = Guid.NewGuid().ToString(),
+                EmployeeId = employeeId,
+                EmployeeName = employeeName,
+                ComputerName = computerName,
+                ComputerIP = computerIP,
+                IdleStartTime = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                IdleEndTime = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                ReasonCategory = "업무종료",
+                ReasonDetail = "업무외시간"
+            };
+
+            bool success = await SendIdleEventAsync(idleEvent);
+            if (!success)
+            {
+                SavePendingIdleEvent(idleEvent);
+            }
+        }
+
+        private async Task<bool> SendIdleEventAsync(IdleEventData data)
+        {
+            try
+            {
+                using HttpClient client = new();
+                string url = $"{ServerBaseUrl}/api/idle-events";
+                string json = JsonSerializer.Serialize(data);
+
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var response = await client.PostAsync(url, content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    RemovePendingIdleEvent(data.Id);
+                    return true;
+                }
+                else
+                {
+                    SavePendingIdleEvent(data);
+                    return false;
+                }
+            }
+            catch
+            {
+                SavePendingIdleEvent(data);
+                return false;
+            }
+        }
+
+        // -----------------------------
+        // 자리비움 로컬 보관/재전송
+        // -----------------------------
+        private void SavePendingIdleEvent(IdleEventData data)
+        {
+            var pendingList = LoadPendingIdleEvents();
+            pendingList.Add(data);
+
+            string? folder = Path.GetDirectoryName(pendingIdleEventsFile);
+            if (!Directory.Exists(folder))
+                Directory.CreateDirectory(folder!);
+
+            File.WriteAllText(pendingIdleEventsFile, JsonSerializer.Serialize(pendingList));
+        }
+
+        private List<IdleEventData> LoadPendingIdleEvents()
+        {
+            if (!File.Exists(pendingIdleEventsFile))
+                return new List<IdleEventData>();
+
+            string json = File.ReadAllText(pendingIdleEventsFile);
+            return JsonSerializer.Deserialize<List<IdleEventData>>(json) ?? new List<IdleEventData>();
+        }
+
+        private void RemovePendingIdleEvent(string id)
+        {
+            var list = LoadPendingIdleEvents();
+            list.RemoveAll(e => e.Id == id);
+
+            string? folder = Path.GetDirectoryName(pendingIdleEventsFile);
+            if (!Directory.Exists(folder))
+                Directory.CreateDirectory(folder!);
+
+            File.WriteAllText(pendingIdleEventsFile, JsonSerializer.Serialize(list));
+        }
+
+        private async Task ResendPendingIdleEventsAsync()
+        {
+            var pendingList = LoadPendingIdleEvents();
+            foreach (var data in new List<IdleEventData>(pendingList))
+            {
+                bool success = await SendIdleEventAsync(data);
+                if (!success)
+                {
+                    break;
+                }
+            }
+        }
+
+        // -----------------------------
+        // PC 이벤트(BOOT / SHUTDOWN)
+        // -----------------------------
+        private async Task SendPcEventAsync(string eventType)
+        {
+            try
+            {
+                using HttpClient client = new();
+                string url = $"{ServerBaseUrl}/api/pc-events";
+
+                var data = new PcEventData
+                {
+                    EmployeeId = employeeId,
+                    EmployeeName = employeeName,
+                    ComputerName = computerName,
+                    ComputerIP = computerIP,
+                    EventType = eventType,
+                    EventTime = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                };
+
+                string json = JsonSerializer.Serialize(data);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                await client.PostAsync(url, content);
+            }
+            catch
+            {
+                // 실패해도 별도 저장은 하지 않고 무시
+            }
+        }
+
+        private async void Form1_FormClosing(object? sender, FormClosingEventArgs e)
+        {
+            try
+            {
+                await SendPcEventAsync("SHUTDOWN");
+            }
+            catch
+            {
+                // 종료 중 오류는 무시
+            }
+        }
+
+        // -----------------------------
+        // 트레이 메뉴 & 유틸
+        // -----------------------------
+        private void InitializeTrayMenu()
+        {
+            trayMenu = new ContextMenuStrip();
+            trayMenu.Items.Add("자리비움 이력 보기", null, OnViewIdleHistory);
+            trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
+
+            notifyIcon.ContextMenuStrip = trayMenu;
+            notifyIcon.Visible = true;
+        }
+
+        private async void OnViewIdleHistory(object? sender, EventArgs e)
+        {
+            var history = await FetchIdleHistoryFromServerAsync();
+            using IdleHistoryForm form = new IdleHistoryForm(history);
+            form.ShowDialog();
+        }
+
+        private async Task<List<IdleEventData>> FetchIdleHistoryFromServerAsync()
+        {
+            try
+            {
+                using var client = new HttpClient();
+                string url = $"{ServerBaseUrl}/api/idle-events?employeeId={employeeId}";
+                string json = await client.GetStringAsync(url);
+                var history = JsonSerializer.Deserialize<List<IdleEventData>>(json);
+                return history ?? new List<IdleEventData>();
+            }
+            catch
+            {
+                MessageBox.Show("자리비움 이력을 가져오는데 실패했습니다.");
+                return new List<IdleEventData>();
+            }
+        }
+
+        private void OnEditUserInfo(object? sender, EventArgs e)
+        {
+            using UserInfoForm userInfoForm = new UserInfoForm();
+            userInfoForm.SetUserInfo(employeeName, employeeId);
+
+            if (userInfoForm.ShowDialog() == DialogResult.OK)
+            {
+                employeeName = userInfoForm.EmployeeName;
+                employeeId = userInfoForm.EmployeeId;
+
+                SaveUserInfo(new UserInfo { Name = employeeName, Id = employeeId });
+
+                MessageBox.Show("사용자 정보가 업데이트 되었습니다.");
+            }
+        }
+
+        private void SaveUserInfo(UserInfo info)
+        {
+            try
+            {
+                string folder = @"C:\ProgramData\YEJI_AW";
+                if (!Directory.Exists(folder))
+                    Directory.CreateDirectory(folder);
+
+                string filePath = Path.Combine(folder, "user_info.json");
+                File.WriteAllText(filePath, JsonSerializer.Serialize(info));
+            }
+            catch
+            {
+                MessageBox.Show("사용자 정보 저장 중 오류가 발생했습니다.");
+            }
+        }
+
+        private string GetLocalIPAddress()
+        {
+            var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+            {
+                if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    return ip.ToString();
+            }
+            return "IP Not Found";
+        }
+    }
+
+    // 서버 client_config 구조와 동일하게 맞춘 DTO
+    public class WorkTimeInfo
+    {
+        public string WorkStart { get; set; } = "09:30";   // "HH:mm"
+        public string WorkEnd { get; set; } = "17:30";
+        public string LunchStart { get; set; } = "12:30";
+        public string LunchEnd { get; set; } = "13:30";
+        public int IdleThresholdMinutes { get; set; } = 10;
+    }
+
+    // PC 이벤트(부팅/종료) 전송용 DTO
+    public class PcEventData
+    {
+        public string EmployeeId { get; set; } = "";
+        public string EmployeeName { get; set; } = "";
+        public string ComputerName { get; set; } = "";
+        public string ComputerIP { get; set; } = "";
+        public string EventType { get; set; } = "";   // "BOOT" 또는 "SHUTDOWN"
+        public string EventTime { get; set; } = "";   // ISO 문자열
+    }
+}
