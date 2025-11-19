@@ -424,7 +424,7 @@ namespace YEJI_AW_Client
                             }
                             else
                             {
-                                await SendAfterWorkIdleAsync(idleStartTime, idleEndTime);
+                            await SendAfterWorkIdleAsync(idleStartTime, idleEndTime);
                             }
                             isIdle = false;
                         }
