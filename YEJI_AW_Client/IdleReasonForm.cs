@@ -36,6 +36,7 @@ namespace YEJI_AW_Client
 
             comboBoxLevel1.SelectedIndexChanged += ComboBoxLevel1_SelectedIndexChanged;
             comboBoxLevel2.SelectedIndexChanged += ComboBoxLevel2_SelectedIndexChanged;
+            comboBoxLevel3.SelectedIndexChanged += ComboBoxLevel3_SelectedIndexChanged;
 
             labelIdleTime.Text = $"{idleStartTime:HH:mm} ~ {idleEndTime:HH:mm}";
 
@@ -91,8 +92,8 @@ namespace YEJI_AW_Client
 
             if (comboBoxLevel1.Items.Count > 0)
             {
-               comboBoxLevel1.SelectedIndex = 0;
-             }
+                comboBoxLevel1.SelectedIndex = 0;
+            }
         }
 
         private void PopulateLevel2(string level1)
@@ -145,6 +146,7 @@ namespace YEJI_AW_Client
             if (string.IsNullOrEmpty(level1)) return;
 
             PopulateLevel2(level1);
+            ApplyPersonalRestDetail();
         }
 
         private void ComboBoxLevel2_SelectedIndexChanged(object? sender, EventArgs e)
@@ -155,6 +157,12 @@ namespace YEJI_AW_Client
             if (string.IsNullOrEmpty(level1) || string.IsNullOrEmpty(level2)) return;
 
             PopulateLevel3(level1, level2);
+            ApplyPersonalRestDetail();
+        }
+
+        private void ComboBoxLevel3_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            ApplyPersonalRestDetail();
         }
 
         // 수정 후
@@ -184,7 +192,7 @@ namespace YEJI_AW_Client
                 MessageBox.Show("기타 사유는 상세 내용을 입력해주세요.");
                 return;
             }
-                        
+
             isSaved = true;
             this.DialogResult = DialogResult.OK;
             this.Close();
@@ -197,6 +205,29 @@ namespace YEJI_AW_Client
             {
                 MessageBox.Show("사유를 선택 및 입력 후 저장해야 합니다.");
                 e.Cancel = true;
+            }
+        }
+
+        private void ApplyPersonalRestDetail()
+        {
+            const string personalRest = "개인 휴식";
+
+            string level1 = comboBoxLevel1.SelectedItem?.ToString() ?? string.Empty;
+            string level2 = comboBoxLevel2.SelectedItem?.ToString() ?? string.Empty;
+            string level3 = comboBoxLevel3.SelectedItem?.ToString() ?? string.Empty;
+
+            bool isPersonalRest = level1 == "개인용무" && (level2 == "휴식" || level3 == "휴식");
+
+            if (isPersonalRest)
+            {
+                if (string.IsNullOrWhiteSpace(textBoxDetail.Text) || textBoxDetail.Text == personalRest)
+                {
+                    textBoxDetail.Text = personalRest;
+                }
+            }
+            else if (textBoxDetail.Text == personalRest)
+            {
+                textBoxDetail.Clear();
             }
         }
     }

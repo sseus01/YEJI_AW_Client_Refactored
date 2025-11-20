@@ -40,6 +40,7 @@
             labelLevel1 = new Label();
             labelLevel2 = new Label();
             labelLevel3 = new Label();
+            labelDetailInstruction = new Label();
             SuspendLayout();
             // 
             // labelInstruction
@@ -117,7 +118,7 @@
             labelLevel1.Name = "labelLevel1";
             labelLevel1.Size = new Size(43, 15);
             labelLevel1.TabIndex = 6;
-            labelLevel1.Text = "대분류";
+            labelLevel1.Text = "구분";
             //
             // labelLevel2
             //
@@ -126,7 +127,7 @@
             labelLevel2.Name = "labelLevel2";
             labelLevel2.Size = new Size(43, 15);
             labelLevel2.TabIndex = 7;
-            labelLevel2.Text = "중분류";
+            labelLevel2.Text = "세부유형";
             //
             // labelLevel3
             //
@@ -135,13 +136,23 @@
             labelLevel3.Name = "labelLevel3";
             labelLevel3.Size = new Size(43, 15);
             labelLevel3.TabIndex = 8;
-            labelLevel3.Text = "소분류";
+            labelLevel3.Text = "상세사유(예)";
+            //
+            // labelDetailInstruction
+            //
+            labelDetailInstruction.AutoSize = true;
+            labelDetailInstruction.Location = new Point(29, 137);
+            labelDetailInstruction.Name = "labelDetailInstruction";
+            labelDetailInstruction.Size = new Size(201, 15);
+            labelDetailInstruction.TabIndex = 9;
+            labelDetailInstruction.Text = "아래의 메모창에 상세 사유를 입력하세요";
             //
             // IdleReasonForm
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(459, 290);
+            Controls.Add(labelDetailInstruction);
             Controls.Add(labelLevel3);
             Controls.Add(labelLevel2);
             Controls.Add(labelLevel1);
@@ -173,5 +184,6 @@
         private Label labelLevel1;
         private Label labelLevel2;
         private Label labelLevel3;
+        private Label labelDetailInstruction;
     }
 }
