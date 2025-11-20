@@ -30,51 +30,72 @@
         {
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(IdleReasonForm));
             labelInstruction = new Label();
-            comboBoxReason = new ComboBox();
+            comboBoxLevel1 = new ComboBox();
+            comboBoxLevel2 = new ComboBox();
+            comboBoxLevel3 = new ComboBox();
             textBoxDetail = new TextBox();
             buttonSave = new Button();
             labelIdleTime = new Label();
             label1 = new Label();
+            labelLevel1 = new Label();
+            labelLevel2 = new Label();
+            labelLevel3 = new Label();
             SuspendLayout();
             // 
             // labelInstruction
             // 
             labelInstruction.AutoSize = true;
-            labelInstruction.Location = new Point(51, 67);
+            labelInstruction.Location = new Point(29, 63);
             labelInstruction.Name = "labelInstruction";
-            labelInstruction.Size = new Size(123, 15);
+            labelInstruction.Size = new Size(159, 15);
             labelInstruction.TabIndex = 0;
-            labelInstruction.Text = "자리비움 사유를 선택";
-            // 
-            // comboBoxReason
-            // 
-            comboBoxReason.FormattingEnabled = true;
-            comboBoxReason.Location = new Point(195, 64);
-            comboBoxReason.Name = "comboBoxReason";
-            comboBoxReason.Size = new Size(121, 23);
-            comboBoxReason.TabIndex = 1;
-            // 
+            labelInstruction.Text = "자리비움 사유를 선택하세요";
+            //
+            // comboBoxLevel1
+            //
+            comboBoxLevel1.FormattingEnabled = true;
+            comboBoxLevel1.Location = new Point(29, 107);
+            comboBoxLevel1.Name = "comboBoxLevel1";
+            comboBoxLevel1.Size = new Size(110, 23);
+            comboBoxLevel1.TabIndex = 1;
+            //
+            // comboBoxLevel2
+            //
+            comboBoxLevel2.FormattingEnabled = true;
+            comboBoxLevel2.Location = new Point(145, 107);
+            comboBoxLevel2.Name = "comboBoxLevel2";
+            comboBoxLevel2.Size = new Size(110, 23);
+            comboBoxLevel2.TabIndex = 2;
+            //
+            // comboBoxLevel3
+            //
+            comboBoxLevel3.FormattingEnabled = true;
+            comboBoxLevel3.Location = new Point(261, 107);
+            comboBoxLevel3.Name = "comboBoxLevel3";
+            comboBoxLevel3.Size = new Size(170, 23);
+            comboBoxLevel3.TabIndex = 3;
+            //
             // textBoxDetail
-            // 
-            textBoxDetail.Location = new Point(48, 96);
+            //
+            textBoxDetail.Location = new Point(29, 155);
             textBoxDetail.Multiline = true;
             textBoxDetail.Name = "textBoxDetail";
-            textBoxDetail.Size = new Size(279, 76);
-            textBoxDetail.TabIndex = 2;
+            textBoxDetail.Size = new Size(402, 76);
+            textBoxDetail.TabIndex = 4;
             // 
             // buttonSave
             // 
-            buttonSave.Location = new Point(141, 189);
+            buttonSave.Location = new Point(179, 244);
             buttonSave.Name = "buttonSave";
             buttonSave.Size = new Size(75, 23);
-            buttonSave.TabIndex = 3;
+            buttonSave.TabIndex = 5;
             buttonSave.Text = "저장";
             buttonSave.UseVisualStyleBackColor = true;
             // 
             // labelIdleTime
             // 
             labelIdleTime.AutoSize = true;
-            labelIdleTime.Location = new Point(141, 33);
+            labelIdleTime.Location = new Point(145, 30);
             labelIdleTime.Name = "labelIdleTime";
             labelIdleTime.Size = new Size(143, 15);
             labelIdleTime.TabIndex = 4;
@@ -83,22 +104,54 @@
             // label1
             // 
             label1.AutoSize = true;
-            label1.Location = new Point(51, 33);
+            label1.Location = new Point(29, 30);
             label1.Name = "label1";
             label1.Size = new Size(94, 15);
             label1.TabIndex = 5;
             label1.Text = "자리비움 시간 : ";
-            // 
+            //
+            // labelLevel1
+            //
+            labelLevel1.AutoSize = true;
+            labelLevel1.Location = new Point(29, 89);
+            labelLevel1.Name = "labelLevel1";
+            labelLevel1.Size = new Size(43, 15);
+            labelLevel1.TabIndex = 6;
+            labelLevel1.Text = "대분류";
+            //
+            // labelLevel2
+            //
+            labelLevel2.AutoSize = true;
+            labelLevel2.Location = new Point(145, 89);
+            labelLevel2.Name = "labelLevel2";
+            labelLevel2.Size = new Size(43, 15);
+            labelLevel2.TabIndex = 7;
+            labelLevel2.Text = "중분류";
+            //
+            // labelLevel3
+            //
+            labelLevel3.AutoSize = true;
+            labelLevel3.Location = new Point(261, 89);
+            labelLevel3.Name = "labelLevel3";
+            labelLevel3.Size = new Size(43, 15);
+            labelLevel3.TabIndex = 8;
+            labelLevel3.Text = "소분류";
+            //
             // IdleReasonForm
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(370, 230);
+            ClientSize = new Size(459, 290);
+            Controls.Add(labelLevel3);
+            Controls.Add(labelLevel2);
+            Controls.Add(labelLevel1);
             Controls.Add(label1);
             Controls.Add(labelIdleTime);
             Controls.Add(buttonSave);
             Controls.Add(textBoxDetail);
-            Controls.Add(comboBoxReason);
+            Controls.Add(comboBoxLevel3);
+            Controls.Add(comboBoxLevel2);
+            Controls.Add(comboBoxLevel1);
             Controls.Add(labelInstruction);
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "IdleReasonForm";
@@ -110,10 +163,15 @@
         #endregion
 
         private Label labelInstruction;
-        private ComboBox comboBoxReason;
+        private ComboBox comboBoxLevel1;
+        private ComboBox comboBoxLevel2;
+        private ComboBox comboBoxLevel3;
         private TextBox textBoxDetail;
         private Button buttonSave;
         private Label labelIdleTime;
         private Label label1;
+        private Label labelLevel1;
+        private Label labelLevel2;
+        private Label labelLevel3;
     }
 }

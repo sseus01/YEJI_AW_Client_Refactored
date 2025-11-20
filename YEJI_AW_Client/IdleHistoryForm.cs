@@ -20,7 +20,10 @@ namespace YEJI_AW_Client
                     시작시간 = start == DateTime.MinValue ? item.IdleStartTime : start.ToString("yyyy-MM-dd HH:mm:ss"),
                     종료시간 = end == DateTime.MinValue ? item.IdleEndTime : end.ToString("yyyy-MM-dd HH:mm:ss"),
                     자리비움시간 = (end > start ? (end - start).ToString(@"hh\:mm\:ss") : ""),
-                    사유 = item.ReasonCategory ?? "",
+                    사유코드 = item.ReasonCode ?? "",
+                    대분류 = item.ReasonLevel1 ?? item.ReasonCategory ?? "",
+                    중분류 = item.ReasonLevel2 ?? "",
+                    소분류 = item.ReasonLevel3 ?? "",
                     상세사유 = item.ReasonDetail ?? ""
                 };
             });

@@ -39,7 +39,7 @@ namespace YEJI_AW_Client
         private bool idleStartedDuringWork = false;
 
         // 자리비움 기준 시간 (서버에서 가져와 덮어씀, 기본 10분)
-        private TimeSpan idleThreshold = TimeSpan.FromMinutes(10);
+        private TimeSpan idleThreshold = TimeSpan.FromMinutes(1);
 
         private string employeeName;
         private string employeeId;
@@ -59,6 +59,7 @@ namespace YEJI_AW_Client
         private HashSet<string> shownPopupTimes = new HashSet<string>();
 
         private DateTime suspendStartTime;
+        private bool wasInLunchBreak = false;
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
@@ -199,7 +200,7 @@ namespace YEJI_AW_Client
             workEndTime = new TimeSpan(17, 30, 0);
             lunchStartTime = new TimeSpan(12, 30, 0);
             lunchEndTime = new TimeSpan(13, 30, 0);
-            idleThreshold = TimeSpan.FromMinutes(10);
+            idleThreshold = TimeSpan.FromMinutes(1);
         }
 
         // 서버에서 받은 설정을 로컬 JSON 파일에 저장
@@ -363,10 +364,17 @@ namespace YEJI_AW_Client
             {
                 var nowTime = DateTime.Now.TimeOfDay;
 
-                bool isWorkingTime =
-                    nowTime >= workStartTime &&
-                    nowTime <= workEndTime &&
-                    !(nowTime >= lunchStartTime && nowTime < lunchEndTime);
+                bool isLunchBreak = IsLunchBreak(nowTime);
+                if (wasInLunchBreak && !isLunchBreak)
+                {
+                    lastInputTime = DateTime.Now;
+                    isIdle = false;
+                    hasShownPopup = false;
+                    idleStartedDuringWork = false;
+                }
+                wasInLunchBreak = isLunchBreak;
+
+                bool isWorkingTime = IsWorkingTime(nowTime);                
 
                 bool isAfterWork = nowTime > workEndTime;
 
@@ -382,7 +390,7 @@ namespace YEJI_AW_Client
                         {
                             hasShownPopup = true;
                             DateTime idleEndTime = currentInputTime;
-                            await ShowIdleReasonPopupAsync(idleStartTime, idleEndTime);
+                            await HandleIdleIntervalAsync(idleStartTime, idleEndTime);                          
                             isIdle = false;
                             idleStartedDuringWork = false;
                         }
@@ -419,7 +427,7 @@ namespace YEJI_AW_Client
                             DateTime idleEndTime = currentInputTime;
                             if (idleStartedDuringWork)
                             {
-                                await ShowIdleReasonPopupAsync(idleStartTime, idleEndTime);
+                                await HandleIdleIntervalAsync(idleStartTime, idleEndTime);
                                 idleStartedDuringWork = false;
                             }
                             else
@@ -464,6 +472,16 @@ namespace YEJI_AW_Client
             return DateTime.Now.AddMilliseconds(-idleTicks);
         }
 
+        private bool IsLunchBreak(TimeSpan time)
+        {
+            return time >= lunchStartTime && time < lunchEndTime;
+        }
+
+        private bool IsWorkingTime(TimeSpan time)
+        {
+            return time >= workStartTime && time <= workEndTime && !IsLunchBreak(time);
+        }
+
         private DateTime AdjustIdleStartForWorkDay(DateTime start)
         {
             var todayWorkStart = DateTime.Today.Add(workStartTime);
@@ -491,15 +509,12 @@ namespace YEJI_AW_Client
                 DateTime resumeTime = DateTime.Now;
 
                 var t = resumeTime.TimeOfDay;
-                bool isWorkingTime =
-                    t >= workStartTime &&
-                    t <= workEndTime &&
-                    !(t >= lunchStartTime && t < lunchEndTime);
+                bool isWorkingTime = IsWorkingTime(t);
 
                 if (isWorkingTime)
                 {
                     // 근무시간 안에서 덮개를 닫고 있었다면 전체 구간을 자리비움으로 팝업 처리
-                    await ShowIdleReasonPopupAsync(suspendStartTime, resumeTime);
+                    await HandleIdleIntervalAsync(suspendStartTime, resumeTime);
                 }
 
                 lastInputTime = resumeTime;
@@ -508,13 +523,87 @@ namespace YEJI_AW_Client
             }
         }
 
+        private async Task HandleIdleIntervalAsync(DateTime start, DateTime end)
+        {
+            var segments = SplitIdleInterval(start, end);
+            foreach (var segment in segments)
+            {
+                await ShowIdleReasonPopupAsync(segment.Start, segment.End);
+            }
+        }
+
+        private List<(DateTime Start, DateTime End)> SplitIdleInterval(DateTime start, DateTime end)
+        {
+            var segments = new List<(DateTime Start, DateTime End)>();
+
+            if (end <= start)
+            {
+                return segments;
+            }
+
+            DateTime referenceDate = start.Date;
+            DateTime workDayStart = referenceDate.Add(workStartTime);
+            DateTime lunchStart = referenceDate.Add(lunchStartTime);
+            DateTime lunchEnd = referenceDate.Add(lunchEndTime);
+
+            DateTime effectiveStart = start < workDayStart ? workDayStart : start;
+            DateTime effectiveEnd = end;
+
+            if (effectiveEnd <= effectiveStart)
+            {
+                return segments;
+            }
+
+            bool overlapsLunch = effectiveStart < lunchEnd && effectiveEnd > lunchStart;
+
+            void TryAddSegment(DateTime segmentStart, DateTime segmentEnd)
+            {
+                if (segmentEnd <= segmentStart)
+                {
+                    return;
+                }
+
+                TimeSpan duration = segmentEnd - segmentStart;
+                if (duration >= idleThreshold)
+                {
+                    segments.Add((segmentStart, segmentEnd));
+                }
+            }
+
+            if (!overlapsLunch)
+            {
+                TryAddSegment(effectiveStart, effectiveEnd);
+                return segments;
+            }
+
+            if (effectiveStart < lunchStart)
+            {
+                DateTime beforeLunchEnd = effectiveEnd < lunchStart ? effectiveEnd : lunchStart;
+                TryAddSegment(effectiveStart, beforeLunchEnd);
+            }
+
+            if (effectiveEnd > lunchEnd)
+            {
+                DateTime afterLunchStart = effectiveStart > lunchEnd ? effectiveStart : lunchEnd;
+                TryAddSegment(afterLunchStart, effectiveEnd);
+            }
+
+            return segments;
+        }
+
         private async Task ShowIdleReasonPopupAsync(DateTime start, DateTime end)
         {
-            using IdleReasonForm form = new IdleReasonForm(start, end);
+            using IdleReasonForm form = new IdleReasonForm(start, end, ServerBaseUrl);
             var result = form.ShowDialog();
 
             if (result == DialogResult.OK)
             {
+                string baseDetail = form.SelectedLevel3 ?? "";
+                string detailText = form.DetailReason ?? string.Empty;
+                string reasonDetail = string.IsNullOrWhiteSpace(detailText)
+                    ? baseDetail
+                    : $"{baseDetail} / {detailText}";
+
                 var idleEvent = new IdleEventData
                 {
                     Id = Guid.NewGuid().ToString(),
@@ -524,8 +613,12 @@ namespace YEJI_AW_Client
                     ComputerIP = computerIP,
                     IdleStartTime = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
                     IdleEndTime = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                    ReasonCategory = form.SelectedReason ?? "",
-                    ReasonDetail = form.DetailReason ?? ""
+                    ReasonCategory = form.SelectedLevel1 ?? "",
+                    ReasonDetail = reasonDetail,
+                    ReasonCode = form.SelectedReasonCode ?? "",
+                    ReasonLevel1 = form.SelectedLevel1 ?? "",
+                    ReasonLevel2 = form.SelectedLevel2 ?? "",
+                    ReasonLevel3 = form.SelectedLevel3 ?? ""
                 };
 
                 bool success = await SendIdleEventAsync(idleEvent);
@@ -550,7 +643,11 @@ namespace YEJI_AW_Client
                 IdleStartTime = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
                 IdleEndTime = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
                 ReasonCategory = "업무종료",
-                ReasonDetail = "업무외시간"
+                ReasonDetail = "업무외시간",
+                ReasonCode = string.Empty,
+                ReasonLevel1 = "업무종료",
+                ReasonLevel2 = "업무외시간",
+                ReasonLevel3 = string.Empty
             };
 
             bool success = await SendIdleEventAsync(idleEvent);
@@ -770,7 +867,7 @@ namespace YEJI_AW_Client
         public string WorkEnd { get; set; } = "17:30";
         public string LunchStart { get; set; } = "12:30";
         public string LunchEnd { get; set; } = "13:30";
-        public int IdleThresholdMinutes { get; set; } = 10;
+        public int IdleThresholdMinutes { get; set; } = 1;
     }
 
     // PC 이벤트(부팅/종료) 전송용 DTO

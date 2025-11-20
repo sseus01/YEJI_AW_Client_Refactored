@@ -22,5 +22,13 @@ namespace YEJI_AW_Client
         public string ReasonCategory { get; set; } = "";
         [JsonPropertyName("reasonDetail")]
         public string ReasonDetail { get; set; } = "";
+        [JsonPropertyName("reasonCode")]
+        public string ReasonCode { get; set; } = "";
+        [JsonPropertyName("reasonLevel1")]
+        public string ReasonLevel1 { get; set; } = "";
+        [JsonPropertyName("reasonLevel2")]
+        public string ReasonLevel2 { get; set; } = "";
+        [JsonPropertyName("reasonLevel3")]
+        public string ReasonLevel3 { get; set; } = "";
     }
 }
