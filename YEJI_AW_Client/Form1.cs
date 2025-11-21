@@ -626,9 +626,21 @@ namespace YEJI_AW_Client
                 {
                     reasonDetail = detailText.Trim();
                 }
-                else if (baseDetail == "화장실이용")
+                else if (!string.IsNullOrWhiteSpace(baseDetail))
                 {
                     reasonDetail = baseDetail;
+                }
+                else if (!string.IsNullOrWhiteSpace(form.SelectedLevel2))
+                {
+                    reasonDetail = form.SelectedLevel2;
+                }
+                else if (!string.IsNullOrWhiteSpace(form.SelectedLevel1))
+                {
+                    reasonDetail = form.SelectedLevel1;
+                }
+                else
+                {
+                    reasonDetail = "세부 사유 미입력";
                 }
 
                 var idleEvent = new IdleEventData

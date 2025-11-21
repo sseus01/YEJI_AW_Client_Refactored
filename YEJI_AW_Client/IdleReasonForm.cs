@@ -167,9 +167,16 @@ namespace YEJI_AW_Client
             SelectedLevel3 = level3;
             DetailReason = textBoxDetail.Text.Trim();
 
-            if ((matchedReason?.ReasonCode == "Z99" || level3.Contains("직접입력")) && string.IsNullOrWhiteSpace(DetailReason))
+            bool isRestroom = level3 == "화장실이용";
+
+            if (isRestroom && string.IsNullOrWhiteSpace(DetailReason))
             {
-                MessageBox.Show("기타 사유는 상세 내용을 입력해주세요.");
+                DetailReason = "화장실이용";
+                textBoxDetail.Text = DetailReason;
+            }
+            else if (string.IsNullOrWhiteSpace(DetailReason))
+            {
+                MessageBox.Show("사유를 입력해주세요.");
                 return;
             }
 

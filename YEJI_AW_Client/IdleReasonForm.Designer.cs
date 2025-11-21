@@ -160,6 +160,7 @@
             Controls.Add(labelIdleTime);
             Controls.Add(buttonSave);
             Controls.Add(textBoxDetail);
+            Controls.Add(labelLevel3);
             Controls.Add(comboBoxLevel2);
             Controls.Add(comboBoxLevel1);
             Controls.Add(labelInstruction);
