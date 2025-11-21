@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -529,6 +530,19 @@ namespace YEJI_AW_Client
             }
         }
 
+        private DateTime GetSystemBootTime()
+        {
+            try
+            {
+                // 시스템 업타임(밀리초)을 사용해 부팅 시간을 계산 (추가 참조 불필요)
+                return DateTime.Now - TimeSpan.FromMilliseconds(Environment.TickCount64);
+            }
+            catch
+            {
+                return DateTime.Now;
+            }
+        }
+
         private async Task HandleIdleIntervalAsync(DateTime start, DateTime end)
         {
             var segments = SplitIdleInterval(start, end);
@@ -751,6 +765,10 @@ namespace YEJI_AW_Client
                 using HttpClient client = new();
                 string url = $"{ServerBaseUrl}/api/pc-events";
 
+                DateTime eventTime = eventType == "BOOT"
+                   ? GetSystemBootTime()
+                   : DateTime.Now;
+
                 var data = new PcEventData
                 {
                     EmployeeId = employeeId,
@@ -758,7 +776,7 @@ namespace YEJI_AW_Client
                     ComputerName = computerName,
                     ComputerIP = computerIP,
                     EventType = eventType,
-                    EventTime = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                    EventTime = eventTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)
                 };
 
                 string json = JsonSerializer.Serialize(data);
