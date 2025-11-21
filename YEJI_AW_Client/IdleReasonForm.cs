@@ -21,6 +21,16 @@ namespace YEJI_AW_Client
         private readonly string serverBaseUrl;
         private List<AwayReason> awayReasons = new();
 
+        private static readonly HttpClient HttpClient = new HttpClient();
+        private static readonly object ReasonCacheLock = new();
+        private static List<AwayReason> cachedAwayReasons = new();
+        private static DateTime lastReasonFetchUtc = DateTime.MinValue;
+        private static readonly TimeSpan ReasonCacheDuration = TimeSpan.FromMinutes(30);
+        private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
         public IdleReasonForm(DateTime idleStartTime, DateTime idleEndTime, string serverBaseUrl)
         {
             InitializeComponent();
@@ -45,17 +55,54 @@ namespace YEJI_AW_Client
             this.Load += async (s, e) => await LoadReasonsAsync();
         }
 
+        private bool TryGetCachedReasons(out List<AwayReason> reasons)
+        {
+            lock (ReasonCacheLock)
+            {
+                if (cachedAwayReasons.Count > 0 && DateTime.UtcNow - lastReasonFetchUtc <= ReasonCacheDuration)
+                {
+                    reasons = new List<AwayReason>(cachedAwayReasons);
+                    return true;
+                }
+            }
+
+            reasons = new List<AwayReason>();
+            return false;
+        }
+
+        private void UpdateReasonCache(List<AwayReason> reasons)
+        {
+            lock (ReasonCacheLock)
+            {
+                cachedAwayReasons = new List<AwayReason>(reasons);
+                lastReasonFetchUtc = DateTime.UtcNow;
+            }
+        }
+
         private async Task LoadReasonsAsync()
         {
+            if (TryGetCachedReasons(out var cached))
+            {
+                awayReasons = cached;
+                PopulateLevel1();
+                return;
+            }
+
             try
             {
-                using HttpClient client = new();
+                var client = HttpClient;
                 string url = serverBaseUrl.TrimEnd('/') + "/api/away-reasons";
-                string json = await client.GetStringAsync(url);
-                awayReasons = JsonSerializer.Deserialize<List<AwayReason>>(json) ?? new List<AwayReason>();
-                 awayReasons = awayReasons
-                    .OrderBy(r => r.ReasonCode)
-                    .ToList();
+                var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                awayReasons = await JsonSerializer.DeserializeAsync<List<AwayReason>>(stream, JsonOptions)
+                    ?? new List<AwayReason>();
+                awayReasons = awayReasons
+                   .OrderBy(r => r.ReasonCode)
+                   .ToList();
+
+                UpdateReasonCache(awayReasons);
             }
             catch
             {

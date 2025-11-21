@@ -2,6 +2,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -11,6 +13,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Drawing.Imaging;
 using Microsoft.Win32;          // 전원(절전/복귀) 이벤트용
 
 // Timer 혼동 방지를 위해 Windows Forms Timer만 사용
@@ -26,7 +29,8 @@ namespace YEJI_AW_Client
         // private Timer idleTimer;
 
         private Timer popupTimer;    // 팝업 시간 체크용
-        private Timer configTimer;   // 서버 client_config 1시간마다 갱신
+        private Timer configTimer;   // 서버 client_config 5분마다 갱신
+        private Timer memoryTrimTimer; // 주기적으로 워킹셋 정리
 
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
@@ -61,6 +65,18 @@ namespace YEJI_AW_Client
 
         private DateTime suspendStartTime;
         private bool wasInLunchBreak = false;
+
+        private static readonly HttpClient HttpClient = new HttpClient();
+        private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+        private readonly TimeSpan popupCacheDuration = TimeSpan.FromMinutes(5);
+        private DateTime lastPopupFetchUtc = DateTime.MinValue;
+        private List<PopupSchedule> cachedPopupSchedules = new();
+        private DateTime popupKeyDate = DateTime.Today;
+        private const int PopupImageMaxWidth = 720;
+        private const int PopupImageMaxHeight = 560;
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
@@ -117,6 +133,11 @@ namespace YEJI_AW_Client
             configTimer.Tick += async (s, e) => await FetchWorkTimeFromServerAsync();
             configTimer.Start();
 
+            memoryTrimTimer = new Timer();
+            memoryTrimTimer.Interval = 5 * 60 * 1000; // 5분마다 워킹셋 트리밍
+            memoryTrimTimer.Tick += (s, e) => MemoryOptimizer.TrimWorkingSet();
+            memoryTrimTimer.Start();
+
             this.Load += async (s, e) =>
             {
                 this.Hide();
@@ -152,13 +173,13 @@ namespace YEJI_AW_Client
         {
             try
             {
-                using HttpClient client = new();
+                var client = HttpClient;
                 string url = ServerBaseUrl + "/api/client-config";
-                string json = await client.GetStringAsync(url);
-                var workTimeInfo = JsonSerializer.Deserialize<WorkTimeInfo>(json, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                var workTimeInfo = await JsonSerializer.DeserializeAsync<WorkTimeInfo>(stream, JsonOptions);
 
                 if (workTimeInfo != null)
                 {
@@ -238,10 +259,7 @@ namespace YEJI_AW_Client
                     return null;
 
                 string json = File.ReadAllText(clientConfigFile, Encoding.UTF8);
-                var info = JsonSerializer.Deserialize<WorkTimeInfo>(json, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                var info = JsonSerializer.Deserialize<WorkTimeInfo>(json, JsonOptions);
                 return info;
             }
             catch
@@ -256,6 +274,8 @@ namespace YEJI_AW_Client
         private async Task CheckAndShowPopupAsync()
         {
             if (isPopupShowing) return;
+
+            ClearStalePopupKeys();
 
             var popups = await FetchPopupSchedulesAsync();
             if (popups == null || popups.Count == 0) return;
@@ -286,20 +306,20 @@ namespace YEJI_AW_Client
                 {
                     shownPopupTimes.Add(popupKey);
                     isPopupShowing = true;
-                    ShowPopup(popup);
+                    await ShowPopupAsync(popup);
                     break;
                 }
             }
         }
 
         // 팝업 표시 (항상 최상단 유지)
-        private void ShowPopup(PopupSchedule popup)
+        private async Task ShowPopupAsync(PopupSchedule popup)
         {
             var popupForm = new Form
             {
                 StartPosition = FormStartPosition.CenterScreen,
-                Width = 1048,
-                Height = 814,
+                Width = PopupImageMaxWidth + 80,
+                Height = PopupImageMaxHeight + 80,
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
@@ -314,14 +334,7 @@ namespace YEJI_AW_Client
                 Cursor = Cursors.Hand
             };
 
-            try
-            {
-                pictureBox.Load(ServerBaseUrl + popup.ImageUrl);
-            }
-            catch
-            {
-                pictureBox.Image = null;
-            }
+            pictureBox.Image = await LoadScaledImageAsync(ServerBaseUrl + popup.ImageUrl, PopupImageMaxWidth, PopupImageMaxHeight);
 
             // 더블클릭으로 닫기
             pictureBox.DoubleClick += (s, e) => popupForm.Close();
@@ -334,30 +347,104 @@ namespace YEJI_AW_Client
                 popupForm.Activate();
             };
 
-            popupForm.FormClosed += (s, e) => { isPopupShowing = false; };
+            popupForm.FormClosed += (s, e) =>
+            {
+                if (pictureBox.Image != null)
+                {
+                    pictureBox.Image.Dispose();
+                    pictureBox.Image = null;
+                }
+
+                pictureBox.Dispose();
+                isPopupShowing = false;
+                MemoryOptimizer.TrimWorkingSet();
+            };
 
             popupForm.Controls.Add(pictureBox);
             popupForm.Show();
         }
 
-        private async Task<List<PopupSchedule>> FetchPopupSchedulesAsync()
+        private static Size GetScaledSize(Size original, int maxWidth, int maxHeight)
+        {
+            double widthRatio = (double)maxWidth / original.Width;
+            double heightRatio = (double)maxHeight / original.Height;
+            double ratio = Math.Min(1.0, Math.Min(widthRatio, heightRatio));
+
+            return new Size((int)(original.Width * ratio), (int)(original.Height * ratio));
+        }
+
+        private void ClearStalePopupKeys()
+        {
+            if (popupKeyDate != DateTime.Today)
+            {
+                shownPopupTimes.Clear();
+                popupKeyDate = DateTime.Today;
+            }
+        }
+
+        private async Task<Image?> LoadScaledImageAsync(string url, int maxWidth, int maxHeight)
         {
             try
             {
-                using var client = new HttpClient();
-                string url = ServerBaseUrl + "/api/scheduled-popups";
-                string json = await client.GetStringAsync(url);
+                using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
 
-                var options = new JsonSerializerOptions
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                using var originalImage = Image.FromStream(stream);
+                var targetSize = GetScaledSize(originalImage.Size, maxWidth, maxHeight);
+
+                using var resized = new Bitmap(targetSize.Width, targetSize.Height);
+                using (var graphics = Graphics.FromImage(resized))
                 {
-                    PropertyNameCaseInsensitive = true
-                };
+                    graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
+                    graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                    graphics.DrawImage(originalImage, 0, 0, targetSize.Width, targetSize.Height);
+                }
 
-                var popups = JsonSerializer.Deserialize<List<PopupSchedule>>(json, options);
-                return popups ?? new List<PopupSchedule>();
+                var optimized = new Bitmap(resized.Width, resized.Height, PixelFormat.Format16bppRgb565);
+                using (var targetGraphics = Graphics.FromImage(optimized))
+                {
+                    targetGraphics.DrawImage(resized, 0, 0, resized.Width, resized.Height);
+                }
+
+                return optimized;
             }
             catch
             {
+                return null;
+            }
+        }
+
+        private async Task<List<PopupSchedule>> FetchPopupSchedulesAsync()
+        {
+            if (DateTime.UtcNow - lastPopupFetchUtc <= popupCacheDuration && cachedPopupSchedules.Count > 0)
+            {
+                return cachedPopupSchedules;
+            }
+
+            try
+            {
+                var client = HttpClient;
+                string url = ServerBaseUrl + "/api/scheduled-popups";
+                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                var popups = await JsonSerializer.DeserializeAsync<List<PopupSchedule>>(stream, JsonOptions)
+                    ?? new List<PopupSchedule>();
+                cachedPopupSchedules = popups;
+                lastPopupFetchUtc = DateTime.UtcNow;
+
+                return popups;
+            }
+            catch
+            {
+                if (cachedPopupSchedules.Count > 0)
+                {
+                    return cachedPopupSchedules;
+                }
+
                 return new List<PopupSchedule>();
             }
         }
@@ -700,7 +787,7 @@ namespace YEJI_AW_Client
         {
             try
             {
-                using HttpClient client = new();
+                var client = HttpClient;
                 string url = $"{ServerBaseUrl}/api/idle-events";
                 string json = JsonSerializer.Serialize(data);
 
@@ -781,7 +868,7 @@ namespace YEJI_AW_Client
         {
             try
             {
-                using HttpClient client = new();
+                var client = HttpClient;
                 string url = $"{ServerBaseUrl}/api/pc-events";
 
                 DateTime eventTime = eventType == "BOOT"
@@ -845,7 +932,7 @@ namespace YEJI_AW_Client
         {
             try
             {
-                using var client = new HttpClient();
+                var client = HttpClient;
                 string url = $"{ServerBaseUrl}/api/idle-events?employeeId={employeeId}";
                 string json = await client.GetStringAsync(url);
                 var history = JsonSerializer.Deserialize<List<IdleEventData>>(json);
