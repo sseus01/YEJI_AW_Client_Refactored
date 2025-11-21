@@ -32,7 +32,7 @@
             labelInstruction = new Label();
             comboBoxLevel1 = new ComboBox();
             comboBoxLevel2 = new ComboBox();
-            comboBoxLevel3 = new ComboBox();
+            labelLevel3Value = new Label();
             textBoxDetail = new TextBox();
             buttonSave = new Button();
             labelIdleTime = new Label();
@@ -68,13 +68,13 @@
             comboBoxLevel2.Size = new Size(110, 23);
             comboBoxLevel2.TabIndex = 2;
             //
-            // comboBoxLevel3
+            // labelLevel3Value
             //
-            comboBoxLevel3.FormattingEnabled = true;
-            comboBoxLevel3.Location = new Point(261, 107);
-            comboBoxLevel3.Name = "comboBoxLevel3";
-            comboBoxLevel3.Size = new Size(170, 23);
-            comboBoxLevel3.TabIndex = 3;
+            labelLevel3Value.AutoSize = true;
+            labelLevel3Value.Location = new Point(261, 111);
+            labelLevel3Value.Name = "labelLevel3Value";
+            labelLevel3Value.Size = new Size(0, 15);
+            labelLevel3Value.TabIndex = 3;
             //
             // textBoxDetail
             //
@@ -136,7 +136,7 @@
             labelLevel3.Name = "labelLevel3";
             labelLevel3.Size = new Size(43, 15);
             labelLevel3.TabIndex = 8;
-            labelLevel3.Text = "상세사유(예)";
+            labelLevel3.Text = "예)";
             //
             // labelDetailInstruction
             //
@@ -153,14 +153,13 @@
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(459, 290);
             Controls.Add(labelDetailInstruction);
-            Controls.Add(labelLevel3);
+            Controls.Add(labelLevel3Value);
             Controls.Add(labelLevel2);
             Controls.Add(labelLevel1);
             Controls.Add(label1);
             Controls.Add(labelIdleTime);
             Controls.Add(buttonSave);
             Controls.Add(textBoxDetail);
-            Controls.Add(comboBoxLevel3);
             Controls.Add(comboBoxLevel2);
             Controls.Add(comboBoxLevel1);
             Controls.Add(labelInstruction);
@@ -176,7 +175,6 @@
         private Label labelInstruction;
         private ComboBox comboBoxLevel1;
         private ComboBox comboBoxLevel2;
-        private ComboBox comboBoxLevel3;
         private TextBox textBoxDetail;
         private Button buttonSave;
         private Label labelIdleTime;
@@ -185,5 +183,6 @@
         private Label labelLevel2;
         private Label labelLevel3;
         private Label labelDetailInstruction;
+        private Label labelLevel3Value;
     }
 }

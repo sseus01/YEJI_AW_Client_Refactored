@@ -32,11 +32,9 @@ namespace YEJI_AW_Client
 
             comboBoxLevel1.DropDownStyle = ComboBoxStyle.DropDownList;
             comboBoxLevel2.DropDownStyle = ComboBoxStyle.DropDownList;
-            comboBoxLevel3.DropDownStyle = ComboBoxStyle.DropDownList;
-
+       
             comboBoxLevel1.SelectedIndexChanged += ComboBoxLevel1_SelectedIndexChanged;
-            comboBoxLevel2.SelectedIndexChanged += ComboBoxLevel2_SelectedIndexChanged;
-            comboBoxLevel3.SelectedIndexChanged += ComboBoxLevel3_SelectedIndexChanged;
+            comboBoxLevel2.SelectedIndexChanged += ComboBoxLevel2_SelectedIndexChanged;         
 
             labelIdleTime.Text = $"{idleStartTime:HH:mm} ~ {idleEndTime:HH:mm}";
 
@@ -111,8 +109,6 @@ namespace YEJI_AW_Client
                 }
             }
 
-            comboBoxLevel3.Items.Clear();
-
             if (comboBoxLevel2.Items.Count > 0)
             {
                 comboBoxLevel2.SelectedIndex = 0;
@@ -121,24 +117,14 @@ namespace YEJI_AW_Client
 
         private void PopulateLevel3(string level1, string level2)
         {
-            comboBoxLevel3.Items.Clear();
-            var seenLevel3 = new HashSet<string>();
-            foreach (var level3 in awayReasons
+            var level3 = awayReasons
                 .Where(r => r.Level1 == level1 && r.Level2 == level2)
-                .Select(r => r.Level3))              
-            {
-                if (seenLevel3.Add(level3))
-                {
-                    comboBoxLevel3.Items.Add(level3);
-                }
-            }
+                .Select(r => r.Level3)
+                .FirstOrDefault();
 
-            if (comboBoxLevel3.Items.Count > 0)
-            {
-                comboBoxLevel3.SelectedIndex = 0;
-            }
+            labelLevel3Value.Text = level3 ?? string.Empty;
         }
-
+          
         private void ComboBoxLevel1_SelectedIndexChanged(object? sender, EventArgs e)
         {
             string level1 = comboBoxLevel1.SelectedItem?.ToString() ?? string.Empty;
@@ -159,17 +145,12 @@ namespace YEJI_AW_Client
             ApplyPersonalRestDetail();
         }
 
-        private void ComboBoxLevel3_SelectedIndexChanged(object? sender, EventArgs e)
-        {
-            ApplyPersonalRestDetail();
-        }
-
-        // 수정 후
+         // 수정 후
         private void ButtonSave_Click(object? sender, EventArgs e)
         {
             string level1 = comboBoxLevel1.SelectedItem?.ToString() ?? string.Empty;
             string level2 = comboBoxLevel2.SelectedItem?.ToString() ?? string.Empty;
-            string level3 = comboBoxLevel3.SelectedItem?.ToString() ?? string.Empty;
+            string level3 = labelLevel3Value.Text;
 
             if (string.IsNullOrEmpty(level1) || string.IsNullOrEmpty(level2) || string.IsNullOrEmpty(level3))
             {
@@ -213,7 +194,7 @@ namespace YEJI_AW_Client
 
             string level1 = comboBoxLevel1.SelectedItem?.ToString() ?? string.Empty;
             string level2 = comboBoxLevel2.SelectedItem?.ToString() ?? string.Empty;
-            string level3 = comboBoxLevel3.SelectedItem?.ToString() ?? string.Empty;
+            string level3 = labelLevel3Value.Text;
 
             bool isPersonalRest = level1 == "개인용무" && (level2 == "휴식" || level3 == "휴식");
 
