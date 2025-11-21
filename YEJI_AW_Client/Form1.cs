@@ -620,9 +620,16 @@ namespace YEJI_AW_Client
             {
                 string baseDetail = form.SelectedLevel3 ?? "";
                 string detailText = form.DetailReason ?? string.Empty;
-                string reasonDetail = string.IsNullOrWhiteSpace(detailText)
-                    ? baseDetail
-                    : $"{baseDetail} / {detailText}";
+
+                string reasonDetail = string.Empty;
+                if (!string.IsNullOrWhiteSpace(detailText))
+                {
+                    reasonDetail = detailText.Trim();
+                }
+                else if (baseDetail == "화장실이용")
+                {
+                    reasonDetail = baseDetail;
+                }
 
                 var idleEvent = new IdleEventData
                 {

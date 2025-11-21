@@ -191,24 +191,32 @@ namespace YEJI_AW_Client
         private void ApplyPersonalRestDetail()
         {
             const string personalRest = "개인 휴식";
+            const string restroom = "화장실이용";
 
             string level1 = comboBoxLevel1.SelectedItem?.ToString() ?? string.Empty;
             string level2 = comboBoxLevel2.SelectedItem?.ToString() ?? string.Empty;
             string level3 = labelLevel3Value.Text;
 
             bool isPersonalRest = level1 == "개인용무" && (level2 == "휴식" || level3 == "휴식");
+            bool isRestroom = level3 == restroom;
 
-            if (isPersonalRest)
+            void ApplyAutoDetail(string marker, bool shouldApply)
             {
-                if (string.IsNullOrWhiteSpace(textBoxDetail.Text) || textBoxDetail.Text == personalRest)
+                if (shouldApply)
                 {
-                    textBoxDetail.Text = personalRest;
+                    if (string.IsNullOrWhiteSpace(textBoxDetail.Text) || textBoxDetail.Text == marker)
+                    {
+                        textBoxDetail.Text = marker;
+                    }
+                }
+                else if (textBoxDetail.Text == marker)
+                {
+                    textBoxDetail.Clear();
                 }
             }
-            else if (textBoxDetail.Text == personalRest)
-            {
-                textBoxDetail.Clear();
-            }
+
+            ApplyAutoDetail(personalRest, isPersonalRest);
+            ApplyAutoDetail(restroom, isRestroom);
         }
     }
     public class AwayReason
