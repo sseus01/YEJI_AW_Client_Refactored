@@ -110,9 +110,9 @@ namespace YEJI_AW_Client
             popupTimer.Tick += async (s, e) => await CheckAndShowPopupAsync();
             popupTimer.Start();
 
-            // 설정(client_config) 갱신 타이머 (1시간 간격)
+            // 설정(client_config) 갱신 타이머 (5분간격)
             configTimer = new Timer();
-            configTimer.Interval = 60 * 60 * 1000; // 1시간
+            configTimer.Interval = 5 * 60 * 1000; ; // 5분
             configTimer.Tick += async (s, e) => await FetchWorkTimeFromServerAsync();
             configTimer.Start();
 
