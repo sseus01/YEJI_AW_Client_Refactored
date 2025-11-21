@@ -55,6 +55,9 @@ namespace YEJI_AW_Client
                 string url = serverBaseUrl.TrimEnd('/') + "/api/away-reasons";
                 string json = await client.GetStringAsync(url);
                 awayReasons = JsonSerializer.Deserialize<List<AwayReason>>(json) ?? new List<AwayReason>();
+                 awayReasons = awayReasons
+                    .OrderBy(r => r.ReasonCode)
+                    .ToList();
             }
             catch
             {
@@ -79,15 +82,13 @@ namespace YEJI_AW_Client
         private void PopulateLevel1()
         {
             comboBoxLevel1.Items.Clear();
-            var level1List = awayReasons
-                .Select(r => r.Level1)
-                .Distinct()
-                .OrderBy(v => v)
-                .ToList();
-
-            foreach (var level1 in level1List)
+            var seenLevel1 = new HashSet<string>();
+            foreach (var level1 in awayReasons.Select(r => r.Level1))
             {
-                comboBoxLevel1.Items.Add(level1);
+                if (seenLevel1.Add(level1))
+                {
+                    comboBoxLevel1.Items.Add(level1);
+                }
             }
 
             if (comboBoxLevel1.Items.Count > 0)
@@ -99,16 +100,15 @@ namespace YEJI_AW_Client
         private void PopulateLevel2(string level1)
         {
             comboBoxLevel2.Items.Clear();
-            var level2List = awayReasons
-                .Where(r => r.Level1 == level1)
-                .Select(r => r.Level2)
-                .Distinct()
-                .OrderBy(v => v)
-                .ToList();
-
-            foreach (var level2 in level2List)
+            var seenLevel2 = new HashSet<string>();
+            foreach (var level2 in awayReasons
+               .Where(r => r.Level1 == level1)
+               .Select(r => r.Level2))
             {
-                comboBoxLevel2.Items.Add(level2);
+                if (seenLevel2.Add(level2))
+                {
+                    comboBoxLevel2.Items.Add(level2);
+                }
             }
 
             comboBoxLevel3.Items.Clear();
@@ -122,16 +122,15 @@ namespace YEJI_AW_Client
         private void PopulateLevel3(string level1, string level2)
         {
             comboBoxLevel3.Items.Clear();
-            var level3List = awayReasons
+            var seenLevel3 = new HashSet<string>();
+            foreach (var level3 in awayReasons
                 .Where(r => r.Level1 == level1 && r.Level2 == level2)
-                .Select(r => r.Level3)
-                .Distinct()
-                .OrderBy(v => v)
-                .ToList();
-
-            foreach (var level3 in level3List)
+                .Select(r => r.Level3))              
             {
-                comboBoxLevel3.Items.Add(level3);
+                if (seenLevel3.Add(level3))
+                {
+                    comboBoxLevel3.Items.Add(level3);
+                }
             }
 
             if (comboBoxLevel3.Items.Count > 0)

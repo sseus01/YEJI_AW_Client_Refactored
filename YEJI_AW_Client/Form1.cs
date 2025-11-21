@@ -39,7 +39,7 @@ namespace YEJI_AW_Client
         private bool idleStartedDuringWork = false;
 
         // 자리비움 기준 시간 (서버에서 가져와 덮어씀, 기본 10분)
-        private TimeSpan idleThreshold = TimeSpan.FromMinutes(1);
+        private TimeSpan idleThreshold = TimeSpan.FromMinutes(10);
 
         private string employeeName;
         private string employeeId;
@@ -154,7 +154,10 @@ namespace YEJI_AW_Client
                 using HttpClient client = new();
                 string url = ServerBaseUrl + "/api/client-config";
                 string json = await client.GetStringAsync(url);
-                var workTimeInfo = JsonSerializer.Deserialize<WorkTimeInfo>(json);
+                var workTimeInfo = JsonSerializer.Deserialize<WorkTimeInfo>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
 
                 if (workTimeInfo != null)
                 {
@@ -196,11 +199,11 @@ namespace YEJI_AW_Client
 
         private void SetDefaultWorkTime()
         {
-            workStartTime = new TimeSpan(9, 30, 0);
-            workEndTime = new TimeSpan(17, 30, 0);
-            lunchStartTime = new TimeSpan(12, 30, 0);
-            lunchEndTime = new TimeSpan(13, 30, 0);
-            idleThreshold = TimeSpan.FromMinutes(1);
+            var defaultInfo = new WorkTimeInfo();
+            ApplyWorkTimeInfo(defaultInfo);
+
+            // 로컬에 저장된 설정이 없는 경우에도 기본값(10분 기준)이 파일로 기록되도록 저장
+            SaveClientConfig(defaultInfo);
         }
 
         // 서버에서 받은 설정을 로컬 JSON 파일에 저장
@@ -234,7 +237,10 @@ namespace YEJI_AW_Client
                     return null;
 
                 string json = File.ReadAllText(clientConfigFile, Encoding.UTF8);
-                var info = JsonSerializer.Deserialize<WorkTimeInfo>(json);
+                var info = JsonSerializer.Deserialize<WorkTimeInfo>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
                 return info;
             }
             catch
@@ -266,7 +272,7 @@ namespace YEJI_AW_Client
                 DateTime scheduledDateTime = DateTime.Today.Add(scheduledTimeSpan);
 
                 // 2분 이상 지나버린 팝업은 무시
-                if (now - scheduledDateTime > TimeSpan.FromMinutes(2))
+                if (now - scheduledDateTime > TimeSpan.FromMinutes(1))
                     continue;
 
                 string popupKey = scheduledDateTime.ToString("yyyyMMddHHmmss");
@@ -867,7 +873,7 @@ namespace YEJI_AW_Client
         public string WorkEnd { get; set; } = "17:30";
         public string LunchStart { get; set; } = "12:30";
         public string LunchEnd { get; set; } = "13:30";
-        public int IdleThresholdMinutes { get; set; } = 1;
+        public int IdleThresholdMinutes { get; set; } = 10;
     }
 
     // PC 이벤트(부팅/종료) 전송용 DTO
