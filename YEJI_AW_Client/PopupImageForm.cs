@@ -10,8 +10,8 @@ namespace YEJI_AW_Client
             InitializeComponent();
 
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Width = 760;
-            this.Height = 620;
+            this.Width = 1064;
+            this.Height = 828;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
