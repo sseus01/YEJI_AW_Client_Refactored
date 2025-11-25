@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Drawing;
 using System.Windows.Forms;
 
 namespace YEJI_AW_Client
@@ -10,8 +11,7 @@ namespace YEJI_AW_Client
             InitializeComponent();
 
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Width = 1064;
-            this.Height = 828;
+            this.ClientSize = new Size(1051, 792);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
