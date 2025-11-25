@@ -60,6 +60,18 @@ namespace YEJI_AW_Client
 
         private const string ServerBaseUrl = "http://175.106.99.157:3000";
 
+        private static string GetCurrentVersion()
+        {
+            try
+            {
+                return Application.ProductVersion;
+            }
+            catch
+            {
+                return "0.0.0";
+            }
+        }
+
         private bool isPopupShowing = false;
         private HashSet<string> shownPopupTimes = new HashSet<string>();
 
@@ -143,6 +155,7 @@ namespace YEJI_AW_Client
                 this.Hide();
                 this.ShowInTaskbar = false;
                 await ResendPendingIdleEventsAsync();
+                await CheckClientUpdateAsync();
             };
 
             InitializeTrayMenu();
@@ -265,6 +278,88 @@ namespace YEJI_AW_Client
             catch
             {
                 return null;
+            }
+        }
+
+        // -----------------------------
+        // 클라이언트 자동 업데이트 확인
+        // -----------------------------
+        private async Task CheckClientUpdateAsync()
+        {
+            try
+            {
+                string currentVersion = GetCurrentVersion();
+                string url = $"{ServerBaseUrl}/api/client-releases/check?currentVersion={Uri.EscapeDataString(currentVersion)}";
+
+                using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                var checkResult = await JsonSerializer.DeserializeAsync<ClientReleaseCheckResponse>(stream, JsonOptions);
+
+                if (checkResult?.Success == true && checkResult.NeedUpdate && checkResult.Latest != null)
+                {
+                    await PromptAndDownloadUpdateAsync(checkResult.Latest, currentVersion);
+                }
+            }
+            catch
+            {
+                // 업데이트 확인 실패는 조용히 무시
+            }
+        }
+
+        private async Task PromptAndDownloadUpdateAsync(ClientReleaseInfo latestRelease, string currentVersion)
+        {
+            string releaseNotes = string.IsNullOrWhiteSpace(latestRelease.ReleaseNotes)
+                ? string.Empty
+                : $"\n\n변경 사항:\n{latestRelease.ReleaseNotes}";
+
+            DialogResult dialogResult = MessageBox.Show(
+                $"현재 버전: {currentVersion}\n최신 버전: {latestRelease.Version}\n자동 업데이트를 진행하시겠습니까?{releaseNotes}",
+                "새 버전 감지",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information);
+
+            if (dialogResult != DialogResult.Yes)
+                return;
+
+            string downloadUrl = latestRelease.DownloadUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                ? latestRelease.DownloadUrl
+                : ServerBaseUrl + latestRelease.DownloadUrl;
+
+            string targetFileName = string.IsNullOrWhiteSpace(latestRelease.FileName)
+                ? $"YEJI_AW_Client_{latestRelease.Version}.exe"
+                : latestRelease.FileName;
+
+            string tempFilePath = Path.Combine(Path.GetTempPath(), targetFileName);
+
+            try
+            {
+                using var response = await HttpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                await using var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await response.Content.CopyToAsync(fileStream);
+            }
+            catch
+            {
+                MessageBox.Show("업데이트 파일 다운로드에 실패했습니다. 네트워크 연결을 확인한 뒤 다시 시도해주세요.");
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = tempFilePath,
+                    UseShellExecute = true
+                });
+
+                Application.Exit();
+            }
+            catch
+            {
+                MessageBox.Show($"다운로드된 설치 파일 실행에 실패했습니다. 다음 경로에서 직접 실행해주세요:\n{tempFilePath}");
             }
         }
 
@@ -1020,5 +1115,45 @@ namespace YEJI_AW_Client
 
         [JsonPropertyName("eventTime")]
         public string EventTime { get; set; } = "";   // ISO 문자열
+    }
+
+    public class ClientReleaseInfo
+    {
+        [JsonPropertyName("version")]
+        public string Version { get; set; } = string.Empty;
+
+        [JsonPropertyName("fileName")]
+        public string FileName { get; set; } = string.Empty;
+
+        [JsonPropertyName("originalName")]
+        public string OriginalName { get; set; } = string.Empty;
+
+        [JsonPropertyName("downloadUrl")]
+        public string DownloadUrl { get; set; } = string.Empty;
+
+        [JsonPropertyName("releaseNotes")]
+        public string ReleaseNotes { get; set; } = string.Empty;
+
+        [JsonPropertyName("uploadedAt")]
+        public string UploadedAt { get; set; } = string.Empty;
+    }
+
+    public class ClientReleaseCheckResponse
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+            = false;
+
+        [JsonPropertyName("needUpdate")]
+        public bool NeedUpdate { get; set; }
+            = false;
+
+        [JsonPropertyName("latest")]
+        public ClientReleaseInfo? Latest { get; set; }
+            = null;
+
+        [JsonPropertyName("message")]
+        public string? Message { get; set; }
+            = string.Empty;
     }
 }
