@@ -92,6 +92,8 @@ namespace YEJI_AW_Client
         private DateTime popupKeyDate = DateTime.Today;
         private const int PopupImageMaxWidth = 720;
         private const int PopupImageMaxHeight = 560;
+        private HashSet<string> processedIdleIntervals = new();
+        private DateTime idleKeyDate = DateTime.Today;
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
@@ -486,6 +488,20 @@ namespace YEJI_AW_Client
             }
         }
 
+        private void ClearStaleIdleKeys()
+        {
+            if (idleKeyDate != DateTime.Today)
+            {
+                processedIdleIntervals.Clear();
+                idleKeyDate = DateTime.Today;
+            }
+        }
+
+        private string GetIdleIntervalKey(DateTime start, DateTime end)
+        {
+            return $"{start:yyyyMMddHHmmssfff}-{end:yyyyMMddHHmmssfff}";
+        }
+
         private async Task<Image?> LoadScaledImageAsync(string url, int maxWidth, int maxHeight)
         {
             try
@@ -736,9 +752,17 @@ namespace YEJI_AW_Client
 
         private async Task HandleIdleIntervalAsync(DateTime start, DateTime end)
         {
+            ClearStaleIdleKeys();
             var segments = SplitIdleInterval(start, end);
             foreach (var segment in segments)
             {
+                string intervalKey = GetIdleIntervalKey(segment.Start, segment.End);
+                if (processedIdleIntervals.Contains(intervalKey))
+                {
+                    continue;
+                }
+
+                processedIdleIntervals.Add(intervalKey); 
                 await ShowIdleReasonPopupAsync(segment.Start, segment.End);
             }
         }
@@ -904,15 +928,21 @@ namespace YEJI_AW_Client
             };
         }
 
+        private async Task PostClientStatusAsync(string url)
+        {
+            var payload = BuildClientStatusPayload();
+            string json = JsonSerializer.Serialize(payload);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            await HttpClient.PostAsync(url, content);
+        }
+
         private async Task RegisterOrUpdateClientAsync()
         {
             try
             {
-                var payload = BuildClientStatusPayload();
-                string json = JsonSerializer.Serialize(payload);
-                using var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-                await HttpClient.PostAsync($"{ServerBaseUrl}/api/client/register", content);
+                await PostClientStatusAsync($"{ServerBaseUrl}/api/client/register");
+                await PostClientStatusAsync($"{ServerBaseUrl}/api/admin/client-status");
             }
             catch
             {
@@ -930,11 +960,7 @@ namespace YEJI_AW_Client
             try
             {
                 isSendingHeartbeat = true;
-                var payload = BuildClientStatusPayload();
-                string json = JsonSerializer.Serialize(payload);
-                using var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-                await HttpClient.PostAsync($"{ServerBaseUrl}/api/client/heartbeat", content);
+                await PostClientStatusAsync($"{ServerBaseUrl}/api/admin/client-status");
             }
             catch
             {
