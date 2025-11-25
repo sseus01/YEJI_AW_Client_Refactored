@@ -195,6 +195,11 @@ namespace YEJI_AW_Client
          // 수정 후
         private void ButtonSave_Click(object? sender, EventArgs e)
         {
+            if (isSaved)
+            {
+                return;
+            }
+
             string level1 = comboBoxLevel1.SelectedItem?.ToString() ?? string.Empty;
             string level2 = comboBoxLevel2.SelectedItem?.ToString() ?? string.Empty;
             string level3 = labelLevel3Value.Text;
@@ -228,6 +233,7 @@ namespace YEJI_AW_Client
             }
 
             isSaved = true;
+            buttonSave.Enabled = false;
             this.DialogResult = DialogResult.OK;
             this.Close();
         }

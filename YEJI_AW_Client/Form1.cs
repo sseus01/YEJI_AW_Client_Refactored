@@ -31,6 +31,7 @@ namespace YEJI_AW_Client
         private Timer popupTimer;    // 팝업 시간 체크용
         private Timer configTimer;   // 서버 client_config 5분마다 갱신
         private Timer memoryTrimTimer; // 주기적으로 워킹셋 정리
+        private Timer heartbeatTimer; // 주기적 상태 전송
 
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
@@ -83,6 +84,8 @@ namespace YEJI_AW_Client
         {
             PropertyNameCaseInsensitive = true
         };
+        private readonly TimeSpan heartbeatInterval = TimeSpan.FromMinutes(2);
+        private bool isSendingHeartbeat = false;
         private readonly TimeSpan popupCacheDuration = TimeSpan.FromMinutes(5);
         private DateTime lastPopupFetchUtc = DateTime.MinValue;
         private List<PopupSchedule> cachedPopupSchedules = new();
@@ -150,12 +153,18 @@ namespace YEJI_AW_Client
             memoryTrimTimer.Tick += (s, e) => MemoryOptimizer.TrimWorkingSet();
             memoryTrimTimer.Start();
 
+            heartbeatTimer = new Timer();
+            heartbeatTimer.Interval = (int)heartbeatInterval.TotalMilliseconds;
+            heartbeatTimer.Tick += async (s, e) => await SendHeartbeatAsync();
+
             this.Load += async (s, e) =>
             {
                 this.Hide();
                 this.ShowInTaskbar = false;
                 await ResendPendingIdleEventsAsync();
                 await CheckClientUpdateAsync();
+                await RegisterOrUpdateClientAsync();
+                heartbeatTimer.Start();
             };
 
             InitializeTrayMenu();
@@ -877,6 +886,66 @@ namespace YEJI_AW_Client
                 SavePendingIdleEvent(idleEvent);
             }
         }
+        // -----------------------------
+        // 클라이언트 상태 전송 (등록/하트비트)
+        // -----------------------------
+        private ClientStatusRequest BuildClientStatusPayload()
+        {
+            computerIP = GetLocalIPAddress();
+
+            return new ClientStatusRequest
+            {
+                EmpNo = employeeId,
+                EmpName = employeeName,
+                PcName = computerName,
+                ClientVersion = GetCurrentVersion(),
+                Ip = computerIP,
+                Installed = 1
+            };
+        }
+
+        private async Task RegisterOrUpdateClientAsync()
+        {
+            try
+            {
+                var payload = BuildClientStatusPayload();
+                string json = JsonSerializer.Serialize(payload);
+                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                await HttpClient.PostAsync($"{ServerBaseUrl}/api/client/register", content);
+            }
+            catch
+            {
+                // 등록 실패는 조용히 무시 (다음 하트비트에서 재시도)
+            }
+        }
+
+        private async Task SendHeartbeatAsync()
+        {
+            if (isSendingHeartbeat)
+            {
+                return;
+            }
+
+            try
+            {
+                isSendingHeartbeat = true;
+                var payload = BuildClientStatusPayload();
+                string json = JsonSerializer.Serialize(payload);
+                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                await HttpClient.PostAsync($"{ServerBaseUrl}/api/client/heartbeat", content);
+            }
+            catch
+            {
+                // 하트비트 실패 시는 무시 (주기적으로 재시도됨)
+            }
+            finally
+            {
+                isSendingHeartbeat = false;
+            }
+        }
+
 
         private async Task<bool> SendIdleEventAsync(IdleEventData data)
         {
