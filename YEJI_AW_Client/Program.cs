@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace YEJI_AW_Client
@@ -18,6 +19,12 @@ namespace YEJI_AW_Client
         [STAThread]
         static void Main()
         {
+            using var mutex = new Mutex(true, @"Global\YEJI_AW_Client", out bool createdNew);
+            if (!createdNew)
+            {
+                MessageBox.Show("프로그램이 실행중입니다.");
+                return;
+            }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
@@ -45,7 +52,14 @@ namespace YEJI_AW_Client
                 return;
             }
 
-            Application.Run(new Form1(userInfo.Name, userInfo.Id));
+            try
+            {
+                Application.Run(new Form1(userInfo.Name, userInfo.Id));
+            }
+            finally
+            {
+                mutex.ReleaseMutex();
+            }
         }
     }
 }
