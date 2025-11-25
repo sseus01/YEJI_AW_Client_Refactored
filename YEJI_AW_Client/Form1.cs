@@ -28,10 +28,11 @@ namespace YEJI_AW_Client
         // idleTimer 는 Form1.Designer.cs 에 있다고 가정 (디자이너 타이머)
         // private Timer idleTimer;
 
-        private Timer popupTimer;    // 팝업 시간 체크용
-        private Timer configTimer;   // 서버 client_config 5분마다 갱신
-        private Timer memoryTrimTimer; // 주기적으로 워킹셋 정리
-        private Timer heartbeatTimer; // 주기적 상태 전송
+        private Timer popupTimer;       // 팝업 시간 체크용
+        private Timer configTimer;      // 서버 client_config 5분마다 갱신
+        private Timer memoryTrimTimer;  // 주기적으로 워킹셋 정리
+        private Timer heartbeatTimer;   // 주기적 상태 전송
+        private Timer updateCheckTimer; // 주기적 업데이트 확인
 
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
@@ -90,8 +91,8 @@ namespace YEJI_AW_Client
         private DateTime lastPopupFetchUtc = DateTime.MinValue;
         private List<PopupSchedule> cachedPopupSchedules = new();
         private DateTime popupKeyDate = DateTime.Today;
-        private const int PopupImageMaxWidth = 720;
-        private const int PopupImageMaxHeight = 560;
+        private const int PopupImageMinWidth = 720;
+        private const int PopupImageMinHeight = 560;
         private HashSet<string> processedIdleIntervals = new();
         private DateTime idleKeyDate = DateTime.Today;
 
@@ -159,6 +160,10 @@ namespace YEJI_AW_Client
             heartbeatTimer.Interval = (int)heartbeatInterval.TotalMilliseconds;
             heartbeatTimer.Tick += async (s, e) => await SendHeartbeatAsync();
 
+            updateCheckTimer = new Timer();
+            updateCheckTimer.Interval = (int)TimeSpan.FromHours(1).TotalMilliseconds; // 1시간 간격
+            updateCheckTimer.Tick += async (s, e) => await CheckClientUpdateAsync();
+
             this.Load += async (s, e) =>
             {
                 this.Hide();
@@ -167,6 +172,7 @@ namespace YEJI_AW_Client
                 await CheckClientUpdateAsync();
                 await RegisterOrUpdateClientAsync();
                 heartbeatTimer.Start();
+                updateCheckTimer.Start();
             };
 
             InitializeTrayMenu();
@@ -421,11 +427,19 @@ namespace YEJI_AW_Client
         // 팝업 표시 (항상 최상단 유지)
         private async Task ShowPopupAsync(PopupSchedule popup)
         {
+            var maxImageSize = GetPopupMaxImageSize();
+
+            var popupImage = await LoadScaledImageAsync(ServerBaseUrl + popup.ImageUrl, maxImageSize.Width, maxImageSize.Height);
+            if (popupImage == null)
+            {
+                isPopupShowing = false;
+                return;
+            }
+
             var popupForm = new Form
             {
                 StartPosition = FormStartPosition.CenterScreen,
-                Width = PopupImageMaxWidth + 80,
-                Height = PopupImageMaxHeight + 80,
+                ClientSize = new Size(popupImage.Width, popupImage.Height),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false,
@@ -437,11 +451,10 @@ namespace YEJI_AW_Client
             {
                 Dock = DockStyle.Fill,
                 SizeMode = PictureBoxSizeMode.Zoom,
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Image = popupImage
             };
-
-            pictureBox.Image = await LoadScaledImageAsync(ServerBaseUrl + popup.ImageUrl, PopupImageMaxWidth, PopupImageMaxHeight);
-
+                      
             // 더블클릭으로 닫기
             pictureBox.DoubleClick += (s, e) => popupForm.Close();
 
@@ -500,8 +513,8 @@ namespace YEJI_AW_Client
         private string GetIdleIntervalKey(DateTime start, DateTime end)
         {
             return $"{start:yyyyMMddHHmmssfff}-{end:yyyyMMddHHmmssfff}";
-        }
-
+        }        
+               
         private async Task<Image?> LoadScaledImageAsync(string url, int maxWidth, int maxHeight)
         {
             try
@@ -534,6 +547,17 @@ namespace YEJI_AW_Client
             {
                 return null;
             }
+        }
+
+        private Size GetPopupMaxImageSize()
+        {
+            var screenBounds = Screen.PrimaryScreen?.Bounds;
+            const int padding = 24; // 화면 가득 차지하지 않도록 최소 여백 확보
+
+            int maxWidth = Math.Max(PopupImageMinWidth, (screenBounds?.Width ?? PopupImageMinWidth) - padding);
+            int maxHeight = Math.Max(PopupImageMinHeight, (screenBounds?.Height ?? PopupImageMinHeight) - padding);
+
+            return new Size(maxWidth, maxHeight);
         }
 
         private async Task<List<PopupSchedule>> FetchPopupSchedulesAsync()
