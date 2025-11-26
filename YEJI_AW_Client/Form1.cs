@@ -60,6 +60,10 @@ namespace YEJI_AW_Client
         private readonly string clientConfigFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "client_config.json");
 
+        // 클라이언트 상태 전송 실패 기록용
+        private readonly string clientStatusLogFile =
+            Path.Combine(@"C:\ProgramData\YEJI_AW", "client_status.log");
+
         private const string ServerBaseUrl = "http://175.106.99.157:3000";
 
         private static string GetCurrentVersion()
@@ -958,7 +962,62 @@ namespace YEJI_AW_Client
             string json = JsonSerializer.Serialize(payload);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            await HttpClient.PostAsync(url, content);
+            try
+            {
+                var response = await HttpClient.PostAsync(url, content);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    string responseBody = await response.Content.ReadAsStringAsync();
+                    LogClientStatusIssue(
+                        $"[{payload.EmpNo}/{payload.PcName}] {url} 응답 오류",
+                        response: response,
+                        body: responseBody);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogClientStatusIssue(
+                    $"[{payload.EmpNo}/{payload.PcName}] {url} 요청 예외",
+                    ex);
+            }
+        }
+
+        private void LogClientStatusIssue(string context, Exception? ex = null, HttpResponseMessage? response = null, string? body = null)
+        {
+            try
+            {
+                string? folder = Path.GetDirectoryName(clientStatusLogFile);
+                if (!string.IsNullOrWhiteSpace(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {context}");
+
+                if (response != null)
+                {
+                    sb.AppendLine($"Status: {(int)response.StatusCode} {response.ReasonPhrase}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    sb.AppendLine($"Body: {body}");
+                }
+
+                if (ex != null)
+                {
+                    sb.AppendLine($"Error: {ex}");
+                }
+
+                sb.AppendLine();
+                File.AppendAllText(clientStatusLogFile, sb.ToString(), Encoding.UTF8);
+            }
+            catch
+            {
+                // 로깅 실패는 무시
+            }
         }
 
         private async Task RegisterOrUpdateClientAsync()
