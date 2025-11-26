@@ -7,14 +7,15 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>TrayIcon_Y_orange.ico</ApplicationIcon>
-	<Version>1.1.4</Version>
-	<FileVersion>1.1.4.0</FileVersion>
-	<InformationalVersion>1.1.4.0</InformationalVersion>
+	<Version>1.2.0</Version>
+    <FileVersion>1.2.0.0</FileVersion>
+    <InformationalVersion>1.2.0.0</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 	<AssemblyTitle>YEJI_AW_Client</AssemblyTitle>
-	<Company>YEJISOLUTION</Company>
-	<Product>YEJI_AW 클라이언트</Product>
-	<Description>사내근태솔루션</Description>
+    <Company>YEJISOLUTION</Company>
+    <Product>YEJI_AW 클라이언트</Product>
+    <Description>사내근태솔루션</Description>
+    <Copyright>YEJISOLUTION</Copyright>
   </PropertyGroup>
 
   <ItemGroup>

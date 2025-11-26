@@ -136,6 +136,12 @@ namespace YEJI_AW_Client
             this.employeeId = employeeId ?? "";
             this.computerIP = GetLocalIPAddress();
 
+#if DEBUG
+            // 디버그 시 단축키/트레이 메뉴로 자리비움 사유 창을 바로 열어볼 수 있도록 키 이벤트 설정
+            this.KeyPreview = true;
+            this.KeyDown += Form1_DebugKeyDown;
+#endif
+
             // 자리비움 감지 타이머 (디자이너에 있는 idleTimer 사용)
             idleTimer.Interval = 1000;
             idleTimer.Tick += IdleTimer_Tick;
@@ -1192,9 +1198,29 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("자리비움 이력 보기", null, OnViewIdleHistory);
             trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
 
+#if DEBUG
+            trayMenu.Items.Add("디버그: 자리비움 사유 창 열기", null, OnDebugOpenIdleReason);
+#endif
+
             notifyIcon.ContextMenuStrip = trayMenu;
             notifyIcon.Visible = true;
         }
+
+#if DEBUG
+        private async void OnDebugOpenIdleReason(object? sender, EventArgs e)
+        {
+            await ShowIdleReasonPopupAsync(DateTime.Now.AddMinutes(-5), DateTime.Now);
+        }
+
+        private async void Form1_DebugKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.Control && e.Shift && e.KeyCode == Keys.R)
+            {
+                e.Handled = true;
+                await ShowIdleReasonPopupAsync(DateTime.Now.AddMinutes(-5), DateTime.Now);
+            }
+        }
+#endif
 
         private async void OnViewIdleHistory(object? sender, EventArgs e)
         {

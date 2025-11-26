@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
@@ -31,6 +32,13 @@ namespace YEJI_AW_Client
             PropertyNameCaseInsensitive = true
         };
 
+        private static readonly string LocalReasonDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "YEJISOLUTION",
+            "AWClient");
+
+        private static readonly string LocalReasonFilePath = Path.Combine(LocalReasonDirectory, "away_reasons.json");
+
         public IdleReasonForm(DateTime idleStartTime, DateTime idleEndTime, string serverBaseUrl)
         {
             InitializeComponent();
@@ -51,6 +59,7 @@ namespace YEJI_AW_Client
             this.FormClosing += IdleReasonForm_FormClosing;
 
             buttonSave.Click += ButtonSave_Click;
+            buttonShowAll.Click += ButtonShowAll_Click;
 
             this.Load += async (s, e) => await LoadReasonsAsync();
         }
@@ -84,6 +93,7 @@ namespace YEJI_AW_Client
             if (TryGetCachedReasons(out var cached))
             {
                 awayReasons = cached;
+                SaveReasonsToLocalFile();
                 PopulateLevel1();
                 return;
             }
@@ -103,24 +113,35 @@ namespace YEJI_AW_Client
                    .ToList();
 
                 UpdateReasonCache(awayReasons);
+                SaveReasonsToLocalFile();
             }
             catch
             {
-                awayReasons = new List<AwayReason>
+                if (TryLoadReasonsFromLocalFile(out var localReasons) && localReasons.Count > 0)
                 {
-                    new AwayReason
+                    awayReasons = localReasons;
+                    UpdateReasonCache(awayReasons);
+                    MessageBox.Show("네트워크가 불안정하여 저장된 사유 목록을 불러옵니다.");
+                }
+                else
+                {
+                    awayReasons = new List<AwayReason>
                     {
-                        ReasonCode = "Z99",
-                        Level1 = "기타",
-                        Level2 = "기타",
-                        Level3 = "기타(직접입력)",
-                        IsWorkApproved = false
-                    }
-                };
+                        new AwayReason
+                        {
+                            ReasonCode = "Z99",
+                            Level1 = "기타",
+                            Level2 = "기타",
+                            Level3 = "기타(직접입력)",
+                            IsWorkApproved = false
+                        }
+                    };
 
-                MessageBox.Show("사유 목록을 불러오지 못했습니다. 네트워크 상태를 확인해주세요. (기타 선택 가능)");
+                    MessageBox.Show("사유 목록을 불러오지 못했습니다. 네트워크 상태를 확인해주세요. (기타 선택 가능)");
+                }
             }
 
+            SaveReasonsToLocalFile();
             PopulateLevel1();
         }
 
@@ -192,7 +213,28 @@ namespace YEJI_AW_Client
             ApplyPersonalRestDetail();
         }
 
-         // 수정 후
+        private void ButtonShowAll_Click(object? sender, EventArgs e)
+        {
+            if (awayReasons.Count == 0)
+            {
+                MessageBox.Show("사유 목록을 불러오는 중입니다. 잠시 후 다시 시도해주세요.");
+                return;
+            }
+
+            var current = awayReasons.FirstOrDefault(r =>
+                r.Level1 == comboBoxLevel1.SelectedItem?.ToString() &&
+                r.Level2 == comboBoxLevel2.SelectedItem?.ToString() &&
+                r.Level3 == labelLevel3Value.Text);
+
+            using var selectionForm = new ReasonSelectionForm(awayReasons, current);
+            selectionForm.PositionNextToOwner(this);
+            if (selectionForm.ShowDialog(this) == DialogResult.OK && selectionForm.SelectedReason != null)
+            {
+                ApplySelectedReason(selectionForm.SelectedReason);
+            }
+        }
+
+        // 수정 후
         private void ButtonSave_Click(object? sender, EventArgs e)
         {
             if (isSaved)
@@ -277,6 +319,63 @@ namespace YEJI_AW_Client
 
             ApplyAutoDetail(personalRest, isPersonalRest);
             ApplyAutoDetail(restroom, isRestroom);
+        }
+
+        private void ApplySelectedReason(AwayReason selectedReason)
+        {
+            comboBoxLevel1.SelectedItem = selectedReason.Level1;
+
+            if (!comboBoxLevel2.Items.Cast<object>().Any(item => item?.ToString() == selectedReason.Level2))
+            {
+                PopulateLevel2(selectedReason.Level1);
+            }
+
+            comboBoxLevel2.SelectedItem = selectedReason.Level2;
+            PopulateLevel3(selectedReason.Level1, selectedReason.Level2);
+            ApplyPersonalRestDetail();
+        }
+
+        private void SaveReasonsToLocalFile()
+        {
+            try
+            {
+                if (awayReasons.Count == 0)
+                {
+                    return;
+                }
+
+                Directory.CreateDirectory(LocalReasonDirectory);
+                var json = JsonSerializer.Serialize(awayReasons, JsonOptions);
+                File.WriteAllText(LocalReasonFilePath, json);
+            }
+            catch
+            {
+                // 로컬 저장 실패는 앱 흐름을 막지 않는다.
+            }
+        }
+
+        private bool TryLoadReasonsFromLocalFile(out List<AwayReason> reasons)
+        {
+            try
+            {
+                if (File.Exists(LocalReasonFilePath))
+                {
+                    var json = File.ReadAllText(LocalReasonFilePath);
+                    var deserialized = JsonSerializer.Deserialize<List<AwayReason>>(json, JsonOptions);
+                    if (deserialized != null && deserialized.Count > 0)
+                    {
+                        reasons = deserialized;
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+                // 로컬 파일 로드 실패는 무시하고 기본 흐름 사용
+            }
+
+            reasons = new List<AwayReason>();
+            return false;
         }
     }
     public class AwayReason
