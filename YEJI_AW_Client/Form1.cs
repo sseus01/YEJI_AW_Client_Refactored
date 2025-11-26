@@ -966,7 +966,7 @@ namespace YEJI_AW_Client
             try
             {
                 await PostClientStatusAsync($"{ServerBaseUrl}/api/client/register");
-                await PostClientStatusAsync($"{ServerBaseUrl}/api/admin/client-status");
+                //await PostClientStatusAsync($"{ServerBaseUrl}/api/admin/client-status");
             }
             catch
             {
@@ -984,7 +984,9 @@ namespace YEJI_AW_Client
             try
             {
                 isSendingHeartbeat = true;
-                await PostClientStatusAsync($"{ServerBaseUrl}/api/admin/client-status");
+                //await PostClientStatusAsync($"{ServerBaseUrl}/api/admin/client-status");
+                // /api/client/heartbeat로 변경
+                await PostClientStatusAsync($"{ServerBaseUrl}/api/client/heartbeat");
             }
             catch
             {
