@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Windows.Forms;
 
@@ -63,6 +64,12 @@ namespace YEJI_AW_Client
                 return;
             }
 
+            if (id.Length != 6 || !id.All(char.IsDigit))
+            {
+                MessageBox.Show("사번은 6자리 숫자로 입력해야 합니다.");
+                return;
+            }
+
             var info = new UserInfo { Name = name, Id = id };
 
             try
@@ -83,6 +90,13 @@ namespace YEJI_AW_Client
             catch (Exception ex)
             {
                 MessageBox.Show("사용자 정보 저장 중 오류가 발생했습니다: " + ex.Message);
+            }
+        }
+        private void textBoxId_KeyPress(object sender, KeyPressEventArgs e)
+        {
+            if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
+            {
+                e.Handled = true;
             }
         }
     }

@@ -1199,6 +1199,7 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
 
 #if DEBUG
+            // 디버그 전용 메뉴는 DEBUG 빌드에서만 포함되므로 릴리스 빌드에는 노출되지 않습니다.
             trayMenu.Items.Add("디버그: 자리비움 사유 창 열기", null, OnDebugOpenIdleReason);
 #endif
 
@@ -1206,7 +1207,7 @@ namespace YEJI_AW_Client
             notifyIcon.Visible = true;
         }
 
-#if DEBUG
+        #if DEBUG
         private async void OnDebugOpenIdleReason(object? sender, EventArgs e)
         {
             await ShowIdleReasonPopupAsync(DateTime.Now.AddMinutes(-5), DateTime.Now);

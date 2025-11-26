@@ -39,6 +39,7 @@
             // 
             textBoxId.Location = new Point(80, 66);
             textBoxId.Name = "textBoxId";
+            textBoxId.MaxLength = 6;
             textBoxId.Size = new Size(155, 23);
             textBoxId.TabIndex = 3;
             // 
