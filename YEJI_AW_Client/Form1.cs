@@ -630,9 +630,7 @@ namespace YEJI_AW_Client
 
                         return true;
                     }
-
-                    var start = parsedDate.Date.Add(fromTime);
-                    var end = parsedDate.Date.Add(toTime);
+                                        
                     var start = baseDate.Add(fromTime);
                     var end = baseDate.Add(toTime);
                     if (end < start)
