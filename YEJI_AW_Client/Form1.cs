@@ -1324,19 +1324,15 @@ namespace YEJI_AW_Client
                 ComputerIP = computerIP,
                 IdleStartTime = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
                 IdleEndTime = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                ReasonCategory = "업무종료",
-                ReasonDetail = "업무외시간",
-                ReasonCode = string.Empty,
-                ReasonLevel1 = "업무종료",
-                ReasonLevel2 = "업무외시간",
-                ReasonLevel3 = string.Empty
+                ReasonCategory = "기타",
+                ReasonDetail = "연장근무 이석",
+                ReasonCode = "Z99",
+                ReasonLevel1 = "기타",
+                ReasonLevel2 = "기타",
+                ReasonLevel3 = "연장근무 이석"
             };
 
-            bool success = await SendIdleEventAsync(idleEvent);
-            if (!success)
-            {
-                SavePendingIdleEvent(idleEvent);
-            }
+            await SendIdleEventAsync(idleEvent);
         }
         // -----------------------------
         // 클라이언트 상태 전송 (등록/하트비트)
