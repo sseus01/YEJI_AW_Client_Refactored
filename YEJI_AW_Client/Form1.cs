@@ -1198,12 +1198,14 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("자리비움 이력 보기", null, OnViewIdleHistory);
             trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
             trayMenu.Items.Add("연장 근무 신청", null, OnOpenOvertimeRequest);
+            trayMenu.Items.Add("연장 근무 결과 확인", null, OnOpenOvertimeStatus);
 
 #if DEBUG
             // 디버그 전용 메뉴는 DEBUG 빌드에서만 포함되므로 릴리스 빌드에는 노출되지 않습니다.
             trayMenu.Items.Add("디버그: 자리비움 사유 창 열기", null, OnDebugOpenIdleReason);
             trayMenu.Items.Add("디버그: PC오프 알림 확인", null, OnDebugShowPcOffAlert);
             trayMenu.Items.Add("디버그: 연장 근무 신청 창 열기", null, OnDebugOpenOvertimeRequest);
+            trayMenu.Items.Add("디버그: 연장 근무 결과 확인", null, OnDebugOpenOvertimeStatus);
             trayMenu.Items.Add("디버그: PC 종료 예외 조회", null, OnDebugOpenShutdownExceptions);
 #endif
 
@@ -1236,6 +1238,11 @@ namespace YEJI_AW_Client
         private void OnDebugOpenOvertimeRequest(object? sender, EventArgs e)
         {
             OnOpenOvertimeRequest(sender, e);
+        }
+
+        private void OnDebugOpenOvertimeStatus(object? sender, EventArgs e)
+        {
+            OnOpenOvertimeStatus(sender, e);
         }
 
         private void OnDebugOpenShutdownExceptions(object? sender, EventArgs e)
@@ -1314,6 +1321,12 @@ namespace YEJI_AW_Client
         private void OnOpenOvertimeRequest(object? sender, EventArgs e)
         {
             using var form = new OvertimeRequestForm(ServerBaseUrl, HttpClient, employeeId);
+            form.ShowDialog();
+        }
+
+        private void OnOpenOvertimeStatus(object? sender, EventArgs e)
+        {
+            using var form = new OvertimeRequestListForm(ServerBaseUrl, HttpClient, employeeId);
             form.ShowDialog();
         }
 

@@ -12,10 +12,10 @@ namespace YEJI_AW_Client
         private readonly HttpClient httpClient;
         private readonly string employeeId;
 
-        private DateTimePicker dtpWorkDate = new DateTimePicker();       
+        private DateTimePicker dtpWorkDate = new DateTimePicker();
         private DateTimePicker dtpEndTime = new DateTimePicker();
         private TextBox txtReason = new TextBox();
-        private Button btnSubmit = new Button();
+        private Button btnSubmit = new Button();       
 
         public OvertimeRequestForm(string serverBaseUrl, HttpClient httpClient, string employeeId)
         {
@@ -58,6 +58,15 @@ namespace YEJI_AW_Client
             btnSubmit.Anchor = AnchorStyles.None;
             btnSubmit.Click += async (s, e) => await SubmitAsync();
 
+            var buttonPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.RightToLeft,
+                Dock = DockStyle.Fill,
+                Padding = new Padding(0),
+                AutoSize = true
+            };
+            buttonPanel.Controls.Add(btnSubmit);          
+
             var layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -75,10 +84,10 @@ namespace YEJI_AW_Client
             layout.Controls.Add(dtpEndTime, 1, 1);
             layout.Controls.Add(lblReason, 0, 2);
             layout.Controls.Add(txtReason, 1, 2);
-            layout.Controls.Add(btnSubmit, 0, 3);
+            layout.Controls.Add(buttonPanel, 0, 3);
 
             layout.SetColumnSpan(txtReason, 1);
-            layout.SetColumnSpan(btnSubmit, 2);
+            layout.SetColumnSpan(buttonPanel, 2);
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
