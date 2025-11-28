@@ -13,8 +13,8 @@ namespace YEJI_AW_Client
         private readonly string employeeId;
 
         private DateTimePicker dtpWorkDate = new DateTimePicker();
-        private TextBox txtStartTime = new TextBox();
-        private TextBox txtEndTime = new TextBox();
+        private DateTimePicker dtpStartTime = new DateTimePicker();
+        private DateTimePicker dtpEndTime = new DateTimePicker();
         private TextBox txtReason = new TextBox();
         private Button btnSubmit = new Button();
 
@@ -39,10 +39,18 @@ namespace YEJI_AW_Client
             dtpWorkDate.Value = DateTime.Today;
 
             var lblStartTime = new Label { Text = "시작 시각 (HH:mm)", AutoSize = true };
-            txtStartTime.Width = 120;
+            dtpStartTime.Format = DateTimePickerFormat.Custom;
+            dtpStartTime.CustomFormat = "HH:mm";
+            dtpStartTime.ShowUpDown = true;
+            dtpStartTime.Width = 120;
+            dtpStartTime.Value = DateTime.Today.Add(DateTime.Now.TimeOfDay);
 
             var lblEndTime = new Label { Text = "종료 시각 (HH:mm)", AutoSize = true };
-            txtEndTime.Width = 120;
+            dtpEndTime.Format = DateTimePickerFormat.Custom;
+            dtpEndTime.CustomFormat = "HH:mm";
+            dtpEndTime.ShowUpDown = true;
+            dtpEndTime.Width = 120;
+            dtpEndTime.Value = DateTime.Today.Add(DateTime.Now.TimeOfDay);
 
             var lblReason = new Label { Text = "사유", AutoSize = true };
             txtReason.Multiline = true;
@@ -69,9 +77,9 @@ namespace YEJI_AW_Client
             layout.Controls.Add(lblWorkDate, 0, 0);
             layout.Controls.Add(dtpWorkDate, 1, 0);
             layout.Controls.Add(lblStartTime, 0, 1);
-            layout.Controls.Add(txtStartTime, 1, 1);
+            layout.Controls.Add(dtpStartTime, 1, 1);
             layout.Controls.Add(lblEndTime, 0, 2);
-            layout.Controls.Add(txtEndTime, 1, 2);
+            layout.Controls.Add(dtpEndTime, 1, 2);
             layout.Controls.Add(lblReason, 0, 3);
             layout.Controls.Add(txtReason, 1, 3);
             layout.Controls.Add(btnSubmit, 1, 4);
@@ -91,20 +99,13 @@ namespace YEJI_AW_Client
         private async System.Threading.Tasks.Task SubmitAsync()
         {
             btnSubmit.Enabled = false;
-
-            if (string.IsNullOrWhiteSpace(txtStartTime.Text) || string.IsNullOrWhiteSpace(txtEndTime.Text))
-            {
-                MessageBox.Show("시작/종료 시각을 HH:mm 형식으로 입력해주세요.");
-                btnSubmit.Enabled = true;
-                return;
-            }
-
+                  
             var payload = new
             {
                 employeeId = employeeId,
                 workDate = dtpWorkDate.Value.ToString("yyyy-MM-dd"),
-                startTime = txtStartTime.Text.Trim(),
-                endTime = txtEndTime.Text.Trim(),
+                startTime = dtpStartTime.Value.ToString("HH:mm"),
+                endTime = dtpEndTime.Value.ToString("HH:mm"),
                 reason = txtReason.Text.Trim()
             };
 

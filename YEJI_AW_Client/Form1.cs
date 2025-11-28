@@ -1202,6 +1202,9 @@ namespace YEJI_AW_Client
 #if DEBUG
             // 디버그 전용 메뉴는 DEBUG 빌드에서만 포함되므로 릴리스 빌드에는 노출되지 않습니다.
             trayMenu.Items.Add("디버그: 자리비움 사유 창 열기", null, OnDebugOpenIdleReason);
+            trayMenu.Items.Add("디버그: PC오프 알림 확인", null, OnDebugShowPcOffAlert);
+            trayMenu.Items.Add("디버그: 연장 근무 신청 창 열기", null, OnDebugOpenOvertimeRequest);
+            trayMenu.Items.Add("디버그: PC 종료 예외 조회", null, OnDebugOpenShutdownExceptions);
 #endif
 
             notifyIcon.ContextMenuStrip = trayMenu;
@@ -1212,6 +1215,33 @@ namespace YEJI_AW_Client
         private async void OnDebugOpenIdleReason(object? sender, EventArgs e)
         {
             await ShowIdleReasonPopupAsync(DateTime.Now.AddMinutes(-5), DateTime.Now);
+        }
+
+        private void OnDebugShowPcOffAlert(object? sender, EventArgs e)
+        {
+            var offTime = DateTime.Today.Add(workEndTime);
+            var remaining = offTime - DateTime.Now;
+
+            string remainingText = remaining.TotalSeconds <= 0
+                ? "이미 종료 시간이 지났습니다."
+                : $"약 {(int)remaining.TotalMinutes}분 {remaining.Seconds}초 남음";
+
+            MessageBox.Show(
+                $"(디버그) PC오프 알림\n예정 시각: {offTime:HH:mm}\n{remainingText}\n\n종료 예외가 필요한 경우 \"디버그: PC 종료 예외 조회\" 메뉴에서 등록을 확인하세요.",
+                "PC오프 알림 테스트",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        private void OnDebugOpenOvertimeRequest(object? sender, EventArgs e)
+        {
+            OnOpenOvertimeRequest(sender, e);
+        }
+
+        private void OnDebugOpenShutdownExceptions(object? sender, EventArgs e)
+        {
+            using var form = new ShutdownExceptionListForm(ServerBaseUrl, HttpClient, employeeId);
+            form.ShowDialog();
         }
 
         private async void Form1_DebugKeyDown(object? sender, KeyEventArgs e)
