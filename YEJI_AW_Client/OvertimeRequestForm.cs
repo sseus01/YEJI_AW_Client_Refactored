@@ -12,8 +12,7 @@ namespace YEJI_AW_Client
         private readonly HttpClient httpClient;
         private readonly string employeeId;
 
-        private DateTimePicker dtpWorkDate = new DateTimePicker();
-        private DateTimePicker dtpStartTime = new DateTimePicker();
+        private DateTimePicker dtpWorkDate = new DateTimePicker();       
         private DateTimePicker dtpEndTime = new DateTimePicker();
         private TextBox txtReason = new TextBox();
         private Button btnSubmit = new Button();
@@ -30,70 +29,74 @@ namespace YEJI_AW_Client
         private void InitializeComponents()
         {
             this.Text = "연장 근무 신청";
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.ClientSize = new System.Drawing.Size(420, 320);
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.ClientSize = new System.Drawing.Size(400, 220);
+            this.MinimumSize = new System.Drawing.Size(400, 220);
+            this.Load += (_, __) => CenterForm();
 
             var lblWorkDate = new Label { Text = "근무일", AutoSize = true };
             dtpWorkDate.Format = DateTimePickerFormat.Custom;
             dtpWorkDate.CustomFormat = "yyyy-MM-dd";
             dtpWorkDate.Value = DateTime.Today;
 
-            var lblStartTime = new Label { Text = "시작 시각 (HH:mm)", AutoSize = true };
-            dtpStartTime.Format = DateTimePickerFormat.Custom;
-            dtpStartTime.CustomFormat = "HH:mm";
-            dtpStartTime.ShowUpDown = true;
-            dtpStartTime.Width = 120;
-            dtpStartTime.Value = DateTime.Today.Add(DateTime.Now.TimeOfDay);
-
-            var lblEndTime = new Label { Text = "종료 시각 (HH:mm)", AutoSize = true };
+            var lblEndTime = new Label { Text = "연장 종료 시각 (HH:mm)", AutoSize = true };
             dtpEndTime.Format = DateTimePickerFormat.Custom;
             dtpEndTime.CustomFormat = "HH:mm";
             dtpEndTime.ShowUpDown = true;
             dtpEndTime.Width = 120;
-            dtpEndTime.Value = DateTime.Today.Add(DateTime.Now.TimeOfDay);
+            dtpEndTime.Value = DateTime.Today.AddHours(18);
 
             var lblReason = new Label { Text = "사유", AutoSize = true };
             txtReason.Multiline = true;
-            txtReason.Height = 120;
+            txtReason.Height = 80;
+            txtReason.MinimumSize = new System.Drawing.Size(200, 50);
             txtReason.ScrollBars = ScrollBars.Vertical;
+            txtReason.Dock = DockStyle.Fill;
 
             btnSubmit.Text = "신청";
             btnSubmit.Width = 100;
-            btnSubmit.Anchor = AnchorStyles.Right;
+            btnSubmit.Anchor = AnchorStyles.None;
             btnSubmit.Click += async (s, e) => await SubmitAsync();
 
             var layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount = 5,
-                Padding = new Padding(10),
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink
+                RowCount = 4,
+                Padding = new Padding(12),
+                AutoSize = false
             };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 65));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 68));
 
             layout.Controls.Add(lblWorkDate, 0, 0);
             layout.Controls.Add(dtpWorkDate, 1, 0);
-            layout.Controls.Add(lblStartTime, 0, 1);
-            layout.Controls.Add(dtpStartTime, 1, 1);
-            layout.Controls.Add(lblEndTime, 0, 2);
-            layout.Controls.Add(dtpEndTime, 1, 2);
-            layout.Controls.Add(lblReason, 0, 3);
-            layout.Controls.Add(txtReason, 1, 3);
-            layout.Controls.Add(btnSubmit, 1, 4);
+            layout.Controls.Add(lblEndTime, 0, 1);
+            layout.Controls.Add(dtpEndTime, 1, 1);
+            layout.Controls.Add(lblReason, 0, 2);
+            layout.Controls.Add(txtReason, 1, 2);
+            layout.Controls.Add(btnSubmit, 0, 3);
 
             layout.SetColumnSpan(txtReason, 1);
-            layout.SetCellPosition(btnSubmit, new TableLayoutPanelCellPosition(1, 4));
-            layout.SetColumnSpan(btnSubmit, 1);
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
+            layout.SetColumnSpan(btnSubmit, 2);
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
 
             this.Controls.Add(layout);
+        }
+
+        private void CenterForm()
+        {
+            if (this.Owner != null)
+            {
+                this.CenterToParent();
+            }
+            else
+            {
+                this.CenterToScreen();
+            }
         }
 
         private async System.Threading.Tasks.Task SubmitAsync()
@@ -104,7 +107,7 @@ namespace YEJI_AW_Client
             {
                 employeeId = employeeId,
                 workDate = dtpWorkDate.Value.ToString("yyyy-MM-dd"),
-                startTime = dtpStartTime.Value.ToString("HH:mm"),
+                startTime = "17:30",
                 endTime = dtpEndTime.Value.ToString("HH:mm"),
                 reason = txtReason.Text.Trim()
             };
