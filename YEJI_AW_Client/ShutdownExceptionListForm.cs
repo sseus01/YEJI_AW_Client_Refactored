@@ -146,10 +146,12 @@ namespace YEJI_AW_Client
                 }
 
                 string json = await response.Content.ReadAsStringAsync();
-                var items = JsonSerializer.Deserialize<List<ShutdownExceptionEntry>>(json, new JsonSerializerOptions
+                var jsonOptions = new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
-                }) ?? new List<ShutdownExceptionEntry>();
+                };
+
+                var items = ParseResponse(json, jsonOptions);
 
                 dataGridView1.AutoGenerateColumns = true;
                 dataGridView1.DataSource = items;
@@ -183,6 +185,47 @@ namespace YEJI_AW_Client
 
             MessageBox.Show(message, "조회 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             lblStatus.Text = "조회 실패";
+        }
+
+        private static List<ShutdownExceptionEntry> ParseResponse(string json, JsonSerializerOptions jsonOptions)
+        {
+            string preview = json.Length > 300 ? json.Substring(0, 300) + "..." : json;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                if (root.ValueKind == JsonValueKind.Array)
+                {
+                    return JsonSerializer.Deserialize<List<ShutdownExceptionEntry>>(json, jsonOptions)
+                        ?? new List<ShutdownExceptionEntry>();
+                }
+
+                if (root.TryGetProperty("data", out var dataElement) && dataElement.ValueKind == JsonValueKind.Array)
+                {
+                    return JsonSerializer.Deserialize<List<ShutdownExceptionEntry>>(dataElement.GetRawText(), jsonOptions)
+                        ?? new List<ShutdownExceptionEntry>();
+                }
+
+                if (root.TryGetProperty("items", out var itemsElement) && itemsElement.ValueKind == JsonValueKind.Array)
+                {
+                    return JsonSerializer.Deserialize<List<ShutdownExceptionEntry>>(itemsElement.GetRawText(), jsonOptions)
+                        ?? new List<ShutdownExceptionEntry>();
+                }
+
+                if (root.TryGetProperty("content", out var contentElement) && contentElement.ValueKind == JsonValueKind.Array)
+                {
+                    return JsonSerializer.Deserialize<List<ShutdownExceptionEntry>>(contentElement.GetRawText(), jsonOptions)
+                        ?? new List<ShutdownExceptionEntry>();
+                }
+            }
+            catch (JsonException)
+            {
+                // parsing will be handled below
+            }
+
+            throw new InvalidOperationException($"서버 응답을 처리할 수 없습니다. 관리자에게 문의하세요. 응답 미리보기: {preview}");
         }
     }
 }
