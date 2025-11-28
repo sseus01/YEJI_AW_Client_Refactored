@@ -94,11 +94,16 @@ namespace YEJI_AW_Client
         private readonly TimeSpan popupCacheDuration = TimeSpan.FromMinutes(5);
         private DateTime lastPopupFetchUtc = DateTime.MinValue;
         private List<PopupSchedule> cachedPopupSchedules = new();
-        private DateTime popupKeyDate = DateTime.Today;
+        private DateTime popupKeyDate;
         private const int PopupImageMinWidth = 720;
         private const int PopupImageMinHeight = 560;
         private HashSet<string> processedIdleIntervals = new();
-        private DateTime idleKeyDate = DateTime.Today;
+        private DateTime idleKeyDate;
+
+#if DEBUG
+        private DateTime? debugBaseDateTime;
+        private DateTime debugAnchorDateTime;
+#endif
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
@@ -128,6 +133,37 @@ namespace YEJI_AW_Client
             public DateTime CreatedAt { get; set; }
         }
 
+        private DateTime GetCurrentDateTime()
+        {
+#if DEBUG
+            if (debugBaseDateTime.HasValue)
+            {
+                var elapsed = DateTime.Now - debugAnchorDateTime;
+                return debugBaseDateTime.Value.Add(elapsed);
+            }
+#endif
+
+            return DateTime.Now;
+        }
+
+        private DateTime GetCurrentDate()
+        {
+            return GetCurrentDateTime().Date;
+        }
+
+#if DEBUG
+        private void SetDebugCurrentTime(DateTime target)
+        {
+            debugBaseDateTime = target;
+            debugAnchorDateTime = DateTime.Now;
+        }
+
+        private void ClearDebugCurrentTime()
+        {
+            debugBaseDateTime = null;
+        }
+#endif
+
         public Form1(string employeeName, string employeeId)
         {
             InitializeComponent();
@@ -135,6 +171,9 @@ namespace YEJI_AW_Client
             this.employeeName = employeeName ?? "";
             this.employeeId = employeeId ?? "";
             this.computerIP = GetLocalIPAddress();
+
+            popupKeyDate = GetCurrentDate();
+            idleKeyDate = popupKeyDate;
 
 #if DEBUG
             // 디버그 시 단축키/트레이 메뉴로 자리비움 사유 창을 바로 열어볼 수 있도록 키 이벤트 설정
@@ -402,7 +441,7 @@ namespace YEJI_AW_Client
             var popups = await FetchPopupSchedulesAsync();
             if (popups == null || popups.Count == 0) return;
 
-            DateTime now = DateTime.Now;
+            DateTime now = GetCurrentDateTime();
 
             foreach (var popup in popups)
             {
@@ -412,7 +451,8 @@ namespace YEJI_AW_Client
                 if (!TimeSpan.TryParse(popup.ScheduledTime.Trim(), out var scheduledTimeSpan))
                     continue;
 
-                DateTime scheduledDateTime = DateTime.Today.Add(scheduledTimeSpan);
+                var currentDate = GetCurrentDate();
+                DateTime scheduledDateTime = currentDate.Add(scheduledTimeSpan);
 
                 // 2분 이상 지나버린 팝업은 무시
                 if (now - scheduledDateTime > TimeSpan.FromMinutes(1))
@@ -504,19 +544,23 @@ namespace YEJI_AW_Client
 
         private void ClearStalePopupKeys()
         {
-            if (popupKeyDate != DateTime.Today)
+            var currentDate = GetCurrentDate();
+
+            if (popupKeyDate != currentDate)
             {
                 shownPopupTimes.Clear();
-                popupKeyDate = DateTime.Today;
+                popupKeyDate = currentDate;
             }
         }
 
         private void ClearStaleIdleKeys()
         {
-            if (idleKeyDate != DateTime.Today)
+            var currentDate = GetCurrentDate();
+
+            if (idleKeyDate != currentDate)
             {
                 processedIdleIntervals.Clear();
-                idleKeyDate = DateTime.Today;
+                idleKeyDate = currentDate;
             }
         }
 
@@ -610,12 +654,13 @@ namespace YEJI_AW_Client
         {
             try
             {
-                var nowTime = DateTime.Now.TimeOfDay;
+                DateTime now = GetCurrentDateTime();
+                var nowTime = now.TimeOfDay;
 
                 bool isLunchBreak = IsLunchBreak(nowTime);
                 if (wasInLunchBreak && !isLunchBreak)
                 {
-                    lastInputTime = DateTime.Now;
+                    lastInputTime = now;
                     isIdle = false;
                     hasShownPopup = false;
                     idleStartedDuringWork = false;
@@ -646,7 +691,7 @@ namespace YEJI_AW_Client
                     }
                     else
                     {
-                        if (!isIdle && (DateTime.Now - lastInputTime) > idleThreshold)
+                        if (!isIdle && (now - lastInputTime) > idleThreshold)
                         {
                             isIdle = true;
                             hasShownPopup = false;
@@ -688,7 +733,7 @@ namespace YEJI_AW_Client
                     }
                     else
                     {
-                        if (!isIdle && (DateTime.Now - lastInputTime) > idleThreshold)
+                        if (!isIdle && (now - lastInputTime) > idleThreshold)
                         {
                             isIdle = true;
                             idleStartedDuringWork = false;
@@ -732,7 +777,7 @@ namespace YEJI_AW_Client
 
         private DateTime AdjustIdleStartForWorkDay(DateTime start)
         {
-            var todayWorkStart = DateTime.Today.Add(workStartTime);
+            var todayWorkStart = GetCurrentDate().Add(workStartTime);
             if (start < todayWorkStart)
             {
                 return todayWorkStart;
@@ -749,12 +794,12 @@ namespace YEJI_AW_Client
             if (e.Mode == PowerModes.Suspend)
             {
                 // 절전 들어갈 때 (노트북 덮개 닫음 등)
-                suspendStartTime = DateTime.Now;
+                suspendStartTime = GetCurrentDateTime();
             }
             else if (e.Mode == PowerModes.Resume)
             {
                 // 절전에서 다시 깨어날 때
-                DateTime resumeTime = DateTime.Now;
+                DateTime resumeTime = GetCurrentDateTime();
 
                 var t = resumeTime.TimeOfDay;
                 bool isWorkingTime = IsWorkingTime(t);
@@ -1154,7 +1199,7 @@ namespace YEJI_AW_Client
 
                 DateTime eventTime = eventType == "BOOT"
                    ? GetSystemBootTime()
-                   : DateTime.Now;
+                   : GetCurrentDateTime();
 
                 var data = new PcEventData
                 {
@@ -1207,29 +1252,121 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("디버그: 연장 근무 신청 창 열기", null, OnDebugOpenOvertimeRequest);
             trayMenu.Items.Add("디버그: 연장 근무 결과 확인", null, OnDebugOpenOvertimeStatus);
             trayMenu.Items.Add("디버그: PC 종료 예외 조회", null, OnDebugOpenShutdownExceptions);
+            trayMenu.Items.Add("디버그: 현재 시각 모의 설정", null, OnDebugSetCurrentTime);
+            trayMenu.Items.Add("디버그: 현재 시각 모의 해제", null, OnDebugClearCurrentTime);
 #endif
 
             notifyIcon.ContextMenuStrip = trayMenu;
             notifyIcon.Visible = true;
         }
 
-        #if DEBUG
+#if DEBUG
         private async void OnDebugOpenIdleReason(object? sender, EventArgs e)
         {
-            await ShowIdleReasonPopupAsync(DateTime.Now.AddMinutes(-5), DateTime.Now);
+            var now = GetCurrentDateTime();
+            await ShowIdleReasonPopupAsync(now.AddMinutes(-5), now);
+        }
+
+        private DateTime? PromptForDebugTime()
+        {
+            using var form = new Form
+            {
+                Text = "디버그용 현재 시각 설정",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(330, 140),
+                MinimizeBox = false,
+                MaximizeBox = false
+            };
+
+            var label = new Label
+            {
+                AutoSize = true,
+                Text = "테스트용 기준 시각을 선택하세요.",
+                Location = new Point(12, 15)
+            };
+
+            var picker = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Custom,
+                CustomFormat = "yyyy-MM-dd HH:mm",
+                ShowUpDown = true,
+                Width = 200,
+                Location = new Point(12, 40),
+                Value = GetCurrentDateTime()
+            };
+
+            var okButton = new Button
+            {
+                Text = "확인",
+                DialogResult = DialogResult.OK,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                Location = new Point(150, 90)
+            };
+
+            var cancelButton = new Button
+            {
+                Text = "취소",
+                DialogResult = DialogResult.Cancel,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                Location = new Point(230, 90)
+            };
+
+            form.Controls.Add(label);
+            form.Controls.Add(picker);
+            form.Controls.Add(okButton);
+            form.Controls.Add(cancelButton);
+
+            form.AcceptButton = okButton;
+            form.CancelButton = cancelButton;
+
+            return form.ShowDialog(this) == DialogResult.OK
+                ? picker.Value
+                : null;
+        }
+
+        private void OnDebugSetCurrentTime(object? sender, EventArgs e)
+        {
+            var selectedTime = PromptForDebugTime();
+            if (selectedTime.HasValue)
+            {
+                SetDebugCurrentTime(selectedTime.Value);
+                MessageBox.Show(
+                    $"디버그용 현재 시간이 {selectedTime.Value:yyyy-MM-dd HH:mm} 으로 설정되었습니다.\n근무 종료 테스트 시 해당 시각이 사용됩니다.",
+                    "현재 시각 모의 설정",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+        }
+
+        private void OnDebugClearCurrentTime(object? sender, EventArgs e)
+        {
+            ClearDebugCurrentTime();
+            MessageBox.Show(
+                "디버그용 현재 시각 설정이 해제되었습니다. 이제 실제 시스템 시간이 사용됩니다.",
+                "현재 시각 모의 해제",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
         private void OnDebugShowPcOffAlert(object? sender, EventArgs e)
         {
-            var offTime = DateTime.Today.Add(workEndTime);
-            var remaining = offTime - DateTime.Now;
+            var now = GetCurrentDateTime();
+            var offTime = GetCurrentDate().Add(workEndTime);
+            var remaining = offTime - now;
+
+            string timeSourceMessage = "현재 시스템 시각 기준";
+            if (debugBaseDateTime.HasValue)
+            {
+                timeSourceMessage = $"모의 시각 기준 (시작: {debugBaseDateTime.Value:yyyy-MM-dd HH:mm})";
+            }
 
             string remainingText = remaining.TotalSeconds <= 0
                 ? "이미 종료 시간이 지났습니다."
                 : $"약 {(int)remaining.TotalMinutes}분 {remaining.Seconds}초 남음";
 
             MessageBox.Show(
-                $"(디버그) PC오프 알림\n예정 시각: {offTime:HH:mm}\n{remainingText}\n\n종료 예외가 필요한 경우 \"디버그: PC 종료 예외 조회\" 메뉴에서 등록을 확인하세요.",
+                $"(디버그) PC오프 알림\n기준 시각: {now:yyyy-MM-dd HH:mm} ({timeSourceMessage})\n예정 시각: {offTime:HH:mm}\n{remainingText}\n\n종료 예외가 필요한 경우 \"디버그: PC 종료 예외 조회\" 메뉴에서 등록을 확인하세요.",
                 "PC오프 알림 테스트",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -1256,7 +1393,8 @@ namespace YEJI_AW_Client
             if (e.Control && e.Shift && e.KeyCode == Keys.R)
             {
                 e.Handled = true;
-                await ShowIdleReasonPopupAsync(DateTime.Now.AddMinutes(-5), DateTime.Now);
+                var now = GetCurrentDateTime();
+                await ShowIdleReasonPopupAsync(now.AddMinutes(-5), now);
             }
         }
 #endif
