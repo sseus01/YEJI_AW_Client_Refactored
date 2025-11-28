@@ -29,6 +29,7 @@ namespace YEJI_AW_Client
         // private Timer idleTimer;
 
         private Timer popupTimer;       // 팝업 시간 체크용
+        private Timer pcOffTimer;       // PC 종료 알림용
         private Timer configTimer;      // 서버 client_config 5분마다 갱신
         private Timer memoryTrimTimer;  // 주기적으로 워킹셋 정리
         private Timer heartbeatTimer;   // 주기적 상태 전송
@@ -99,6 +100,8 @@ namespace YEJI_AW_Client
         private const int PopupImageMinHeight = 560;
         private HashSet<string> processedIdleIntervals = new();
         private DateTime idleKeyDate;
+        private bool hasShownPcOffAlert = false;
+        private DateTime pcOffKeyDate;
 
 #if DEBUG
         private DateTime? debugBaseDateTime;
@@ -174,6 +177,7 @@ namespace YEJI_AW_Client
 
             popupKeyDate = GetCurrentDate();
             idleKeyDate = popupKeyDate;
+            pcOffKeyDate = popupKeyDate;
 
 #if DEBUG
             // 디버그 시 단축키/트레이 메뉴로 자리비움 사유 창을 바로 열어볼 수 있도록 키 이벤트 설정
@@ -193,6 +197,12 @@ namespace YEJI_AW_Client
             popupTimer.Interval = 60 * 1000;
             popupTimer.Tick += async (s, e) => await CheckAndShowPopupAsync();
             popupTimer.Start();
+
+            // PC 종료 알림 체크 타이머 (1분 간격)
+            pcOffTimer = new Timer();
+            pcOffTimer.Interval = 60 * 1000;
+            pcOffTimer.Tick += CheckPcOffAlert;
+            pcOffTimer.Start();
 
             // 설정(client_config) 갱신 타이머 (5분간격)
             configTimer = new Timer();
@@ -437,6 +447,7 @@ namespace YEJI_AW_Client
             if (isPopupShowing) return;
 
             ClearStalePopupKeys();
+            ResetPcOffAlertIfNewDay();
 
             var popups = await FetchPopupSchedulesAsync();
             if (popups == null || popups.Count == 0) return;
@@ -472,6 +483,49 @@ namespace YEJI_AW_Client
                     break;
                 }
             }
+        }
+
+        private void CheckPcOffAlert(object? sender, EventArgs e)
+        {
+            try
+            {
+                ResetPcOffAlertIfNewDay();
+
+                if (hasShownPcOffAlert)
+                    return;
+
+                DateTime now = GetCurrentDateTime();
+                DateTime offTime = GetCurrentDate().Add(workEndTime);
+                var diff = now - offTime;
+
+                if (diff >= TimeSpan.FromMinutes(-1) && diff <= TimeSpan.FromMinutes(1))
+                {
+                    ShowPcOffAlert(now, offTime);
+                    hasShownPcOffAlert = true;
+                }
+            }
+            catch
+            {
+                // 조용히 무시
+            }
+        }
+
+        private void ShowPcOffAlert(DateTime now, DateTime offTime)
+        {
+            string timeSourceMessage = debugBaseDateTime.HasValue
+                ? $"모의 시각 기준 (시작: {debugBaseDateTime.Value:yyyy-MM-dd HH:mm})"
+                : "현재 시스템 시각 기준";
+
+            var remaining = offTime - now;
+            string remainingText = remaining.TotalSeconds <= 0
+                ? "종료 시각이 도래했습니다. PC 종료를 진행해주세요."
+                : $"약 {(int)remaining.TotalMinutes}분 {remaining.Seconds}초 남음";
+
+            MessageBox.Show(
+                $"PC 종료 알림\n기준 시각: {now:yyyy-MM-dd HH:mm} ({timeSourceMessage})\n예정 시각: {offTime:HH:mm}\n{remainingText}\n\n종료 예외가 필요한 경우 관리자에게 문의하거나 예외 등록을 확인해주세요.",
+                "PC 종료 알림",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
 
         // 팝업 표시 (항상 최상단 유지)
@@ -564,10 +618,21 @@ namespace YEJI_AW_Client
             }
         }
 
+        private void ResetPcOffAlertIfNewDay()
+        {
+            var currentDate = GetCurrentDate();
+
+            if (pcOffKeyDate != currentDate)
+            {
+                hasShownPcOffAlert = false;
+                pcOffKeyDate = currentDate;
+            }
+        }
+
         private string GetIdleIntervalKey(DateTime start, DateTime end)
         {
             return $"{start:yyyyMMddHHmmssfff}-{end:yyyyMMddHHmmssfff}";
-        }        
+        }
                
         private async Task<Image?> LoadScaledImageAsync(string url, int maxWidth, int maxHeight)
         {
