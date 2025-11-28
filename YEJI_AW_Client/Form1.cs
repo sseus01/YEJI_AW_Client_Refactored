@@ -30,6 +30,7 @@ namespace YEJI_AW_Client
 
         private Timer popupTimer;       // 팝업 시간 체크용
         private Timer pcOffTimer;       // PC 종료 알림용
+        private Timer shutdownCountdownTimer; // PC 강제 종료 카운트다운
         private Timer configTimer;      // 서버 client_config 5분마다 갱신
         private Timer memoryTrimTimer;  // 주기적으로 워킹셋 정리
         private Timer heartbeatTimer;   // 주기적 상태 전송
@@ -102,6 +103,9 @@ namespace YEJI_AW_Client
         private DateTime idleKeyDate;
         private bool hasShownPcOffAlert = false;
         private DateTime pcOffKeyDate;
+        private DateTime? scheduledShutdownTime;
+        private bool? cachedShutdownExempt;
+        private DateTime lastShutdownExemptCheckTime;
 
 #if DEBUG
         private DateTime? debugBaseDateTime;
@@ -201,8 +205,12 @@ namespace YEJI_AW_Client
             // PC 종료 알림 체크 타이머 (1분 간격)
             pcOffTimer = new Timer();
             pcOffTimer.Interval = 60 * 1000;
-            pcOffTimer.Tick += CheckPcOffAlert;
+            pcOffTimer.Tick += async (s, e) => await CheckPcOffAlertAsync();
             pcOffTimer.Start();
+
+            shutdownCountdownTimer = new Timer();
+            shutdownCountdownTimer.Interval = 1000;
+            shutdownCountdownTimer.Tick += ShutdownCountdownTimer_Tick;
 
             // 설정(client_config) 갱신 타이머 (5분간격)
             configTimer = new Timer();
@@ -228,16 +236,15 @@ namespace YEJI_AW_Client
                 this.Hide();
                 this.ShowInTaskbar = false;
                 await ResendPendingIdleEventsAsync();
+                await FetchWorkTimeFromServerAsync();
                 await CheckClientUpdateAsync();
                 await RegisterOrUpdateClientAsync();
+                await CheckAfterHoursOnStartupAsync();
                 heartbeatTimer.Start();
                 updateCheckTimer.Start();
             };
 
             InitializeTrayMenu();
-
-            // 시작 시 한 번 서버에서 업무시간/점심시간/자리비움 기준분 가져오기
-            _ = FetchWorkTimeFromServerAsync();
 
             // 종료 시 SHUTDOWN 이벤트 전송
             this.FormClosing += Form1_FormClosing;
@@ -485,23 +492,35 @@ namespace YEJI_AW_Client
             }
         }
 
-        private void CheckPcOffAlert(object? sender, EventArgs e)
+        private async Task CheckAfterHoursOnStartupAsync()
+        {
+            await TryShowPcOffAlertAsync(triggeredAfterBoot: true);
+        }
+
+        private async Task CheckPcOffAlertAsync()
+        {
+            await TryShowPcOffAlertAsync(triggeredAfterBoot: false);
+        }
+
+        private async Task TryShowPcOffAlertAsync(bool triggeredAfterBoot)       
         {
             try
             {
                 ResetPcOffAlertIfNewDay();
 
+                DateTime now = GetCurrentDateTime();              
+
+                if (await IsShutdownExemptAsync(now))
+                    return;               
+
                 if (hasShownPcOffAlert)
                     return;
-
-                DateTime now = GetCurrentDateTime();
+               
                 DateTime offTime = GetCurrentDate().Add(workEndTime);
-                var diff = now - offTime;
-
-                if (diff >= TimeSpan.FromMinutes(-1) && diff <= TimeSpan.FromMinutes(1))
+                if (now >= offTime)
                 {
-                    ShowPcOffAlert(now, offTime);
                     hasShownPcOffAlert = true;
+                    ShowPcOffAlert(now, offTime, triggeredAfterBoot);
                 }
             }
             catch
@@ -510,22 +529,265 @@ namespace YEJI_AW_Client
             }
         }
 
-        private void ShowPcOffAlert(DateTime now, DateTime offTime)
+        private async Task<bool> IsShutdownExemptAsync(DateTime now)
         {
+            if (cachedShutdownExempt.HasValue &&
+                (now - lastShutdownExemptCheckTime) < TimeSpan.FromMinutes(5))
+            {
+                return cachedShutdownExempt.Value;
+            }
+
+            bool exempt = await HasApprovedOvertimeTodayAsync(now) || await HasActiveShutdownExceptionAsync(now);
+            cachedShutdownExempt = exempt;
+            lastShutdownExemptCheckTime = now;
+            return exempt;
+        }
+
+        private async Task<bool> HasApprovedOvertimeTodayAsync(DateTime now)
+        {
+            try
+            {
+                string today = now.ToString("yyyy-MM-dd");
+                var url = $"{ServerBaseUrl}/api/overtime-requests?employeeId={Uri.EscapeDataString(employeeId)}&startDate={today}&endDate={today}";
+                using var response = await HttpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return false;
+                }
+
+                string json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                foreach (var entry in EnumerateArrayLike(root))
+                {
+                    string status = GetElementString(entry, "status", "approvalStatus", "approval_status", "result");
+                    if (!string.Equals(status, "APPROVED", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string workDate = GetElementString(entry, "workDate", "work_date", "date");
+                    if (DateTime.TryParse(workDate, out var parsedDate) && parsedDate.Date == now.Date)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+                // 실패 시 예외 사용자로 간주하지 않음
+            }
+
+            return false;
+        }
+
+        private async Task<bool> HasActiveShutdownExceptionAsync(DateTime now)
+        {
+            try
+            {
+                string today = now.ToString("yyyy-MM-dd");
+                var url = $"{ServerBaseUrl}/api/shutdown-exceptions?employeeId={Uri.EscapeDataString(employeeId)}&startDate={today}&endDate={today}";
+                using var response = await HttpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return false;
+                }
+
+                string json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                foreach (var entry in EnumerateArrayLike(root))
+                {
+                    string workDate = GetElementString(entry, "workDate", "work_date");
+                    if (!DateTime.TryParse(workDate, out var parsedDate) || parsedDate.Date != now.Date)
+                    {
+                        continue;
+                    }
+
+                    string from = GetElementString(entry, "from_time", "fromTime");
+                    string to = GetElementString(entry, "to_time", "toTime");
+
+                    if (!TimeSpan.TryParse(from, out var fromTime) || !TimeSpan.TryParse(to, out var toTime))
+                    {
+                        return true;
+                    }
+
+                    var start = parsedDate.Date.Add(fromTime);
+                    var end = parsedDate.Date.Add(toTime);
+                    if (end < start)
+                    {
+                        end = end.AddDays(1);
+                    }
+
+                    if (now >= start && now <= end)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+                // 실패 시 예외 사용자로 간주하지 않음
+            }
+
+            return false;
+        }
+
+        private static IEnumerable<JsonElement> EnumerateArrayLike(JsonElement root)
+        {
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in root.EnumerateArray())
+                {
+                    yield return item;
+                }
+                yield break;
+            }
+
+            foreach (var name in new[] { "data", "items", "content" })
+            {
+                if (root.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        yield return item;
+                    }
+                    yield break;
+                }
+            }
+        }
+
+        private static string GetElementString(JsonElement element, params string[] propertyNames)
+        {
+            foreach (var name in propertyNames)
+            {
+                if (element.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null)
+                {
+                    return value.ValueKind == JsonValueKind.String
+                        ? value.GetString() ?? string.Empty
+                        : value.ToString();
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private void ShowPcOffAlert(DateTime now, DateTime offTime, bool triggeredAfterBoot)
+        {
+            ScheduleShutdown(GetCurrentDateTime().AddMinutes(1));
+
             string timeSourceMessage = debugBaseDateTime.HasValue
                 ? $"모의 시각 기준 (시작: {debugBaseDateTime.Value:yyyy-MM-dd HH:mm})"
                 : "현재 시스템 시각 기준";
 
-            var remaining = offTime - now;
-            string remainingText = remaining.TotalSeconds <= 0
-                ? "종료 시각이 도래했습니다. PC 종료를 진행해주세요."
-                : $"약 {(int)remaining.TotalMinutes}분 {remaining.Seconds}초 남음";
+            var sb = new StringBuilder();
+            sb.AppendLine($"기준 시각: {now:yyyy-MM-dd HH:mm} ({timeSourceMessage})");
+            sb.AppendLine($"업무 종료 시각: {offTime:HH:mm}");
+            if (triggeredAfterBoot)
+            {
+                sb.AppendLine("부팅 이후 이미 업무 종료 시간이 지났습니다.");
+            }
+            sb.AppendLine("1분 뒤 PC가 강제 종료됩니다.");
+            sb.AppendLine("작업을 저장하거나 필요한 경우 5분 연장을 눌러주세요.");
 
-            MessageBox.Show(
-                $"PC 종료 알림\n기준 시각: {now:yyyy-MM-dd HH:mm} ({timeSourceMessage})\n예정 시각: {offTime:HH:mm}\n{remainingText}\n\n종료 예외가 필요한 경우 관리자에게 문의하거나 예외 등록을 확인해주세요.",
-                "PC 종료 알림",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+            using var form = new Form
+            {
+                Text = "PC 종료 알림",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterScreen,
+                MinimizeBox = false,
+                MaximizeBox = false,
+                ClientSize = new Size(420, 200),
+                TopMost = true
+            };
+
+            var label = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Top,
+                Height = 120,
+                Padding = new Padding(12),
+                Text = sb.ToString()
+            };
+
+            var extendButton = new Button
+            {
+                Text = "5분 연장",
+                DialogResult = DialogResult.OK,
+                Width = 120,
+                Height = 35,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                Location = new Point(160, 140)
+            };
+
+            extendButton.Click += (s, e) =>
+            {
+                ScheduleShutdown(GetCurrentDateTime().AddMinutes(5));
+                MessageBox.Show(
+                    "PC 종료가 5분 뒤로 연장되었습니다. 추가 작업을 저장해주세요.",
+                    "연장 완료",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            };
+
+            var okButton = new Button
+            {
+                Text = "확인",
+                DialogResult = DialogResult.OK,
+                Width = 120,
+                Height = 35,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                Location = new Point(300, 140)
+            };
+
+            form.Controls.Add(label);
+            form.Controls.Add(extendButton);
+            form.Controls.Add(okButton);
+            form.AcceptButton = okButton;
+            form.CancelButton = okButton;
+
+            form.ShowDialog();
+        }
+
+        private void ScheduleShutdown(DateTime targetTime)
+        {
+            scheduledShutdownTime = targetTime;
+            shutdownCountdownTimer.Start();
+        }
+
+        private void ShutdownCountdownTimer_Tick(object? sender, EventArgs e)
+        {
+            if (!scheduledShutdownTime.HasValue)
+            {
+                shutdownCountdownTimer.Stop();
+                return;
+            }
+
+            if (GetCurrentDateTime() >= scheduledShutdownTime.Value)
+            {
+                shutdownCountdownTimer.Stop();
+                ForceShutdown();
+            }
+        }
+
+        private void ForceShutdown()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "shutdown",
+                    Arguments = "/s /f /t 0",
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                };
+
+                Process.Start(psi);
+            }
+            catch
+            {
+                // 강제 종료 실행 실패 시 추가 조치는 없음
+            }
         }
 
         // 팝업 표시 (항상 최상단 유지)
@@ -625,6 +887,9 @@ namespace YEJI_AW_Client
             if (pcOffKeyDate != currentDate)
             {
                 hasShownPcOffAlert = false;
+                scheduledShutdownTime = null;
+                cachedShutdownExempt = null;
+                shutdownCountdownTimer.Stop();
                 pcOffKeyDate = currentDate;
             }
         }
