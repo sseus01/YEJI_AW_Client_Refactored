@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -237,10 +238,16 @@ namespace YEJI_AW_Client
             btnDelete.Enabled = false;
             try
             {
-                var urlBuilder = new StringBuilder($"{serverBaseUrl}/api/overtime-requests/{Uri.EscapeDataString(entry.Id)}");
-                urlBuilder.Append($"?employeeId={Uri.EscapeDataString(employeeId)}");
+            var request = new HttpRequestMessage(HttpMethod.Delete,
+                 $"{serverBaseUrl}/api/overtime-requests/{Uri.EscapeDataString(entry.Id)}")
+            {
+                 Content = new StringContent(
+                    JsonSerializer.Serialize(new { employeeId }),
+                    Encoding.UTF8,
+                    "application/json")
+                };
 
-                using var response = await httpClient.DeleteAsync(urlBuilder.ToString());
+                using var response = await httpClient.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
                 {
                     string message = await response.Content.ReadAsStringAsync();
