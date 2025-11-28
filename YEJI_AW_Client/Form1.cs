@@ -532,7 +532,7 @@ namespace YEJI_AW_Client
         private async Task<bool> IsShutdownExemptAsync(DateTime now)
         {
             if (cachedShutdownExempt.HasValue &&
-                (now - lastShutdownExemptCheckTime) < TimeSpan.FromMinutes(5))
+               (now - lastShutdownExemptCheckTime) < TimeSpan.FromMinutes(1))
             {
                 return cachedShutdownExempt.Value;
             }
@@ -585,8 +585,9 @@ namespace YEJI_AW_Client
         {
             try
             {
-                string today = now.ToString("yyyy-MM-dd");
-                var url = $"{ServerBaseUrl}/api/shutdown-exceptions?employeeId={Uri.EscapeDataString(employeeId)}&startDate={today}&endDate={today}";
+                string fromDate = now.AddDays(-1).ToString("yyyy-MM-dd");
+                string toDate = now.AddDays(1).ToString("yyyy-MM-dd");
+                var url = $"{ServerBaseUrl}/api/shutdown-exceptions?employeeId={Uri.EscapeDataString(employeeId)}&startDate={fromDate}&endDate={toDate}";
                 using var response = await HttpClient.GetAsync(url);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -598,22 +599,42 @@ namespace YEJI_AW_Client
                 var root = doc.RootElement;
                 foreach (var entry in EnumerateArrayLike(root))
                 {
-                    string workDate = GetElementString(entry, "workDate", "work_date");
-                    if (!DateTime.TryParse(workDate, out var parsedDate) || parsedDate.Date != now.Date)
+                    string targetComputer = GetElementString(entry, "computerName", "computer_name", "pcName", "pc_name", "hostname");
+                    if (!string.IsNullOrWhiteSpace(targetComputer) &&
+                        !string.Equals(targetComputer, computerName, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
 
-                    string from = GetElementString(entry, "from_time", "fromTime");
-                    string to = GetElementString(entry, "to_time", "toTime");
+                    string workDate = GetElementString(entry, "workDate", "work_date", "date", "targetDate", "target_date");
+                    DateTime baseDate = now.Date;
+                    if (DateTime.TryParse(workDate, out var parsedDate))
+                    {
+                        baseDate = parsedDate.Date;
+                    }
+
+                    string from = GetElementString(entry, "from_time", "fromTime", "start_time", "startTime", "from");
+                    string to = GetElementString(entry, "to_time", "toTime", "end_time", "endTime", "to");
 
                     if (!TimeSpan.TryParse(from, out var fromTime) || !TimeSpan.TryParse(to, out var toTime))
                     {
+                        if (DateTime.TryParse(from, out var startDateTime) && DateTime.TryParse(to, out var endDateTime))
+                        {
+                            if (now >= startDateTime && now <= endDateTime)
+                            {
+                                return true;
+                            }
+
+                            continue;
+                        }
+
                         return true;
                     }
 
                     var start = parsedDate.Date.Add(fromTime);
                     var end = parsedDate.Date.Add(toTime);
+                    var start = baseDate.Add(fromTime);
+                    var end = baseDate.Add(toTime);
                     if (end < start)
                     {
                         end = end.AddDays(1);
