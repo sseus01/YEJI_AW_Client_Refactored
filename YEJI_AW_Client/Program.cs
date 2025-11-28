@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
@@ -19,10 +20,22 @@ namespace YEJI_AW_Client
         [STAThread]
         static void Main()
         {
-            using var mutex = new Mutex(true, @"Global\YEJI_AW_Client", out bool createdNew);
+#if DEBUG
+            // 디버그 시에는 실제 배포본과 격리된 뮤텍스 이름을 사용해
+            // 이미 동작 중인 프로세스가 있어도 별도로 실행/디버깅할 수 있도록 한다.
+            const string MutexName = @"Global\YEJI_AW_Client_DEBUG";
+#else
+            const string MutexName = @"Global\YEJI_AW_Client";
+#endif
+
+            using var mutex = new Mutex(true, MutexName, out bool createdNew);
             if (!createdNew)
             {
+#if DEBUG
+                MessageBox.Show("이미 실행 중인 디버그 인스턴스가 있어 새로 실행하지 않습니다.");
+#else
                 MessageBox.Show("프로그램이 실행중입니다.");
+#endif
                 return;
             }
             Application.EnableVisualStyles();

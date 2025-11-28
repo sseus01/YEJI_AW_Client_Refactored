@@ -1197,6 +1197,7 @@ namespace YEJI_AW_Client
             trayMenu = new ContextMenuStrip();
             trayMenu.Items.Add("자리비움 이력 보기", null, OnViewIdleHistory);
             trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
+            trayMenu.Items.Add("연장 근무 신청", null, OnOpenOvertimeRequest);
 
 #if DEBUG
             // 디버그 전용 메뉴는 DEBUG 빌드에서만 포함되므로 릴리스 빌드에는 노출되지 않습니다.
@@ -1278,6 +1279,12 @@ namespace YEJI_AW_Client
             {
                 MessageBox.Show("사용자 정보 저장 중 오류가 발생했습니다.");
             }
+        }
+
+        private void OnOpenOvertimeRequest(object? sender, EventArgs e)
+        {
+            using var form = new OvertimeRequestForm(ServerBaseUrl, HttpClient, employeeId);
+            form.ShowDialog();
         }
 
         private string GetLocalIPAddress()
