@@ -103,6 +103,7 @@ namespace YEJI_AW_Client
         private HashSet<string> processedIdleIntervals = new();
         private DateTime idleKeyDate;
         private bool hasShownPcOffAlert = false;
+        private DateTime? pcOffAlertTargetTime;
         private DateTime pcOffKeyDate;
         private DateTime? scheduledShutdownTime;
         private bool? cachedShutdownExempt;
@@ -114,6 +115,7 @@ namespace YEJI_AW_Client
         private Form? pcOffAlertForm;
         private Label? shutdownCountdownLabel;
         private Label? pcOffStatusLabel;
+        private bool isTemporaryDisableActive;
 
 #if DEBUG
         private DateTime? debugBaseDateTime;
@@ -534,14 +536,20 @@ namespace YEJI_AW_Client
                 if (await IsShutdownExemptAsync(now))
                     return;
 
+                if (pcOffAlertTargetTime == null)
+                {
+                    pcOffAlertTargetTime = GetCurrentDate().Add(pcShutdownTime);
+                    hasShownPcOffAlert = false;
+                }
+
                 if (hasShownPcOffAlert)
                     return;
 
-                DateTime offTime = GetCurrentDate().Add(pcShutdownTime);
-                if (now >= offTime)
+                if (now >= pcOffAlertTargetTime.Value)
                 {
                     hasShownPcOffAlert = true;
-                    await ShowPcOffAlertAsync(now, offTime, triggeredAfterBoot);
+                    await ShowPcOffAlertAsync(now, pcOffAlertTargetTime.Value, triggeredAfterBoot, isTemporaryDisableActive);
+                    isTemporaryDisableActive = false;
                 }
             }
             catch
@@ -712,7 +720,7 @@ namespace YEJI_AW_Client
             return string.Empty;
         }
 
-        private async Task ShowPcOffAlertAsync(DateTime now, DateTime offTime, bool triggeredAfterBoot)
+        private async Task ShowPcOffAlertAsync(DateTime now, DateTime offTime, bool triggeredAfterBoot, bool isFollowUpAlert)
         {
             ScheduleShutdown(GetCurrentDateTime().AddMinutes(1));
 
@@ -723,21 +731,7 @@ namespace YEJI_AW_Client
             }
 
             shutdownCountdownLabel = null;
-            pcOffStatusLabel = null;
-
-            Image? alertImage = null;
-            try
-            {
-                if (!string.IsNullOrWhiteSpace(pcOffSettings.TempPopupImage))
-                {
-                    var resolvedUrl = ResolveImageUrl(pcOffSettings.TempPopupImage);
-                    alertImage = await LoadScaledImageAsync(resolvedUrl, PopupImageMinWidth, PopupImageMinHeight);
-                }
-            }
-            catch
-            {
-                alertImage = null;
-            }
+            pcOffStatusLabel = null;            
 
             pcOffAlertForm?.Close();
             pcOffAlertForm?.Dispose();
@@ -749,7 +743,7 @@ namespace YEJI_AW_Client
                 StartPosition = FormStartPosition.CenterScreen,
                 MinimizeBox = false,
                 MaximizeBox = false,
-                ClientSize = alertImage != null ? alertImage.Size : new Size(820, 640),
+                ClientSize = new Size(760, 220),
                 TopMost = true,
                 ShowInTaskbar = false
             };
@@ -761,35 +755,25 @@ namespace YEJI_AW_Client
                 RowCount = 2,
             };
 
-            PictureBox? pictureBox = null;
-            if (alertImage != null)
-            {
-                pictureBox = new PictureBox
-                {
-                    Dock = DockStyle.Fill,
-                    SizeMode = PictureBoxSizeMode.Zoom,
-                    Image = alertImage
-                };
-                container.Controls.Add(pictureBox, 0, 0);
-            }
-            else
-            {
-                container.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
-                container.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = Color.White }, 0, 0);
-            }
+            container.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
+            container.RowStyles.Add(new RowStyle(SizeType.Percent, 35));
 
-            var bottomPanel = new Panel
+            var messagePanel = new Panel
             {
                 Dock = DockStyle.Fill,
                 Padding = new Padding(16),
                 BackColor = Color.White
             };
 
+            string headline = isFollowUpAlert
+               ? "연장 시간이 종료되어 PC 종료까지 1분이 남았습니다."
+               : $"업무시간이 종료되어 PC가 종료됩니다(기준 시각: {offTime:HH:mm}). 일시해제후 진행 업무는 연장근무에 해당되지 않습니다.";
+
             var messageLabel = new Label
             {
                 Dock = DockStyle.Top,
-                Height = 48,
-                Text = $"업무시간이 종료되어 PC가 종료됩니다(기준 시각: {offTime:HH:mm}). 일시해제후 진행 업무는 연장근무에 해당되지 않습니다.",
+                Height = 64,
+                Text = headline,
                 Font = new Font(FontFamily.GenericSansSerif, 10, FontStyle.Bold)
             };
 
@@ -813,11 +797,15 @@ namespace YEJI_AW_Client
                 Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Regular)
             };
 
+            messagePanel.Controls.Add(pcOffStatusLabel);
+            messagePanel.Controls.Add(shutdownCountdownLabel);
+            messagePanel.Controls.Add(messageLabel);
+
             var buttonPanel = new FlowLayoutPanel
             {
-                Dock = DockStyle.Bottom,
+                Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.RightToLeft,
-                Height = 45
+                Padding = new Padding(16, 0, 16, 8)
             };
 
             var closeButton = new Button
@@ -846,48 +834,34 @@ namespace YEJI_AW_Client
                 }
 
                 remainingTempDisableCount--;
-                ScheduleShutdown(GetCurrentDateTime().AddMinutes(pcOffSettings.TempUsageMinutes));
+                shutdownCountdownTimer.Stop();
+                scheduledShutdownTime = null;
+                isTemporaryDisableActive = true;
+                pcOffAlertTargetTime = GetCurrentDateTime().AddMinutes(pcOffSettings.TempUsageMinutes);
+                hasShownPcOffAlert = false;
+
                 MessageBox.Show(
-                   $"{pcOffSettings.TempUsageMinutes}분 후 PC 종료가 종료됩니다. 진행중인 업무를 마무리 해주시기 바랍니다.",
+                    $"{pcOffSettings.TempUsageMinutes}분 후 PC 종료 안내가 다시 표시됩니다. 진행중인 업무를 마무리 해주시기 바랍니다.",
                     "일시 해제 신청 완료",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
 
-                if (remainingTempDisableCount <= 0)
-                {
-                    extendButton.Visible = false;
-                    pcOffStatusLabel!.Text = "1분 후 PC가 강제종료됩니다.";
-                }
-                else
-                {
-                    pcOffStatusLabel!.Text = $"남은 일시 해제 신청 {remainingTempDisableCount}회";
-                }
-
-                UpdateShutdownCountdownLabel();
+                pcOffAlertForm?.Close();               
             };
+
+            closeButton.Click += (s, e) => pcOffAlertForm?.Close();
 
             buttonPanel.Controls.Add(closeButton);
             buttonPanel.Controls.Add(extendButton);
 
-            bottomPanel.Controls.Add(buttonPanel);
-            bottomPanel.Controls.Add(pcOffStatusLabel);
-            bottomPanel.Controls.Add(shutdownCountdownLabel);
-            bottomPanel.Controls.Add(messageLabel);
-
-            container.Controls.Add(bottomPanel, 0, 1);
+            container.Controls.Add(messagePanel, 0, 0);
+            container.Controls.Add(buttonPanel, 0, 1);
             pcOffAlertForm.Controls.Add(container);
             pcOffAlertForm.AcceptButton = closeButton;
             pcOffAlertForm.CancelButton = closeButton;
 
             pcOffAlertForm.FormClosed += (s, e) =>
             {
-                if (pictureBox?.Image != null)
-                {
-                    pictureBox.Image.Dispose();
-                    pictureBox.Image = null;
-                }
-
-                pictureBox?.Dispose();
                 pcOffAlertForm = null;
                 shutdownCountdownLabel = null;
                 pcOffStatusLabel = null;
@@ -1065,12 +1039,14 @@ namespace YEJI_AW_Client
             if (pcOffKeyDate != currentDate)
             {
                 hasShownPcOffAlert = false;
+                pcOffAlertTargetTime = null;
                 scheduledShutdownTime = null;
                 cachedShutdownExempt = null;
                 shutdownCountdownTimer.Stop();
                 pcOffKeyDate = currentDate;
                 pcOffCountInitializedForDay = false;
                 remainingTempDisableCount = 0;
+                isTemporaryDisableActive = false;
             }
         }
 
