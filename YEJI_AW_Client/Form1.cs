@@ -739,7 +739,7 @@ namespace YEJI_AW_Client
                 alertImage = null;
             }
 
-            u pcOffAlertForm?.Close();
+            pcOffAlertForm?.Close();
             pcOffAlertForm?.Dispose();
 
             pcOffAlertForm = new Form
