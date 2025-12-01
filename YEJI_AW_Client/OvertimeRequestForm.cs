@@ -11,17 +11,19 @@ namespace YEJI_AW_Client
         private readonly string serverBaseUrl;
         private readonly HttpClient httpClient;
         private readonly string employeeId;
+        private readonly Func<DateTime> currentTimeProvider;
 
         private DateTimePicker dtpWorkDate = new DateTimePicker();
         private DateTimePicker dtpEndTime = new DateTimePicker();
         private TextBox txtReason = new TextBox();
-        private Button btnSubmit = new Button();       
+        private Button btnSubmit = new Button();
 
-        public OvertimeRequestForm(string serverBaseUrl, HttpClient httpClient, string employeeId)
+        public OvertimeRequestForm(string serverBaseUrl, HttpClient httpClient, string employeeId, Func<DateTime> currentTimeProvider)
         {
             this.serverBaseUrl = serverBaseUrl;
             this.httpClient = httpClient;
             this.employeeId = employeeId;
+            this.currentTimeProvider = currentTimeProvider ?? (() => DateTime.Now);
 
             InitializeComponents();
         }
@@ -37,14 +39,14 @@ namespace YEJI_AW_Client
             var lblWorkDate = new Label { Text = "근무일", AutoSize = true };
             dtpWorkDate.Format = DateTimePickerFormat.Custom;
             dtpWorkDate.CustomFormat = "yyyy-MM-dd";
-            dtpWorkDate.Value = DateTime.Today;
+            dtpWorkDate.Value = currentTimeProvider().Date;
 
             var lblEndTime = new Label { Text = "연장 종료 시각 (HH:mm)", AutoSize = true };
             dtpEndTime.Format = DateTimePickerFormat.Custom;
             dtpEndTime.CustomFormat = "HH:mm";
             dtpEndTime.ShowUpDown = true;
             dtpEndTime.Width = 120;
-            dtpEndTime.Value = DateTime.Today.AddHours(18);
+            dtpEndTime.Value = currentTimeProvider().Date.AddHours(18);
 
             var lblReason = new Label { Text = "사유", AutoSize = true };
             txtReason.Multiline = true;
@@ -110,6 +112,16 @@ namespace YEJI_AW_Client
 
         private async System.Threading.Tasks.Task SubmitAsync()
         {
+            var now = currentTimeProvider();
+            var cutoffTime = new TimeSpan(17, 30, 0);
+
+            if (now.TimeOfDay >= cutoffTime)
+            {
+                MessageBox.Show("연장 근무 신청은 업무시간 내에만 가능합니다.\n업무시간 이전에 승인 요청한 건만 가능합니다.",
+                    "신청 불가", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             btnSubmit.Enabled = false;
                   
             var payload = new

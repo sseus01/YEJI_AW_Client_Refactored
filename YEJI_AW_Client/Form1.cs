@@ -2000,7 +2000,20 @@ namespace YEJI_AW_Client
 
         private void OnOpenOvertimeRequest(object? sender, EventArgs e)
         {
-            using var form = new OvertimeRequestForm(ServerBaseUrl, HttpClient, employeeId);
+            var now = GetCurrentDateTime();
+            var cutoffTime = new TimeSpan(17, 30, 0);
+
+            if (now.TimeOfDay >= cutoffTime)
+            {
+                MessageBox.Show(
+                    "연장 근무 신청은 업무시간(17:30 이전)에만 가능합니다.\n업무시간 이전에 승인 요청한 건만 가능합니다.",
+                    "신청 불가",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            using var form = new OvertimeRequestForm(ServerBaseUrl, HttpClient, employeeId, GetCurrentDateTime);
             form.ShowDialog();
         }
 
