@@ -1267,7 +1267,11 @@ namespace YEJI_AW_Client
                             }
                             else
                             {
-                            await SendAfterWorkIdleAsync(idleStartTime, idleEndTime);
+                                var afterWorkIdleDuration = idleEndTime - idleStartTime;
+                                if (afterWorkIdleDuration >= idleThreshold)
+                                {
+                                    await SendAfterWorkIdleAsync(idleStartTime, idleEndTime);
+                                }
                             }
                             isIdle = false;
                         }
