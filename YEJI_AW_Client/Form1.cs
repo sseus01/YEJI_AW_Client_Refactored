@@ -39,6 +39,7 @@ namespace YEJI_AW_Client
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
         private TimeSpan lunchStartTime;
+        private TimeSpan pcShutdownTime = new TimeSpan(17, 30, 0);
         private TimeSpan lunchEndTime;
 
         private DateTime lastInputTime;
@@ -106,6 +107,13 @@ namespace YEJI_AW_Client
         private DateTime? scheduledShutdownTime;
         private bool? cachedShutdownExempt;
         private DateTime lastShutdownExemptCheckTime;
+        private PcOffSettings pcOffSettings = new();
+        private int remainingTempDisableCount;
+        private DateTime lastPcOffSettingsFetchTime;
+        private bool pcOffCountInitializedForDay;
+        private Form? pcOffAlertForm;
+        private Label? shutdownCountdownLabel;
+        private Label? pcOffStatusLabel;
 
 #if DEBUG
         private DateTime? debugBaseDateTime;
@@ -308,11 +316,22 @@ namespace YEJI_AW_Client
         // WorkTimeInfo 하나를 받아서 실제 변수들에 적용하는 공통 함수
         private void ApplyWorkTimeInfo(WorkTimeInfo info)
         {
-            workStartTime = TimeSpan.Parse(info.WorkStart);
-            workEndTime = TimeSpan.Parse(info.WorkEnd);
-            lunchStartTime = TimeSpan.Parse(info.LunchStart);
-            lunchEndTime = TimeSpan.Parse(info.LunchEnd);
+            workStartTime = SafeParseTime(info.WorkStart, new TimeSpan(9, 30, 0));
+            workEndTime = SafeParseTime(info.WorkEnd, new TimeSpan(17, 30, 0));
+            pcShutdownTime = SafeParseTime(info.PcShutdownTime, workEndTime);
+            lunchStartTime = SafeParseTime(info.LunchStart, new TimeSpan(12, 30, 0));
+            lunchEndTime = SafeParseTime(info.LunchEnd, new TimeSpan(13, 30, 0));
             idleThreshold = TimeSpan.FromMinutes(info.IdleThresholdMinutes);
+        }
+
+        private static TimeSpan SafeParseTime(string time, TimeSpan fallback)
+        {
+            if (TimeSpan.TryParse(time, out var parsed))
+            {
+                return parsed;
+            }
+
+            return fallback;
         }
 
         private void SetDefaultWorkTime()
@@ -502,25 +521,27 @@ namespace YEJI_AW_Client
             await TryShowPcOffAlertAsync(triggeredAfterBoot: false);
         }
 
-        private async Task TryShowPcOffAlertAsync(bool triggeredAfterBoot)       
+        private async Task TryShowPcOffAlertAsync(bool triggeredAfterBoot)
         {
             try
             {
                 ResetPcOffAlertIfNewDay();
 
-                DateTime now = GetCurrentDateTime();              
+                DateTime now = GetCurrentDateTime();
+
+                await EnsurePcOffSettingsAsync();
 
                 if (await IsShutdownExemptAsync(now))
-                    return;               
+                    return;
 
                 if (hasShownPcOffAlert)
                     return;
-               
-                DateTime offTime = GetCurrentDate().Add(workEndTime);
+
+                DateTime offTime = GetCurrentDate().Add(pcShutdownTime);
                 if (now >= offTime)
                 {
                     hasShownPcOffAlert = true;
-                    ShowPcOffAlert(now, offTime, triggeredAfterBoot);
+                    await ShowPcOffAlertAsync(now, offTime, triggeredAfterBoot);
                 }
             }
             catch
@@ -691,87 +712,196 @@ namespace YEJI_AW_Client
             return string.Empty;
         }
 
-        private void ShowPcOffAlert(DateTime now, DateTime offTime, bool triggeredAfterBoot)
+        private async Task ShowPcOffAlertAsync(DateTime now, DateTime offTime, bool triggeredAfterBoot)
         {
             ScheduleShutdown(GetCurrentDateTime().AddMinutes(1));
 
-            string timeSourceMessage = debugBaseDateTime.HasValue
-                ? $"모의 시각 기준 (시작: {debugBaseDateTime.Value:yyyy-MM-dd HH:mm})"
-                : "현재 시스템 시각 기준";
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"기준 시각: {now:yyyy-MM-dd HH:mm} ({timeSourceMessage})");
-            sb.AppendLine($"업무 종료 시각: {offTime:HH:mm}");
-            if (triggeredAfterBoot)
+            if (!pcOffCountInitializedForDay)
             {
-                sb.AppendLine("부팅 이후 이미 업무 종료 시간이 지났습니다.");
+                remainingTempDisableCount = pcOffSettings.TempDisableCount;
+                pcOffCountInitializedForDay = true;
             }
-            sb.AppendLine("1분 뒤 PC가 강제 종료됩니다.");
-            sb.AppendLine("작업을 저장하거나 필요한 경우 5분 연장을 눌러주세요.");
 
-            using var form = new Form
+            shutdownCountdownLabel = null;
+            pcOffStatusLabel = null;
+
+            Image? alertImage = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(pcOffSettings.TempPopupImage))
+                {
+                    var resolvedUrl = ResolveImageUrl(pcOffSettings.TempPopupImage);
+                    alertImage = await LoadScaledImageAsync(resolvedUrl, PopupImageMinWidth, PopupImageMinHeight);
+                }
+            }
+            catch
+            {
+                alertImage = null;
+            }
+
+            u pcOffAlertForm?.Close();
+            pcOffAlertForm?.Dispose();
+
+            pcOffAlertForm = new Form
             {
                 Text = "PC 종료 알림",
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition = FormStartPosition.CenterScreen,
                 MinimizeBox = false,
                 MaximizeBox = false,
-                ClientSize = new Size(420, 200),
-                TopMost = true
+                ClientSize = alertImage != null ? alertImage.Size : new Size(820, 640),
+                TopMost = true,
+                ShowInTaskbar = false
             };
 
-            var label = new Label
+            var container = new TableLayoutPanel
             {
-                AutoSize = false,
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+            };
+
+            PictureBox? pictureBox = null;
+            if (alertImage != null)
+            {
+                pictureBox = new PictureBox
+                {
+                    Dock = DockStyle.Fill,
+                    SizeMode = PictureBoxSizeMode.Zoom,
+                    Image = alertImage
+                };
+                container.Controls.Add(pictureBox, 0, 0);
+            }
+            else
+            {
+                container.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
+                container.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = Color.White }, 0, 0);
+            }
+
+            var bottomPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(16),
+                BackColor = Color.White
+            };
+
+            var messageLabel = new Label
+            {
                 Dock = DockStyle.Top,
-                Height = 120,
-                Padding = new Padding(12),
-                Text = sb.ToString()
+                Height = 48,
+                Text = $"업무시간이 종료되어 PC가 종료됩니다(기준 시각: {offTime:HH:mm}). 일시해제후 진행 업무는 연장근무에 해당되지 않습니다.",
+                Font = new Font(FontFamily.GenericSansSerif, 10, FontStyle.Bold)
             };
 
-            var extendButton = new Button
+            shutdownCountdownLabel = new Label
             {
-                Text = "5분 연장",
-                DialogResult = DialogResult.OK,
-                Width = 120,
-                Height = 35,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-                Location = new Point(160, 140)
+                Dock = DockStyle.Top,
+                Height = 30,
+                Text = "1분 후 PC가 강제종료됩니다.",
+                Font = new Font(FontFamily.GenericSansSerif, 10, FontStyle.Regular)
             };
 
-            extendButton.Click += (s, e) =>
+            string statusText = triggeredAfterBoot || remainingTempDisableCount <= 0
+                ? "1분 후 PC가 강제종료됩니다."
+                : $"일시 해제 신청 가능 횟수: {Math.Max(0, remainingTempDisableCount)}회";
+
+            pcOffStatusLabel = new Label
             {
-                ScheduleShutdown(GetCurrentDateTime().AddMinutes(5));
-                MessageBox.Show(
-                    "PC 종료가 5분 뒤로 연장되었습니다. 추가 작업을 저장해주세요.",
-                    "연장 완료",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                Dock = DockStyle.Top,
+                Height = 30,
+                Text = statusText,
+                Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Regular)
             };
 
-            var okButton = new Button
+            var buttonPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                FlowDirection = FlowDirection.RightToLeft,
+                Height = 45
+            };
+
+            var closeButton = new Button
             {
                 Text = "확인",
                 DialogResult = DialogResult.OK,
                 Width = 120,
-                Height = 35,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-                Location = new Point(300, 140)
+                Height = 32
             };
 
-            form.Controls.Add(label);
-            form.Controls.Add(extendButton);
-            form.Controls.Add(okButton);
-            form.AcceptButton = okButton;
-            form.CancelButton = okButton;
+            var extendButton = new Button
+            {
+                Text = "일시해제신청",
+                Width = 120,
+                Height = 32,
+                Visible = remainingTempDisableCount > 0
+            };
 
-            form.ShowDialog();
+            extendButton.Click += (s, e) =>
+            {
+                if (remainingTempDisableCount <= 0)
+                {
+                    extendButton.Visible = false;
+                    pcOffStatusLabel!.Text = "1분 후 PC가 강제종료됩니다.";
+                    return;
+                }
+
+                remainingTempDisableCount--;
+                ScheduleShutdown(GetCurrentDateTime().AddMinutes(pcOffSettings.TempUsageMinutes));
+                MessageBox.Show(
+                   $"{pcOffSettings.TempUsageMinutes}분 후 PC 종료가 종료됩니다. 진행중인 업무를 마무리 해주시기 바랍니다.",
+                    "일시 해제 신청 완료",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                if (remainingTempDisableCount <= 0)
+                {
+                    extendButton.Visible = false;
+                    pcOffStatusLabel!.Text = "1분 후 PC가 강제종료됩니다.";
+                }
+                else
+                {
+                    pcOffStatusLabel!.Text = $"남은 일시 해제 신청 {remainingTempDisableCount}회";
+                }
+
+                UpdateShutdownCountdownLabel();
+            };
+
+            buttonPanel.Controls.Add(closeButton);
+            buttonPanel.Controls.Add(extendButton);
+
+            bottomPanel.Controls.Add(buttonPanel);
+            bottomPanel.Controls.Add(pcOffStatusLabel);
+            bottomPanel.Controls.Add(shutdownCountdownLabel);
+            bottomPanel.Controls.Add(messageLabel);
+
+            container.Controls.Add(bottomPanel, 0, 1);
+            pcOffAlertForm.Controls.Add(container);
+            pcOffAlertForm.AcceptButton = closeButton;
+            pcOffAlertForm.CancelButton = closeButton;
+
+            pcOffAlertForm.FormClosed += (s, e) =>
+            {
+                if (pictureBox?.Image != null)
+                {
+                    pictureBox.Image.Dispose();
+                    pictureBox.Image = null;
+                }
+
+                pictureBox?.Dispose();
+                pcOffAlertForm = null;
+                shutdownCountdownLabel = null;
+                pcOffStatusLabel = null;
+            };
+
+            pcOffAlertForm.Show();
+            UpdateShutdownCountdownLabel();
         }
 
         private void ScheduleShutdown(DateTime targetTime)
         {
             scheduledShutdownTime = targetTime;
             shutdownCountdownTimer.Start();
+            UpdateShutdownCountdownLabel();
         }
 
         private void ShutdownCountdownTimer_Tick(object? sender, EventArgs e)
@@ -782,11 +912,40 @@ namespace YEJI_AW_Client
                 return;
             }
 
+            UpdateShutdownCountdownLabel();
+
             if (GetCurrentDateTime() >= scheduledShutdownTime.Value)
             {
                 shutdownCountdownTimer.Stop();
                 ForceShutdown();
             }
+        }
+
+        private void UpdateShutdownCountdownLabel()
+        {
+            if (!shutdownCountdownLabel?.IsHandleCreated ?? true)
+            {
+                return;
+            }
+
+            if (!scheduledShutdownTime.HasValue)
+            {
+                shutdownCountdownLabel!.Text = string.Empty;
+                return;
+            }
+
+            var remaining = scheduledShutdownTime.Value - GetCurrentDateTime();
+            if (remaining < TimeSpan.Zero)
+            {
+                remaining = TimeSpan.Zero;
+            }
+
+            if (pcOffStatusLabel != null && remaining <= TimeSpan.FromMinutes(1) && remainingTempDisableCount <= 0)
+            {
+                pcOffStatusLabel.Text = "1분 후 PC가 강제종료됩니다.";
+            }
+
+            shutdownCountdownLabel!.Text = $"남은 시간: {(int)remaining.TotalSeconds}초";
         }
 
         private void ForceShutdown()
@@ -910,7 +1069,55 @@ namespace YEJI_AW_Client
                 cachedShutdownExempt = null;
                 shutdownCountdownTimer.Stop();
                 pcOffKeyDate = currentDate;
+                pcOffCountInitializedForDay = false;
+                remainingTempDisableCount = 0;
             }
+        }
+
+        private async Task EnsurePcOffSettingsAsync()
+        {
+            var now = GetCurrentDateTime();
+            if ((now - lastPcOffSettingsFetchTime) < TimeSpan.FromMinutes(5) && pcOffSettings != null)
+            {
+                return;
+            }
+
+            try
+            {
+                string url = $"{ServerBaseUrl}/api/pc-off-settings";
+                using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                if (response.IsSuccessStatusCode)
+                {
+                    await using var stream = await response.Content.ReadAsStreamAsync();
+                    var settings = await JsonSerializer.DeserializeAsync<PcOffSettings>(stream, JsonOptions);
+                    if (settings != null)
+                    {
+                        pcOffSettings = NormalizePcOffSettings(settings);
+                        if (!pcOffCountInitializedForDay)
+                        {
+                            remainingTempDisableCount = pcOffSettings.TempDisableCount;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // 실패 시 이전 설정 유지
+            }
+            finally
+            {
+                lastPcOffSettingsFetchTime = now;
+            }
+        }
+
+        private PcOffSettings NormalizePcOffSettings(PcOffSettings source)
+        {
+            return new PcOffSettings
+            {
+                TempDisableCount = Math.Max(0, source.TempDisableCount),
+                TempUsageMinutes = Math.Max(1, source.TempUsageMinutes),
+                TempPopupImage = source.TempPopupImage ?? string.Empty
+            };
         }
 
         private string GetIdleIntervalKey(DateTime start, DateTime end)
@@ -950,6 +1157,16 @@ namespace YEJI_AW_Client
             {
                 return null;
             }
+        }
+
+        private string ResolveImageUrl(string imageUrl)
+        {
+            if (Uri.TryCreate(imageUrl, UriKind.Absolute, out _))
+            {
+                return imageUrl;
+            }
+
+            return $"{ServerBaseUrl.TrimEnd('/')}/{imageUrl.TrimStart('/')}";
         }
 
         private Size GetPopupMaxImageSize()
@@ -1697,7 +1914,7 @@ namespace YEJI_AW_Client
         private void OnDebugShowPcOffAlert(object? sender, EventArgs e)
         {
             var now = GetCurrentDateTime();
-            var offTime = GetCurrentDate().Add(workEndTime);
+            var offTime = GetCurrentDate().Add(pcShutdownTime);
             var remaining = offTime - now;
 
             string timeSourceMessage = "현재 시스템 시각 기준";
@@ -1830,9 +2047,24 @@ namespace YEJI_AW_Client
     {
         public string WorkStart { get; set; } = "09:30";   // "HH:mm"
         public string WorkEnd { get; set; } = "17:30";
+        public string PcShutdownTime { get; set; } = "17:30";
         public string LunchStart { get; set; } = "12:30";
         public string LunchEnd { get; set; } = "13:30";
         public int IdleThresholdMinutes { get; set; } = 10;
+    }
+
+    public class PcOffSettings
+    {
+        [JsonPropertyName("tempDisableCount")]
+        public int TempDisableCount { get; set; }
+            = 0;
+
+        [JsonPropertyName("tempUsageMinutes")]
+        public int TempUsageMinutes { get; set; }
+            = 1;
+
+        [JsonPropertyName("tempPopupImage")]
+        public string TempPopupImage { get; set; } = string.Empty;
     }
 
     // PC 이벤트(부팅/종료) 전송용 DTO
