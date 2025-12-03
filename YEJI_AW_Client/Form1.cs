@@ -14,9 +14,7 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Drawing.Imaging;
-using Microsoft.Win32;          // 전원(절전/복귀) 이벤트용
-
-// Timer 혼동 방지를 위해 Windows Forms Timer만 사용
+using Microsoft.Win32;
 using Timer = System.Windows.Forms.Timer;
 
 namespace YEJI_AW_Client
@@ -116,6 +114,8 @@ namespace YEJI_AW_Client
         private Label? shutdownCountdownLabel;
         private Label? pcOffStatusLabel;
         private bool isTemporaryDisableActive;
+
+        private bool isManagerUser;
 
 #if DEBUG
         private DateTime? debugBaseDateTime;
@@ -1789,7 +1789,6 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("연장 근무 결과 확인", null, OnOpenOvertimeStatus);
 
 #if DEBUG
-            // 디버그 전용 메뉴는 DEBUG 빌드에서만 포함되므로 릴리스 빌드에는 노출되지 않습니다.
             trayMenu.Items.Add("디버그: 자리비움 사유 창 열기", null, OnDebugOpenIdleReason);
             trayMenu.Items.Add("디버그: PC오프 알림 확인", null, OnDebugShowPcOffAlert);
             trayMenu.Items.Add("디버그: 연장 근무 신청 창 열기", null, OnDebugOpenOvertimeRequest);
@@ -1837,61 +1836,22 @@ namespace YEJI_AW_Client
                 var emp = (employeeId ?? string.Empty).Trim();
                 if (string.IsNullOrEmpty(emp))
                 {
-#if DEBUG
-                    MessageBox.Show("employeeId가 비어 있습니다.", "관리자 확인 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-#endif
                     return;
                 }
 
                 string url = $"{ServerBaseUrl}/api/client/manager-info?employeeId={Uri.EscapeDataString(emp)}";
                 using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
                 if (!response.IsSuccessStatusCode)
-                {
-#if DEBUG
-                    string bodyText = string.Empty;
-                    try { bodyText = await response.Content.ReadAsStringAsync(); } catch { }
-                    MessageBox.Show($"관리자 정보 API 실패\nStatus: {(int)response.StatusCode} {response.ReasonPhrase}\nURL: {url}\nBody: {bodyText}", "관리자 확인 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
-#endif
                     return;
-                }
 
                 await using var stream = await response.Content.ReadAsStreamAsync();
                 var mgr = await JsonSerializer.DeserializeAsync<ManagerInfoResponse>(stream, JsonOptions);
                 bool isManager = mgr?.Success == true && (mgr.Manager != null || (mgr.Permissions != null && mgr.Permissions.Count > 0));
-
-#if DEBUG
-                var diag = new StringBuilder();
-                diag.AppendLine("관리자 진단");
-                diag.AppendLine($"emp: {emp}");
-                diag.AppendLine($"Success: {mgr?.Success}");
-                diag.AppendLine($"Manager null?: {mgr?.Manager == null}");
-                diag.AppendLine($"Permissions count: {mgr?.Permissions?.Count ?? 0}");
-                diag.AppendLine($"isManager: {isManager}");
-                MessageBox.Show(diag.ToString(), "관리자 확인 결과", MessageBoxButtons.OK, isManager ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
-#endif
-
-                if (isManager)
-                {
-                    // UI 스레드에서 메뉴 추가 (중복 추가 방지)
-                    if (trayMenu != null && notifyIcon != null)
-                    {
-                        this.BeginInvoke(new Action(() =>
-                        {
-                            foreach (ToolStripItem item in trayMenu.Items)
-                            {
-                                if (item is ToolStripMenuItem mi && mi.Text.Contains("관리: 조직 자리비움 이력 보기"))
-                                    return;
-                            }
-                            trayMenu.Items.Insert(0, new ToolStripMenuItem("관리: 조직 자리비움 이력 보기", null, OnViewManagedIdleHistory));
-                        }));
-                    }
-                }
+                isManagerUser = isManager;
+                // 트레이에 별도 관리 메뉴는 추가하지 않음 (요청에 따라 제거)
             }
-            catch (Exception ex)
+            catch
             {
-#if DEBUG
-                MessageBox.Show($"예외 발생: {ex}", "관리자 확인 예외", MessageBoxButtons.OK, MessageBoxIcon.Error);
-#endif
                 // 실패 시 조용히 무시
             }
         }
@@ -1931,9 +1891,34 @@ namespace YEJI_AW_Client
 
         private async void OnViewIdleHistory(object? sender, EventArgs e)
         {
-            var history = await FetchIdleHistoryFromServerAsync();
-            using IdleHistoryForm form = new IdleHistoryForm(history);
-            form.ShowDialog();
+            // 관리자라면 조직/이름 선택 및 날짜 범위 선택이 가능한 확장 폼 제공
+            if (isManagerUser)
+            {
+                using var form = new ManagedIdleHistoryForm(ServerBaseUrl, HttpClient, employeeId);
+                form.ShowDialog();
+                return;
+            }
+
+            // 일반 사용자: 본인 이력, 기본 당일
+            var history = await FetchIdleHistoryForDateRangeAsync(employeeId, GetCurrentDate(), GetCurrentDate());
+            using IdleHistoryForm form2 = new IdleHistoryForm(history);
+            form2.ShowDialog();
+        }
+
+        private async Task<List<IdleEventData>> FetchIdleHistoryForDateRangeAsync(string targetEmpId, DateTime fromDate, DateTime toDate)
+        {
+            try
+            {
+                var client = HttpClient;
+                string url = $"{ServerBaseUrl}/api/idle-events?employeeId={Uri.EscapeDataString(targetEmpId)}&startDate={fromDate:yyyy-MM-dd}&endDate={toDate:yyyy-MM-dd}";
+                string json = await client.GetStringAsync(url);
+                var history = JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions);
+                return history ?? new List<IdleEventData>();
+            }
+            catch
+            {
+                return new List<IdleEventData>();
+            }
         }
 
         private void OnEditUserInfo(object? sender, EventArgs e)
@@ -1988,14 +1973,10 @@ namespace YEJI_AW_Client
         private void OnDebugShowPcOffAlert(object? sender, EventArgs e)
         {
 #if DEBUG
+            // 실제 알림창을 테스트로 띄우도록 변경
             var now = GetCurrentDateTime();
             var offTime = GetCurrentDate().Add(pcShutdownTime);
-            var remaining = offTime - now;
-            MessageBox.Show(
-                $"(디버그) PC오프 알림\n기준 시각: {now:yyyy-MM-dd HH:mm}\n예정 시각: {offTime:HH:mm}\n남은 시간: {(int)remaining.TotalMinutes}분 {remaining.Seconds}초",
-                "PC오프 알림 테스트",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            _ = ShowPcOffAlertAsync(now, offTime, triggeredAfterBoot: false, isFollowUpAlert: false);
 #endif
         }
 
@@ -2196,10 +2177,10 @@ namespace YEJI_AW_Client
         }
     }
 
-    // 서버 client_config 구조와 동일하게 맞춘 DTO
+    // DTOs inside namespace
     public class WorkTimeInfo
     {
-        public string WorkStart { get; set; } = "09:30";   // "HH:mm"
+        public string WorkStart { get; set; } = "09:30";
         public string WorkEnd { get; set; } = "17:30";
         public string PcShutdownTime { get; set; } = "17:30";
         public string LunchStart { get; set; } = "12:30";
@@ -2211,69 +2192,37 @@ namespace YEJI_AW_Client
     {
         [JsonPropertyName("tempDisableCount")]
         public int TempDisableCount { get; set; } = 0;
-
         [JsonPropertyName("tempUsageMinutes")]
         public int TempUsageMinutes { get; set; } = 1;
-
         [JsonPropertyName("tempPopupImage")]
         public string TempPopupImage { get; set; } = string.Empty;
     }
 
-    // PC 이벤트(부팅/종료) 전송용 DTO
     public class PcEventData
     {
-        [JsonPropertyName("employeeId")]
-        public string EmployeeId { get; set; } = "";
-
-        [JsonPropertyName("employeeName")]
-        public string EmployeeName { get; set; } = "";
-
-        [JsonPropertyName("computerName")]
-        public string ComputerName { get; set; } = "";
-
-        [JsonPropertyName("computerIp")]
-        public string ComputerIP { get; set; } = "";
-
-        [JsonPropertyName("eventType")]
-        public string EventType { get; set; } = "";   // "BOOT" 또는 "SHUTDOWN"
-
-        [JsonPropertyName("eventTime")]
-        public string EventTime { get; set; } = "";   // ISO 문자열
+        [JsonPropertyName("employeeId")] public string EmployeeId { get; set; } = "";
+        [JsonPropertyName("employeeName")] public string EmployeeName { get; set; } = "";
+        [JsonPropertyName("computerName")] public string ComputerName { get; set; } = "";
+        [JsonPropertyName("computerIp")] public string ComputerIP { get; set; } = "";
+        [JsonPropertyName("eventType")] public string EventType { get; set; } = "";
+        [JsonPropertyName("eventTime")] public string EventTime { get; set; } = "";
     }
 
     public class ClientReleaseInfo
     {
-        [JsonPropertyName("version")]
-        public string Version { get; set; } = string.Empty;
-
-        [JsonPropertyName("fileName")]
-        public string FileName { get; set; } = string.Empty;
-
-        [JsonPropertyName("originalName")]
-        public string OriginalName { get; set; } = string.Empty;
-
-        [JsonPropertyName("downloadUrl")]
-        public string DownloadUrl { get; set; } = string.Empty;
-
-        [JsonPropertyName("releaseNotes")]
-        public string ReleaseNotes { get; set; } = string.Empty;
-
-        [JsonPropertyName("uploadedAt")]
-        public string UploadedAt { get; set; } = string.Empty;
+        [JsonPropertyName("version")] public string Version { get; set; } = string.Empty;
+        [JsonPropertyName("fileName")] public string FileName { get; set; } = string.Empty;
+        [JsonPropertyName("originalName")] public string OriginalName { get; set; } = string.Empty;
+        [JsonPropertyName("downloadUrl")] public string DownloadUrl { get; set; } = string.Empty;
+        [JsonPropertyName("releaseNotes")] public string ReleaseNotes { get; set; } = string.Empty;
+        [JsonPropertyName("uploadedAt")] public string UploadedAt { get; set; } = string.Empty;
     }
 
     public class ClientReleaseCheckResponse
     {
-        [JsonPropertyName("success")]
-        public bool Success { get; set; } = false;
-
-        [JsonPropertyName("needUpdate")]
-        public bool NeedUpdate { get; set; } = false;
-
-        [JsonPropertyName("latest")]
-        public ClientReleaseInfo? Latest { get; set; } = null;
-
-        [JsonPropertyName("message")]
-        public string? Message { get; set; } = string.Empty;
+        [JsonPropertyName("success")] public bool Success { get; set; } = false;
+        [JsonPropertyName("needUpdate")] public bool NeedUpdate { get; set; } = false;
+        [JsonPropertyName("latest")] public ClientReleaseInfo? Latest { get; set; } = null;
+        [JsonPropertyName("message")] public string? Message { get; set; } = string.Empty;
     }
 }
