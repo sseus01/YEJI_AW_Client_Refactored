@@ -24,6 +24,7 @@ namespace YEJI_AW_Client
         private ListView listView;
 
         private static readonly TimeZoneInfo KoreaTz = SafeGetKoreaTz();
+        private string? managerDisplayName;
 
         public ManagedIdleHistoryForm(string serverBaseUrl, HttpClient httpClient, string managerEmpId)
         {
@@ -33,6 +34,7 @@ namespace YEJI_AW_Client
             InitializeUi();
             Load += async (s, e) =>
             {
+                await LoadManagerDisplayNameAsync();
                 await LoadOrganizationsAsync();
                 EnsurePersonalDefaultShown();
                 await LoadIdleEventsAsync();
@@ -75,7 +77,28 @@ namespace YEJI_AW_Client
             Controls.Add(listView);
 
             orgCombo.SelectedIndexChanged += async (s, e) => await LoadUsersForSelectedOrgAsync();
-            userCombo.SelectedIndexChanged += async (s, e) => await LoadIdleEventsAsync();
+            // 자동 조회 제거: 조회 버튼으로만 이력 로딩
+            // userCombo.SelectedIndexChanged += async (s, e) => await LoadIdleEventsAsync();
+        }
+
+        private async Task LoadManagerDisplayNameAsync()
+        {
+            try
+            {
+                string url = $"{serverBaseUrl}/api/client/manager-info?employeeId={Uri.EscapeDataString(managerEmpId)}";
+                using var response = await httpClient.GetAsync(url);
+                if (response.IsSuccessStatusCode)
+                {
+                    string json = await response.Content.ReadAsStringAsync();
+                    var mgr = JsonSerializer.Deserialize<ManagerInfoResponse>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    managerDisplayName = mgr?.Manager?.DisplayName;
+                    if (string.IsNullOrWhiteSpace(managerDisplayName))
+                    {
+                        managerDisplayName = mgr?.Manager?.Username;
+                    }
+                }
+            }
+            catch { }
         }
 
         private async Task LoadOrganizationsAsync()
@@ -150,21 +173,11 @@ namespace YEJI_AW_Client
 
         private void EnsurePersonalDefaultShown()
         {
-            bool exists = false;
-            foreach (var item in userCombo.Items)
+            // 사용자 목록이 비어 있을 때만 개인 기본 항목 추가
+            if (userCombo.Items.Count == 0)
             {
-                if (item is ComboItem ci && ci.Value == managerEmpId)
-                {
-                    exists = true;
-                    break;
-                }
-            }
-            if (!exists)
-            {
-                userCombo.Items.Insert(0, new ComboItem($"개인 ({managerEmpId})", managerEmpId));
-            }
-            if (userCombo.Items.Count > 0)
-            {
+                var name = string.IsNullOrWhiteSpace(managerDisplayName) ? "개인" : managerDisplayName.Trim();
+                userCombo.Items.Add(new ComboItem($"{name} ({managerEmpId})", managerEmpId));
                 userCombo.SelectedIndex = 0;
             }
         }
@@ -172,12 +185,15 @@ namespace YEJI_AW_Client
         private async Task LoadUsersForSelectedOrgAsync()
         {
             var selected = orgCombo.SelectedItem as ComboItem;
-            string orgCode = selected?.Value ?? "ALL";
+            string orgValue = selected?.Value ?? "ALL"; // 코드 또는 경로
+            string orgText = selected?.Text ?? orgValue; // 표시명
 
-            // 서버 사용자 목록 시도: 다양한 쿼리 파라미터 지원
+            // 1차: 조직별 사용자 목록 API 호출 (가능한 모든 파라미터로 시도)
             var url = new StringBuilder();
             url.Append($"{serverBaseUrl}/api/client/manager-users?");
-            url.Append($"orgCode={Uri.EscapeDataString(orgCode)}");
+            url.Append($"orgCode={Uri.EscapeDataString(orgValue)}");
+            url.Append($"&orgName={Uri.EscapeDataString(orgText)}");
+            url.Append($"&orgPath={Uri.EscapeDataString(orgValue)}");
             url.Append($"&managerId={Uri.EscapeDataString(managerEmpId)}");
             url.Append($"&employeeId={Uri.EscapeDataString(managerEmpId)}");
             url.Append($"&empNo={Uri.EscapeDataString(managerEmpId)}");
@@ -194,33 +210,47 @@ namespace YEJI_AW_Client
             }
             catch { }
 
-            // 폴백: 관리자 로그에서 사용자 추출
+            // 2차: 다른 엔드포인트 시도 (서버 구현 차이 대비)
             if (users.Count == 0)
             {
                 try
                 {
-                    var end = DateTime.Today;
-                    var start = end.AddDays(-30);
-                    string murl = $"{serverBaseUrl}/api/client/manager-logs?employeeId={Uri.EscapeDataString(managerEmpId)}&startDate={start:yyyy-MM-dd}&endDate={end:yyyy-MM-dd}";
-                    string json = await httpClient.GetStringAsync(murl);
-                    using var doc = JsonDocument.Parse(json);
-                    var root = doc.RootElement;
-                    IEnumerable<JsonElement> items = root.ValueKind == JsonValueKind.Array ? root.EnumerateArray() : Enumerable.Empty<JsonElement>();
-                    foreach (var item in items)
+                    string altUrl = $"{serverBaseUrl}/api/client/manager-users-by-org?orgName={Uri.EscapeDataString(orgText)}&managerId={Uri.EscapeDataString(managerEmpId)}";
+                    using var response2 = await httpClient.GetAsync(altUrl);
+                    if (response2.IsSuccessStatusCode)
                     {
-                        string id = GetProp(item, "employeeId", "empNo", "emp_no", "id", "employee_id");
-                        string name = GetProp(item, "employeeName", "empName", "emp_name", "name", "displayName");
-                        if (!string.IsNullOrWhiteSpace(id))
-                        {
-                            users[id] = name;
-                        }
+                        string json2 = await response2.Content.ReadAsStringAsync();
+                        users = ParseUsers(json2);
                     }
                 }
                 catch { }
             }
 
+            // 3차 폴백: 응답에 직원 목록이 중첩된 경우 탐색
+            if (users.Count == 0)
+            {
+                try
+                {
+                    string probeUrl = $"{serverBaseUrl}/api/client/manager-org-users?org={Uri.EscapeDataString(orgValue)}";
+                    string json3 = await httpClient.GetStringAsync(probeUrl);
+                    users = ParseUsers(json3);
+                }
+                catch { }
+            }
+
             PopulateUserComboFromDict(users);
-            EnsurePersonalDefaultShown();
+
+            if (userCombo.Items.Count == 0)
+            {
+                // 사용자 없음: 개인만 표시
+                var name = string.IsNullOrWhiteSpace(managerDisplayName) ? "개인" : managerDisplayName.Trim();
+                userCombo.Items.Add(new ComboItem($"{name} ({managerEmpId})", managerEmpId));
+            }
+
+            if (userCombo.Items.Count > 0)
+            {
+                userCombo.SelectedIndex = 0;
+            }
         }
 
         private static string GetProp(JsonElement element, params string[] names)
@@ -245,8 +275,9 @@ namespace YEJI_AW_Client
 
                 void AddIfValid(JsonElement el)
                 {
-                    string id = GetProp(el, "employeeId", "empNo", "emp_no", "id", "userId");
-                    string name = GetProp(el, "displayName", "name", "employeeName", "empName", "emp_name");
+                    // 다양한 필드명 지원
+                    string id = GetProp(el, "employeeId", "empNo", "emp_no", "id", "userId", "empId");
+                    string name = GetProp(el, "displayName", "name", "employeeName", "empName", "emp_name", "userName");
                     if (!string.IsNullOrWhiteSpace(id))
                     {
                         users[id] = string.IsNullOrWhiteSpace(name) ? id : name;
@@ -259,13 +290,25 @@ namespace YEJI_AW_Client
                     return users;
                 }
 
-                string[] arrayNames = new[] { "users", "data", "items", "content" };
+                // 배열 필드 찾기
+                string[] arrayNames = new[] { "users", "data", "items", "content", "employees", "members" };
                 foreach (var n in arrayNames)
                 {
                     if (root.TryGetProperty(n, out var arr) && arr.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var it in arr.EnumerateArray()) AddIfValid(it);
                         return users;
+                    }
+                }
+
+                // 단일/중첩 객체 처리
+                foreach (var prop in root.EnumerateObject())
+                {
+                    var v = prop.Value;
+                    if (v.ValueKind == JsonValueKind.Object) AddIfValid(v);
+                    else if (v.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var it in v.EnumerateArray()) AddIfValid(it);
                     }
                 }
 
@@ -281,7 +324,7 @@ namespace YEJI_AW_Client
             userCombo.Items.Clear();
             foreach (var kv in users)
             {
-                var name = string.IsNullOrWhiteSpace(kv.Value) ? kv.Key : kv.Value;
+                var name = string.IsNullOrWhiteSpace(kv.Value) ? kv.Key : kv.Value.Trim();
                 userCombo.Items.Add(new ComboItem($"{name} ({kv.Key})", kv.Key));
             }
             if (userCombo.Items.Count > 0) userCombo.SelectedIndex = 0;
@@ -425,6 +468,7 @@ namespace YEJI_AW_Client
         {
             public bool Success { get; set; }
             public System.Collections.Generic.List<ManagerPermission>? Permissions { get; set; }
+            public Manager? Manager { get; set; }
         }
 
         private class ManagerPermission
@@ -432,6 +476,12 @@ namespace YEJI_AW_Client
             public string Catcode { get; set; } = string.Empty;
             public string Catcode2 { get; set; } = string.Empty;
             public string Catcode3 { get; set; } = string.Empty;
+        }
+
+        private class Manager
+        {
+            public string? DisplayName { get; set; }
+            public string? Username { get; set; }
         }
 
         private class IdleEvt
