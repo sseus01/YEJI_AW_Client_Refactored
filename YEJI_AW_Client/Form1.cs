@@ -1143,6 +1143,7 @@ namespace YEJI_AW_Client
             }
 
             return $"{ServerBaseUrl.TrimEnd('/')}/{imageUrl.TrimStart('/')}";
+
         }
 
         private Size GetPopupMaxImageSize()
@@ -1279,7 +1280,7 @@ namespace YEJI_AW_Client
                     }
                     else
                     {
-                        if (!isIdle && (now - lastInputTime) > idleThreshold)
+                        if (!isIdle && (now - lastInputTime) > idleThreshold && now.TimeOfDay > pcShutdownTime)
                         {
                             isIdle = true;
                             idleStartedDuringWork = false;
@@ -1800,15 +1801,135 @@ namespace YEJI_AW_Client
 
             notifyIcon.ContextMenuStrip = trayMenu;
             notifyIcon.Visible = true;
+
+            // 관리자 여부 비동기 확인: 관리자라면 관리용 메뉴 추가
+            _ = CheckAndAddManagerMenuAsync();
+        }
+
+        // 관리자 정보 응답 DTO
+        private class ManagerPermission
+        {
+            public string Catcode { get; set; } = string.Empty;
+            public string Catcode2 { get; set; } = string.Empty;
+            public string Catcode3 { get; set; } = string.Empty;
+        }
+
+        private class ManagerInfoDto
+        {
+            public string EmployeeId { get; set; } = string.Empty;
+            public string Username { get; set; } = string.Empty;
+            public string DisplayName { get; set; } = string.Empty;
+        }
+
+        private class ManagerInfoResponse
+        {
+            public bool Success { get; set; }
+            public ManagerInfoDto? Manager { get; set; }
+            public List<ManagerPermission>? Permissions { get; set; }
+        }
+
+        // 관리자 여부 확인 후 트레이 메뉴에 관리용 항목 추가
+        private async Task CheckAndAddManagerMenuAsync()
+        {
+            try
+            {
+                string url = $"{ServerBaseUrl}/api/client/manager-info?employeeId={Uri.EscapeDataString(employeeId)}";
+                using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                if (!response.IsSuccessStatusCode)
+                    return;
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                var mgr = await JsonSerializer.DeserializeAsync<ManagerInfoResponse>(stream, JsonOptions);
+                if (mgr?.Success == true && mgr.Manager != null)
+                {
+                    // UI 스레드에서 메뉴 추가
+                    if (trayMenu != null && notifyIcon != null)
+                    {
+                        this.BeginInvoke(new Action(() =>
+                        {
+                            // 관리용 메뉴를 상단에 추가
+                            trayMenu.Items.Insert(0, new ToolStripMenuItem("관리: 조직 자리비움 이력 보기", null, OnViewManagedIdleHistory));
+                        }));
+                    }
+                }
+            }
+            catch
+            {
+                // 실패 시 조용히 무시
+            }
+        }
+
+        // 관리자가 클릭했을 때 조직별 자리비움 이력 조회
+        private async void OnViewManagedIdleHistory(object? sender, EventArgs e)
+        {
+            try
+            {
+                // 기본: 지난 7일
+                var now = GetCurrentDateTime();
+                string endDate = now.ToString("yyyy-MM-dd");
+                string startDate = now.AddDays(-7).ToString("yyyy-MM-dd");
+
+                string url = $"{ServerBaseUrl}/api/client/manager-logs?employeeId={Uri.EscapeDataString(employeeId)}&startDate={startDate}&endDate={endDate}";
+                string json = await HttpClient.GetStringAsync(url);
+
+                var events = ParseIdleEventsFromJson(json);
+                using IdleHistoryForm form = new IdleHistoryForm(events);
+                form.ShowDialog(this);
+            }
+            catch
+            {
+                MessageBox.Show("관리 조직의 자리비움 이력을 가져오는데 실패했습니다.");
+            }
+        }
+
+        private List<IdleEventData> ParseIdleEventsFromJson(string json)
+        {
+            try
+            {
+                var list = JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions);
+                if (list != null) return list;
+            }
+            catch
+            {
+                // 무시하고 시도 계속
+            }
+
+            var result = new List<IdleEventData>();
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                foreach (var item in EnumerateArrayLike(root))
+                {
+                    var e = new IdleEventData
+                    {
+                        Id = GetElementString(item, "id", "_id"),
+                        EmployeeId = GetElementString(item, "employeeId", "employee_id", "empNo", "emp_no"),
+                        EmployeeName = GetElementString(item, "employeeName", "employee_name", "empName", "emp_name"),
+                        ComputerName = GetElementString(item, "computerName", "computer_name", "pcName", "pc_name"),
+                        ComputerIP = GetElementString(item, "computerIp", "computer_ip", "ip"),
+                        IdleStartTime = GetElementString(item, "idleStartTime", "idle_start_time", "startTime", "start_time"),
+                        IdleEndTime = GetElementString(item, "idleEndTime", "idle_end_time", "endTime", "end_time"),
+                        ReasonCategory = GetElementString(item, "reasonCategory", "reason_category" , "category"),
+                        ReasonDetail = GetElementString(item, "reasonDetail", "reason_detail", "detail"),
+                        ReasonCode = GetElementString(item, "reasonCode", "reason_code"),
+                        ReasonLevel1 = GetElementString(item, "reasonLevel1", "reason_level1"),
+                        ReasonLevel2 = GetElementString(item, "reasonLevel2", "reason_level2"),
+                        ReasonLevel3 = GetElementString(item, "reasonLevel3", "reason_level3")
+                    };
+
+                    result.Add(e);
+                }
+            }
+            catch
+            {
+                // 파싱 실패 시 빈 리스트 반환
+            }
+
+            return result;
         }
 
 #if DEBUG
-        private async void OnDebugOpenIdleReason(object? sender, EventArgs e)
-        {
-            var now = GetCurrentDateTime();
-            await ShowIdleReasonPopupAsync(now.AddMinutes(-5), now);
-        }
-
         private DateTime? PromptForDebugTime()
         {
             using var form = new Form
@@ -1929,17 +2050,19 @@ namespace YEJI_AW_Client
             using var form = new ShutdownExceptionListForm(ServerBaseUrl, HttpClient, employeeId);
             form.ShowDialog();
         }
+#endif
 
         private async void Form1_DebugKeyDown(object? sender, KeyEventArgs e)
         {
+#if DEBUG
             if (e.Control && e.Shift && e.KeyCode == Keys.R)
             {
                 e.Handled = true;
                 var now = GetCurrentDateTime();
                 await ShowIdleReasonPopupAsync(now.AddMinutes(-5), now);
             }
-        }
 #endif
+        }
 
         private async void OnViewIdleHistory(object? sender, EventArgs e)
         {
@@ -1955,7 +2078,7 @@ namespace YEJI_AW_Client
                 var client = HttpClient;
                 string url = $"{ServerBaseUrl}/api/idle-events?employeeId={employeeId}";
                 string json = await client.GetStringAsync(url);
-                var history = JsonSerializer.Deserialize<List<IdleEventData>>(json);
+                var history = JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions);
                 return history ?? new List<IdleEventData>();
             }
             catch
@@ -2023,6 +2146,12 @@ namespace YEJI_AW_Client
             form.ShowDialog();
         }
 
+        private async void OnDebugOpenIdleReason(object? sender, EventArgs e)
+        {
+            var now = GetCurrentDateTime();
+            await ShowIdleReasonPopupAsync(now.AddMinutes(-5), now);
+        }
+
         private string GetLocalIPAddress()
         {
             var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
@@ -2049,12 +2178,10 @@ namespace YEJI_AW_Client
     public class PcOffSettings
     {
         [JsonPropertyName("tempDisableCount")]
-        public int TempDisableCount { get; set; }
-            = 0;
+        public int TempDisableCount { get; set; } = 0;
 
         [JsonPropertyName("tempUsageMinutes")]
-        public int TempUsageMinutes { get; set; }
-            = 1;
+        public int TempUsageMinutes { get; set; } = 1;
 
         [JsonPropertyName("tempPopupImage")]
         public string TempPopupImage { get; set; } = string.Empty;
@@ -2106,19 +2233,15 @@ namespace YEJI_AW_Client
     public class ClientReleaseCheckResponse
     {
         [JsonPropertyName("success")]
-        public bool Success { get; set; }
-            = false;
+        public bool Success { get; set; } = false;
 
         [JsonPropertyName("needUpdate")]
-        public bool NeedUpdate { get; set; }
-            = false;
+        public bool NeedUpdate { get; set; } = false;
 
         [JsonPropertyName("latest")]
-        public ClientReleaseInfo? Latest { get; set; }
-            = null;
+        public ClientReleaseInfo? Latest { get; set; } = null;
 
         [JsonPropertyName("message")]
-        public string? Message { get; set; }
-            = string.Empty;
+        public string? Message { get; set; } = string.Empty;
     }
 }
