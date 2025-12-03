@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -57,13 +58,14 @@ namespace YEJI_AW_Client
             searchButton = new Button { Left = 12, Top = 44, Width = 120, Height = 26, Text = "조회" };
             searchButton.Click += async (s, e) => await LoadIdleEventsAsync();
 
-            listView = new ListView { Left = 12, Top = 76, Width = 848, Height = 452, View = View.Details, FullRowSelect = true };
-            listView.Columns.Add("사번", 80);
-            listView.Columns.Add("이름", 120);
-            listView.Columns.Add("PC", 160);
-            listView.Columns.Add("시작", 200);
-            listView.Columns.Add("종료", 200);
-            listView.Columns.Add("사유", 200);
+            listView = new ListView { Left = 12, Top = 76, Width = 848, Height = 452, View = View.Details, FullRowSelect = true, GridLines = true };
+            listView.Columns.Add("사번", 100);
+            listView.Columns.Add("이름", 140);
+            // PC 컬럼 제거 요청 반영
+            listView.Columns.Add("시작", 170);
+            listView.Columns.Add("종료", 170);
+            listView.Columns.Add("자리비움시간", 120);
+            listView.Columns.Add("사유", 220);
 
             Controls.Add(orgCombo);
             Controls.Add(userCombo);
@@ -78,7 +80,6 @@ namespace YEJI_AW_Client
 
         private async Task LoadOrganizationsAsync()
         {
-            // 1차: 서버 조직 목록 API 시도
             try
             {
                 string url = $"{serverBaseUrl}/api/client/manager-orgs?employeeId={Uri.EscapeDataString(managerEmpId)}";
@@ -96,7 +97,6 @@ namespace YEJI_AW_Client
             }
             catch { }
 
-            // 2차 폴백: 관리자 정보에서 권한 조직 코드 추출
             try
             {
                 string url = $"{serverBaseUrl}/api/client/manager-info?employeeId={Uri.EscapeDataString(managerEmpId)}";
@@ -121,7 +121,6 @@ namespace YEJI_AW_Client
 
                 if (list.Count == 0)
                 {
-                    // 권한 정보가 없으면 최소 한 항목(전체) 제공
                     list.Add(new OrgDto { Code = "ALL", Name = "전체" });
                 }
 
@@ -129,7 +128,6 @@ namespace YEJI_AW_Client
             }
             catch
             {
-                // 최종 폴백: 전체만
                 orgCombo.Items.Clear();
                 orgCombo.Items.Add(new ComboItem("전체", "ALL"));
                 orgCombo.SelectedIndex = 0;
@@ -152,7 +150,6 @@ namespace YEJI_AW_Client
 
         private void EnsurePersonalDefaultShown()
         {
-            // 사용자 콤보에 기본으로 '개인' 추가 및 선택
             bool exists = false;
             foreach (var item in userCombo.Items)
             {
@@ -177,57 +174,52 @@ namespace YEJI_AW_Client
             var selected = orgCombo.SelectedItem as ComboItem;
             string orgCode = selected?.Value ?? "ALL";
 
-            // 1차: 서버 사용자 목록 API 시도 (서버가 관리자 식별 필요할 수 있어 함께 전달)
+            // 서버 사용자 목록 시도: 다양한 쿼리 파라미터 지원
+            var url = new StringBuilder();
+            url.Append($"{serverBaseUrl}/api/client/manager-users?");
+            url.Append($"orgCode={Uri.EscapeDataString(orgCode)}");
+            url.Append($"&managerId={Uri.EscapeDataString(managerEmpId)}");
+            url.Append($"&employeeId={Uri.EscapeDataString(managerEmpId)}");
+            url.Append($"&empNo={Uri.EscapeDataString(managerEmpId)}");
+
+            Dictionary<string, string> users = new();
             try
             {
-                var url = new StringBuilder();
-                url.Append($"{serverBaseUrl}/api/client/manager-users?orgCode={Uri.EscapeDataString(orgCode)}");
-                url.Append($"&managerId={Uri.EscapeDataString(managerEmpId)}");
-                url.Append($"&employeeId={Uri.EscapeDataString(managerEmpId)}");
-                url.Append($"&empNo={Uri.EscapeDataString(managerEmpId)}");
-
                 using var response = await httpClient.GetAsync(url.ToString());
                 if (response.IsSuccessStatusCode)
                 {
                     string json = await response.Content.ReadAsStringAsync();
-                    var users = ParseUsers(json);
-                    PopulateUserComboFromDict(users);
-                    EnsurePersonalDefaultShown();
-                    return;
+                    users = ParseUsers(json);
                 }
             }
             catch { }
 
-            // 2차 폴백: 최근 7일 관리자 로그에서 사용자 목록 추출
-            try
+            // 폴백: 관리자 로그에서 사용자 추출
+            if (users.Count == 0)
             {
-                var end = DateTime.Today;
-                var start = end.AddDays(-7);
-                string url = $"{serverBaseUrl}/api/client/manager-logs?employeeId={Uri.EscapeDataString(managerEmpId)}&startDate={start:yyyy-MM-dd}&endDate={end:yyyy-MM-dd}";
-                string json = await httpClient.GetStringAsync(url);
-                var users = new Dictionary<string, string>();
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-                if (root.ValueKind == JsonValueKind.Array)
+                try
                 {
-                    foreach (var item in root.EnumerateArray())
+                    var end = DateTime.Today;
+                    var start = end.AddDays(-30);
+                    string murl = $"{serverBaseUrl}/api/client/manager-logs?employeeId={Uri.EscapeDataString(managerEmpId)}&startDate={start:yyyy-MM-dd}&endDate={end:yyyy-MM-dd}";
+                    string json = await httpClient.GetStringAsync(murl);
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+                    IEnumerable<JsonElement> items = root.ValueKind == JsonValueKind.Array ? root.EnumerateArray() : Enumerable.Empty<JsonElement>();
+                    foreach (var item in items)
                     {
                         string id = GetProp(item, "employeeId", "empNo", "emp_no", "id", "employee_id");
                         string name = GetProp(item, "employeeName", "empName", "emp_name", "name", "displayName");
                         if (!string.IsNullOrWhiteSpace(id))
                         {
-                            if (!users.ContainsKey(id)) users[id] = name;
+                            users[id] = name;
                         }
                     }
                 }
-                PopulateUserComboFromDict(users);
-            }
-            catch
-            {
-                // 마지막 폴백: 개인만
-                userCombo.Items.Clear();
+                catch { }
             }
 
+            PopulateUserComboFromDict(users);
             EnsurePersonalDefaultShown();
         }
 
@@ -257,7 +249,7 @@ namespace YEJI_AW_Client
                     string name = GetProp(el, "displayName", "name", "employeeName", "empName", "emp_name");
                     if (!string.IsNullOrWhiteSpace(id))
                     {
-                        users[id] = name;
+                        users[id] = string.IsNullOrWhiteSpace(name) ? id : name;
                     }
                 }
 
@@ -277,7 +269,6 @@ namespace YEJI_AW_Client
                     }
                 }
 
-                // 단일 객체일 수도 있음
                 AddIfValid(root);
             }
             catch { }
@@ -303,35 +294,38 @@ namespace YEJI_AW_Client
                 var userItem = userCombo.SelectedItem as ComboItem;
                 var empId = userItem?.Value ?? managerEmpId; // 디폴트: 개인
 
-                var startDate = startPicker.Value.Date;
-                var endDate = endPicker.Value.Date;
+                var startDateKst = startPicker.Value.Date;
+                var endDateKst = endPicker.Value.Date;
 
-                // 서버 호환성을 위해 날짜/시간 쿼리 모두 전달
-                var startUtc = ToUtcFromKst(startDate);
-                var endUtc = ToUtcFromKst(endDate.AddDays(1).AddTicks(-1)); // 당일 23:59:59.9999999 KST
+                var startUtc = ToUtcFromKst(startDateKst);
+                var endUtc = ToUtcFromKst(endDateKst.AddDays(1).AddTicks(-1));
 
                 var url = new StringBuilder();
                 url.Append($"{serverBaseUrl}/api/idle-events?employeeId={Uri.EscapeDataString(empId)}");
-                url.Append($"&startDate={startDate:yyyy-MM-dd}&endDate={endDate:yyyy-MM-dd}");
+                url.Append($"&startDate={startDateKst:yyyy-MM-dd}&endDate={endDateKst:yyyy-MM-dd}");
                 url.Append($"&start={Uri.EscapeDataString(startUtc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"))}");
                 url.Append($"&end={Uri.EscapeDataString(endUtc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"))}");
 
                 string json = await httpClient.GetStringAsync(url.ToString());
                 var events = JsonSerializer.Deserialize<List<IdleEvt>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
 
+                // 클라이언트 측 필터: 서버가 범위를 적용하지 않는 경우 대비
+                var filtered = events.Where(e => InRangeKst(e.IdleStartTime, e.IdleEndTime, startDateKst, endDateKst)).ToList();
+
                 listView.Items.Clear();
-                foreach (var e in events)
+                foreach (var e in filtered)
                 {
                     string startText = FormatKst(e.IdleStartTime);
                     string endText = FormatKst(e.IdleEndTime);
+                    string duration = CalcDurationKst(e.IdleStartTime, e.IdleEndTime);
 
                     var item = new ListViewItem(new[]
                     {
                         e.EmployeeId ?? string.Empty,
                         e.EmployeeName ?? string.Empty,
-                        e.ComputerName ?? string.Empty,
                         startText,
                         endText,
+                        duration,
                         e.ReasonDetail ?? string.Empty
                     });
                     listView.Items.Add(item);
@@ -345,33 +339,60 @@ namespace YEJI_AW_Client
 
         private static DateTime ToUtcFromKst(DateTime kstLocalDateTime)
         {
-            // kstLocalDateTime는 현지 시스템 로컬이 아닌 'KST 기준'으로 해석해야 한다.
             var unspecified = DateTime.SpecifyKind(kstLocalDateTime, DateTimeKind.Unspecified);
             var kst = TimeZoneInfo.ConvertTimeToUtc(unspecified, KoreaTz);
             return kst;
         }
 
-        private static string FormatKst(string? iso)
+        private static bool InRangeKst(string? startIso, string? endIso, DateTime startDateKst, DateTime endDateKst)
         {
-            if (string.IsNullOrWhiteSpace(iso)) return string.Empty;
             try
             {
-                // 오프셋이 있으면 해당 기준으로, 없으면 UTC로 가정 후 KST로 변환
-                if (DateTimeOffset.TryParse(iso, out var dto))
-                {
-                    var kstTime = TimeZoneInfo.ConvertTime(dto, KoreaTz);
-                    return kstTime.ToString("yyyy-MM-dd HH:mm");
-                }
-                if (DateTime.TryParse(iso, out var dt))
-                {
-                    var unspecified = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
-                    var dto2 = new DateTimeOffset(unspecified, TimeSpan.Zero);
-                    var kstTime = TimeZoneInfo.ConvertTime(dto2, KoreaTz);
-                    return kstTime.ToString("yyyy-MM-dd HH:mm");
-                }
+                var start = ParseToKst(startIso);
+                var end = ParseToKst(endIso);
+                var from = startDateKst.Date;
+                var to = endDateKst.Date.AddDays(1).AddTicks(-1);
+                var s = start ?? end ?? from;
+                var e = end ?? start ?? to;
+                return s >= from && e <= to;
             }
-            catch { }
-            return iso;
+            catch
+            {
+                return true; // 파싱 실패 시 표시
+            }
+        }
+
+        private static DateTime? ParseToKst(string? iso)
+        {
+            if (string.IsNullOrWhiteSpace(iso)) return null;
+            if (DateTimeOffset.TryParse(iso, out var dto))
+            {
+                return TimeZoneInfo.ConvertTime(dto, KoreaTz).DateTime;
+            }
+            if (DateTime.TryParse(iso, out var dt))
+            {
+                var dto2 = new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero);
+                return TimeZoneInfo.ConvertTime(dto2, KoreaTz).DateTime;
+            }
+            return null;
+        }
+
+        private static string FormatKst(string? iso)
+        {
+            var kst = ParseToKst(iso);
+            return kst.HasValue ? kst.Value.ToString("yyyy-MM-dd HH:mm") : string.Empty;
+        }
+
+        private static string CalcDurationKst(string? startIso, string? endIso)
+        {
+            var s = ParseToKst(startIso);
+            var e = ParseToKst(endIso);
+            if (s.HasValue && e.HasValue && e.Value > s.Value)
+            {
+                var span = e.Value - s.Value;
+                return span.ToString("hh\\:mm\\:ss");
+            }
+            return string.Empty;
         }
 
         private static TimeZoneInfo SafeGetKoreaTz()
@@ -382,7 +403,6 @@ namespace YEJI_AW_Client
             }
             catch
             {
-                // Fallback: UTC+9
                 return TimeZoneInfo.CreateCustomTimeZone("KST", TimeSpan.FromHours(9), "Korea Standard Time", "Korea Standard Time");
             }
         }
