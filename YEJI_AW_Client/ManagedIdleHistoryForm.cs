@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Net.Http;
@@ -22,6 +23,7 @@ namespace YEJI_AW_Client
         private DateTimePicker endPicker;
         private Button searchButton;
         private ListView listView;
+        private Label emptyLabel;
 
         private static readonly TimeZoneInfo KoreaTz = SafeGetKoreaTz();
         private string? managerDisplayName;
@@ -45,7 +47,7 @@ namespace YEJI_AW_Client
         {
             Text = "관리: 조직 자리비움 이력";
             ClientSize = new Size(900, 540);
-            StartPosition = FormStartPosition.CenterParent;
+            StartPosition = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
 
@@ -64,10 +66,26 @@ namespace YEJI_AW_Client
             listView.Columns.Add("사번", 100);
             listView.Columns.Add("이름", 140);
             // PC 컬럼 제거 요청 반영
-            listView.Columns.Add("시작", 170);
-            listView.Columns.Add("종료", 170);
+            listView.Columns.Add("시작시간", 170);
+            listView.Columns.Add("종료시간", 170);
             listView.Columns.Add("자리비움시간", 120);
-            listView.Columns.Add("사유", 220);
+            listView.Columns.Add("상세사유", 220);
+
+            emptyLabel = new Label
+            {
+                Text = "자리비움 이력이 없습니다.",
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.None,
+                Left = listView.Left,
+                Top = listView.Top,
+                Width = listView.Width,
+                Height = listView.Height,
+                Visible = false,
+                ForeColor = Color.Gray,
+                BackColor = Color.White,
+                Font = new Font(Font, FontStyle.Regular)
+            };
 
             Controls.Add(orgCombo);
             Controls.Add(userCombo);
@@ -75,10 +93,14 @@ namespace YEJI_AW_Client
             Controls.Add(endPicker);
             Controls.Add(searchButton);
             Controls.Add(listView);
+            Controls.Add(emptyLabel);
+            emptyLabel.BringToFront();
 
             orgCombo.SelectedIndexChanged += async (s, e) => await LoadUsersForSelectedOrgAsync();
             // 자동 조회 제거: 조회 버튼으로만 이력 로딩
             // userCombo.SelectedIndexChanged += async (s, e) => await LoadIdleEventsAsync();
+
+            PositionNearTray();
         }
 
         private async Task LoadManagerDisplayNameAsync()
@@ -412,7 +434,33 @@ namespace YEJI_AW_Client
                 var name = string.IsNullOrWhiteSpace(kv.Value) ? kv.Key : kv.Value.Trim();
                 userCombo.Items.Add(new ComboItem($"{name} ({kv.Key})", kv.Key));
             }
-            if (userCombo.Items.Count > 0) userCombo.SelectedIndex = 0;
+            EnsureManagerPresence();
+        }
+
+        private void EnsureManagerPresence()
+        {
+            ComboItem? managerItem = null;
+            foreach (var item in userCombo.Items)
+            {
+                if (item is ComboItem ci && ci.Value == managerEmpId)
+                {
+                    managerItem = ci;
+                    break;
+                }
+            }
+
+            if (managerItem == null)
+            {
+                var name = string.IsNullOrWhiteSpace(managerDisplayName) ? string.Empty : managerDisplayName.Trim();
+                managerItem = new ComboItem($"{name} ({managerEmpId})", managerEmpId);
+                userCombo.Items.Insert(0, managerItem);
+            }
+
+            userCombo.SelectedItem = managerItem;
+            if (userCombo.SelectedItem == null && userCombo.Items.Count > 0)
+            {
+                userCombo.SelectedIndex = 0;
+            }
         }
 
         private async Task LoadIdleEventsAsync()
@@ -459,15 +507,28 @@ namespace YEJI_AW_Client
                     listView.Items.Add(item);
                 }
 
-                if (filtered.Count == 0)
-                {
-                    MessageBox.Show("자리비움이력이 없습니다.");
-                }
+                ShowEmptyState(filtered.Count == 0, "자리비움 이력이 없습니다.");
             }
             catch
             {
-                MessageBox.Show("자리비움 이력을 가져오지 못했습니다.");
+                listView.Items.Clear();
+                ShowEmptyState(true, "자리비움 이력을 불러오지 못했습니다.");
             }
+        }
+
+        private void ShowEmptyState(bool show, string message)
+        {
+            emptyLabel.Text = message;
+            emptyLabel.Visible = show;
+        }
+
+        private void PositionNearTray()
+        {
+            const int margin = 10;
+            Rectangle workingArea = Screen.PrimaryScreen?.WorkingArea ?? Rectangle.Empty;
+            Location = new Point(
+                Math.Max(margin, workingArea.Right - Width - margin),
+                Math.Max(margin, workingArea.Bottom - Height - margin));
         }
 
         private static DateTime ToUtcFromKst(DateTime kstLocalDateTime)
@@ -585,47 +646,9 @@ namespace YEJI_AW_Client
         }
 
 #if DEBUG
-        private static Form? _debugDlg;
-        private static TextBox? _debugTb;
         private void DebugLog(string title, string content)
         {
-            try
-            {
-                if (_debugDlg == null || _debugTb == null || _debugDlg.IsDisposed)
-                {
-                    _debugDlg = new Form
-                    {
-                        Text = "DEBUG: 조직/사용자 조회 로그",
-                        Width = 800,
-                        Height = 600,
-                        StartPosition = FormStartPosition.CenterParent
-                    };
-                    _debugTb = new TextBox
-                    {
-                        Multiline = true,
-                        ReadOnly = true,
-                        ScrollBars = ScrollBars.Both,
-                        Dock = DockStyle.Fill,
-                        Font = new Font("Consolas", 9F)
-                    };
-                    _debugDlg.Controls.Add(_debugTb);
-                    _debugDlg.Show(this);
-                }
-
-                if (!_debugDlg.Visible) _debugDlg.Show(this);
-                if (!string.IsNullOrWhiteSpace(title))
-                {
-                    _debugDlg.Text = title;
-                }
-
-                var ts = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
-                _debugTb.AppendText($"[{ts}] {title}\r\n");
-                _debugTb.AppendText(content);
-                _debugTb.AppendText("\r\n\r\n");
-                _debugTb.SelectionStart = _debugTb.TextLength;
-                _debugTb.ScrollToCaret();
-            }
-            catch { }
+            Debug.WriteLine($"[ManagedIdleHistory] {title}: {content}");
         }
 #endif
     }
