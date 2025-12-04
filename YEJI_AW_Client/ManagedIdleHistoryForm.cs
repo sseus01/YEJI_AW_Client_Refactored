@@ -16,6 +16,7 @@ namespace YEJI_AW_Client
         private readonly string serverBaseUrl;
         private readonly HttpClient httpClient;
         private readonly string managerEmpId;
+        private string? managerDefaultOrgCode;
 
         private ComboBox orgCombo;
         private ComboBox userCombo;
@@ -117,6 +118,7 @@ namespace YEJI_AW_Client
 #endif
                     var mgr = JsonSerializer.Deserialize<ManagerInfoResponse>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                     managerDisplayName = mgr?.Manager?.DisplayName;
+                    SetManagerDefaultOrgCodeIfEmpty(mgr);
                     if (string.IsNullOrWhiteSpace(managerDisplayName))
                     {
                         managerDisplayName = mgr?.Manager?.Username;
@@ -157,6 +159,7 @@ namespace YEJI_AW_Client
                 response.EnsureSuccessStatusCode();
                 string json = await response.Content.ReadAsStringAsync();
                 var mgr = JsonSerializer.Deserialize<ManagerInfoResponse>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                SetManagerDefaultOrgCodeIfEmpty(mgr);
                 var list = new List<OrgDto>();
                 if (mgr?.Permissions != null)
                 {
@@ -183,7 +186,7 @@ namespace YEJI_AW_Client
             {
                 orgCombo.Items.Clear();
                 orgCombo.Items.Add(new ComboItem("전체", "ALL"));
-                orgCombo.SelectedIndex = 0;
+                SetDefaultOrgSelection();
             }
         }
 
@@ -198,7 +201,51 @@ namespace YEJI_AW_Client
             {
                 orgCombo.Items.Add(new ComboItem("전체", "ALL"));
             }
-            orgCombo.SelectedIndex = 0;
+            SetDefaultOrgSelection();
+        }
+
+        private void SetManagerDefaultOrgCodeIfEmpty(ManagerInfoResponse? mgr)
+        {
+            if (mgr?.Permissions == null || mgr.Permissions.Count == 0 || !string.IsNullOrWhiteSpace(managerDefaultOrgCode))
+            {
+                return;
+            }
+
+            var first = mgr.Permissions.FirstOrDefault();
+            if (first == null)
+            {
+                return;
+            }
+
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(first.Catcode)) parts.Add(first.Catcode);
+            if (!string.IsNullOrWhiteSpace(first.Catcode2)) parts.Add(first.Catcode2);
+            if (!string.IsNullOrWhiteSpace(first.Catcode3)) parts.Add(first.Catcode3);
+
+            if (parts.Count > 0)
+            {
+                managerDefaultOrgCode = string.Join("/", parts);
+            }
+        }
+
+        private void SetDefaultOrgSelection()
+        {
+            if (!string.IsNullOrWhiteSpace(managerDefaultOrgCode))
+            {
+                var match = orgCombo.Items.Cast<object>()
+                    .Select((item, idx) => (item, idx))
+                    .FirstOrDefault(tuple => tuple.item is ComboItem ci &&
+                        (string.Equals(ci.Value, managerDefaultOrgCode, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(ci.Text, managerDefaultOrgCode, StringComparison.OrdinalIgnoreCase)));
+
+                if (match.item is ComboItem)
+                {
+                    orgCombo.SelectedIndex = match.idx;
+                    return;
+                }
+            }
+
+            orgCombo.SelectedIndex = orgCombo.Items.Count > 0 ? 0 : -1;
         }
 
         private void EnsurePersonalDefaultShown()
