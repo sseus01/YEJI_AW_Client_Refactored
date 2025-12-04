@@ -90,6 +90,9 @@ namespace YEJI_AW_Client
                 if (response.IsSuccessStatusCode)
                 {
                     string json = await response.Content.ReadAsStringAsync();
+#if DEBUG
+                    DebugLog("manager-info 응답", json);
+#endif
                     var mgr = JsonSerializer.Deserialize<ManagerInfoResponse>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                     managerDisplayName = mgr?.Manager?.DisplayName;
                     if (string.IsNullOrWhiteSpace(managerDisplayName))
@@ -98,7 +101,12 @@ namespace YEJI_AW_Client
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+#if DEBUG
+                DebugLog("manager-info 예외", ex.ToString());
+#endif
+            }
         }
 
         private async Task LoadOrganizationsAsync()
@@ -188,7 +196,6 @@ namespace YEJI_AW_Client
             string orgValue = selected?.Value ?? "ALL"; // 코드 또는 경로
             string orgText = selected?.Text ?? orgValue; // 표시명
 
-            // 1차: 조직별 사용자 목록 API 호출 (가능한 모든 파라미터로 시도)
             var url = new StringBuilder();
             url.Append($"{serverBaseUrl}/api/client/manager-users?");
             url.Append($"orgCode={Uri.EscapeDataString(orgValue)}");
@@ -198,56 +205,82 @@ namespace YEJI_AW_Client
             url.Append($"&employeeId={Uri.EscapeDataString(managerEmpId)}");
             url.Append($"&empNo={Uri.EscapeDataString(managerEmpId)}");
 
+#if DEBUG
+            DebugLog("manager-users 요청", url.ToString());
+#endif
+
             Dictionary<string, string> users = new();
             try
             {
                 using var response = await httpClient.GetAsync(url.ToString());
+#if DEBUG
+                DebugLog("manager-users 상태", $"Status: {(int)response.StatusCode} {response.ReasonPhrase}");
+#endif
                 if (response.IsSuccessStatusCode)
                 {
                     string json = await response.Content.ReadAsStringAsync();
+#if DEBUG
+                    DebugLog("manager-users 응답", json.Length > 4000 ? json.Substring(0, 4000) : json);
+#endif
                     users = ParseUsers(json);
                 }
             }
-            catch { }
-
-            // 2차: 다른 엔드포인트 시도 (서버 구현 차이 대비)
-            if (users.Count == 0)
+            catch (Exception ex)
             {
-                try
-                {
-                    string altUrl = $"{serverBaseUrl}/api/client/manager-users-by-org?orgName={Uri.EscapeDataString(orgText)}&managerId={Uri.EscapeDataString(managerEmpId)}";
-                    using var response2 = await httpClient.GetAsync(altUrl);
-                    if (response2.IsSuccessStatusCode)
-                    {
-                        string json2 = await response2.Content.ReadAsStringAsync();
-                        users = ParseUsers(json2);
-                    }
-                }
-                catch { }
+#if DEBUG
+                DebugLog("manager-users 예외", ex.ToString());
+#endif
             }
 
-            // 3차 폴백: 응답에 직원 목록이 중첩된 경우 탐색
             if (users.Count == 0)
             {
                 try
                 {
-                    string probeUrl = $"{serverBaseUrl}/api/client/manager-org-users?org={Uri.EscapeDataString(orgValue)}";
-                    string json3 = await httpClient.GetStringAsync(probeUrl);
-                    users = ParseUsers(json3);
+                    var end = DateTime.Today;
+                    var start = end.AddDays(-30);
+                    string murl = $"{serverBaseUrl}/api/client/manager-logs?employeeId={Uri.EscapeDataString(managerEmpId)}&startDate={start:yyyy-MM-dd}&endDate={end:yyyy-MM-dd}";
+#if DEBUG
+                    DebugLog("manager-logs 요청", murl);
+#endif
+                    string json = await httpClient.GetStringAsync(murl);
+#if DEBUG
+                    DebugLog("manager-logs 응답", json.Length > 4000 ? json.Substring(0, 4000) : json);
+#endif
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+                    IEnumerable<JsonElement> items = root.ValueKind == JsonValueKind.Array ? root.EnumerateArray() : Enumerable.Empty<JsonElement>();
+                    foreach (var item in items)
+                    {
+                        string id = GetProp(item, "employeeId", "empNo", "emp_no", "id", "employee_id");
+                        string name = GetProp(item, "employeeName", "empName", "emp_name", "name", "displayName");
+                        if (!string.IsNullOrWhiteSpace(id))
+                        {
+                            users[id] = name;
+                        }
+                    }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+#if DEBUG
+                    DebugLog("manager-logs 예외", ex.ToString());
+#endif
+                }
             }
 
             PopulateUserComboFromDict(users);
 
-            if (userCombo.Items.Count == 0)
+            // 본인 사번이 목록에 있으면 기본 선택
+            if (userCombo.Items.Cast<object>().FirstOrDefault(it => it is ComboItem ci && ci.Value == managerEmpId) is ComboItem myItem)
             {
-                // 사용자 없음: 개인만 표시
+                userCombo.SelectedItem = myItem;
+            }
+            else if (userCombo.Items.Count == 0)
+            {
                 var name = string.IsNullOrWhiteSpace(managerDisplayName) ? "개인" : managerDisplayName.Trim();
                 userCombo.Items.Add(new ComboItem($"{name} ({managerEmpId})", managerEmpId));
+                userCombo.SelectedIndex = 0;
             }
-
-            if (userCombo.Items.Count > 0)
+            else
             {
                 userCombo.SelectedIndex = 0;
             }
@@ -493,5 +526,50 @@ namespace YEJI_AW_Client
             public string? IdleEndTime { get; set; }
             public string? ReasonDetail { get; set; }
         }
+
+#if DEBUG
+        private static Form? _debugDlg;
+        private static TextBox? _debugTb;
+        private void DebugLog(string title, string content)
+        {
+            try
+            {
+                if (_debugDlg == null || _debugTb == null || _debugDlg.IsDisposed)
+                {
+                    _debugDlg = new Form
+                    {
+                        Text = "DEBUG: 조직/사용자 조회 로그",
+                        Width = 800,
+                        Height = 600,
+                        StartPosition = FormStartPosition.CenterParent
+                    };
+                    _debugTb = new TextBox
+                    {
+                        Multiline = true,
+                        ReadOnly = true,
+                        ScrollBars = ScrollBars.Both,
+                        Dock = DockStyle.Fill,
+                        Font = new Font("Consolas", 9F)
+                    };
+                    _debugDlg.Controls.Add(_debugTb);
+                    _debugDlg.Show(this);
+                }
+
+                if (!_debugDlg.Visible) _debugDlg.Show(this);
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    _debugDlg.Text = title;
+                }
+
+                var ts = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+                _debugTb.AppendText($"[{ts}] {title}\r\n");
+                _debugTb.AppendText(content);
+                _debugTb.AppendText("\r\n\r\n");
+                _debugTb.SelectionStart = _debugTb.TextLength;
+                _debugTb.ScrollToCaret();
+            }
+            catch { }
+        }
+#endif
     }
 }
