@@ -266,6 +266,9 @@ namespace YEJI_AW_Client
 
                     foreach (var item in EnumerateItems(root))
                     {
+                        if (!MatchesOrganization(item, orgValue))
+                            continue;
+
                         string id = GetProp(item, "employeeId", "empNo", "emp_no", "id", "employee_id");
                         string name = GetProp(item, "employeeName", "empName", "emp_name", "name", "displayName");
                         if (!string.IsNullOrWhiteSpace(id))
@@ -311,6 +314,40 @@ namespace YEJI_AW_Client
                 }
             }
             return string.Empty;
+        }
+
+        private static bool MatchesOrganization(JsonElement item, string orgValue)
+        {
+            if (string.IsNullOrWhiteSpace(orgValue) || string.Equals(orgValue, "ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            bool ContainsOrg(string? target)
+            {
+                if (string.IsNullOrWhiteSpace(target)) return false;
+                return target.IndexOf(orgValue, StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+
+            if (ContainsOrg(GetProp(item, "orgCode", "orgPath", "org", "orgName", "organization", "department", "departmentPath", "dept", "deptPath")))
+            {
+                return true;
+            }
+
+            // catcode 조합으로 표현된 조직 경로도 함께 비교
+            var catcodeParts = new[] { GetProp(item, "catcode"), GetProp(item, "catcode2"), GetProp(item, "catcode3") }
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .ToList();
+            if (catcodeParts.Count > 0)
+            {
+                var combined = string.Join("/", catcodeParts);
+                if (ContainsOrg(combined))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private Dictionary<string, string> ParseUsers(string json)
@@ -420,6 +457,11 @@ namespace YEJI_AW_Client
                         e.ReasonDetail ?? string.Empty
                     });
                     listView.Items.Add(item);
+                }
+
+                if (filtered.Count == 0)
+                {
+                    MessageBox.Show("자리비움이력이 없습니다.");
                 }
             }
             catch
