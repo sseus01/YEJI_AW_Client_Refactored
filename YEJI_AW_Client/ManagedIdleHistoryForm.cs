@@ -248,14 +248,29 @@ namespace YEJI_AW_Client
 #endif
                     using var doc = JsonDocument.Parse(json);
                     var root = doc.RootElement;
-                    IEnumerable<JsonElement> items = root.ValueKind == JsonValueKind.Array ? root.EnumerateArray() : Enumerable.Empty<JsonElement>();
-                    foreach (var item in items)
+
+                    static IEnumerable<JsonElement> EnumerateItems(JsonElement element)
+                    {
+                        if (element.ValueKind == JsonValueKind.Array)
+                        {
+                            return element.EnumerateArray();
+                        }
+
+                        if (element.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array)
+                        {
+                            return dataArr.EnumerateArray();
+                        }
+
+                        return Enumerable.Empty<JsonElement>();
+                    }
+
+                    foreach (var item in EnumerateItems(root))
                     {
                         string id = GetProp(item, "employeeId", "empNo", "emp_no", "id", "employee_id");
                         string name = GetProp(item, "employeeName", "empName", "emp_name", "name", "displayName");
                         if (!string.IsNullOrWhiteSpace(id))
                         {
-                            users[id] = name;
+                            users[id] = string.IsNullOrWhiteSpace(name) ? id : name;
                         }
                     }
                 }
