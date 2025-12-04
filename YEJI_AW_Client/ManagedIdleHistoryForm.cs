@@ -244,7 +244,7 @@ namespace YEJI_AW_Client
 #if DEBUG
                     DebugLog("manager-users 응답", json.Length > 4000 ? json.Substring(0, 4000) : json);
 #endif
-                    users = ParseUsers(json);
+                    users = ParseUsers(json, orgValue);
                 }
             }
             catch (Exception ex)
@@ -372,7 +372,7 @@ namespace YEJI_AW_Client
             return false;
         }
 
-        private Dictionary<string, string> ParseUsers(string json)
+        private Dictionary<string, string> ParseUsers(string json, string orgValue)
         {
             var users = new Dictionary<string, string>();
             try
@@ -385,7 +385,7 @@ namespace YEJI_AW_Client
                     // 다양한 필드명 지원
                     string id = GetProp(el, "employeeId", "empNo", "emp_no", "id", "userId", "empId");
                     string name = GetProp(el, "displayName", "name", "employeeName", "empName", "emp_name", "userName");
-                    if (!string.IsNullOrWhiteSpace(id))
+                    if (!string.IsNullOrWhiteSpace(id) && MatchesOrganization(el, orgValue))
                     {
                         users[id] = string.IsNullOrWhiteSpace(name) ? id : name;
                     }
@@ -434,10 +434,10 @@ namespace YEJI_AW_Client
                 var name = string.IsNullOrWhiteSpace(kv.Value) ? kv.Key : kv.Value.Trim();
                 userCombo.Items.Add(new ComboItem($"{name} ({kv.Key})", kv.Key));
             }
-            EnsureManagerPresence();
+            EnsureManagerSelection();
         }
 
-        private void EnsureManagerPresence()
+        private void EnsureManagerSelection()
         {
             ComboItem? managerItem = null;
             foreach (var item in userCombo.Items)
@@ -449,15 +449,12 @@ namespace YEJI_AW_Client
                 }
             }
 
-            if (managerItem == null)
+            if (managerItem != null)
             {
-                var name = string.IsNullOrWhiteSpace(managerDisplayName) ? string.Empty : managerDisplayName.Trim();
-                managerItem = new ComboItem($"{name} ({managerEmpId})", managerEmpId);
-                userCombo.Items.Insert(0, managerItem);
+                userCombo.SelectedItem = managerItem;
             }
 
-            userCombo.SelectedItem = managerItem;
-            if (userCombo.SelectedItem == null && userCombo.Items.Count > 0)
+            else if (userCombo.Items.Count > 0)
             {
                 userCombo.SelectedIndex = 0;
             }
