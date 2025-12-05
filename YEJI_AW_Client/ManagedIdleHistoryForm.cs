@@ -38,8 +38,9 @@ namespace YEJI_AW_Client
             Load += async (s, e) =>
             {
                 await LoadManagerDisplayNameAsync();
+                await EnsureManagerOrgCodeAsync();
                 await LoadOrganizationsAsync();
-                EnsurePersonalDefaultShown();
+                await LoadUsersForSelectedOrgAsync();
                 await LoadIdleEventsAsync();
             };
         }
@@ -232,11 +233,11 @@ namespace YEJI_AW_Client
         {
             if (!string.IsNullOrWhiteSpace(managerDefaultOrgCode))
             {
+                string target = NormalizeOrg(managerDefaultOrgCode);
                 var match = orgCombo.Items.Cast<object>()
                     .Select((item, idx) => (item, idx))
                     .FirstOrDefault(tuple => tuple.item is ComboItem ci &&
-                        (string.Equals(ci.Value, managerDefaultOrgCode, StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(ci.Text, managerDefaultOrgCode, StringComparison.OrdinalIgnoreCase)));
+                      (IsOrgMatch(ci.Value, target) || IsOrgMatch(ci.Text, target)));
 
                 if (match.item is ComboItem)
                 {
@@ -247,18 +248,7 @@ namespace YEJI_AW_Client
 
             orgCombo.SelectedIndex = orgCombo.Items.Count > 0 ? 0 : -1;
         }
-
-        private void EnsurePersonalDefaultShown()
-        {
-            // 사용자 목록이 비어 있을 때만 개인 기본 항목 추가
-            if (userCombo.Items.Count == 0)
-            {
-                var name = string.IsNullOrWhiteSpace(managerDisplayName) ? "개인" : managerDisplayName.Trim();
-                userCombo.Items.Add(new ComboItem($"{name} ({managerEmpId})", managerEmpId));
-                userCombo.SelectedIndex = 0;
-            }
-        }
-
+         
         private async Task LoadUsersForSelectedOrgAsync()
         {
             var selected = orgCombo.SelectedItem as ComboItem;
@@ -279,6 +269,7 @@ namespace YEJI_AW_Client
 #endif
 
             Dictionary<string, string> users = new();
+            string? managerUsersJson = null;
             try
             {
                 using var response = await httpClient.GetAsync(url.ToString());
@@ -287,11 +278,11 @@ namespace YEJI_AW_Client
 #endif
                 if (response.IsSuccessStatusCode)
                 {
-                    string json = await response.Content.ReadAsStringAsync();
+                    managerUsersJson = await response.Content.ReadAsStringAsync();
 #if DEBUG
-                    DebugLog("manager-users 응답", json.Length > 4000 ? json.Substring(0, 4000) : json);
+                    DebugLog("manager-users 응답", managerUsersJson.Length > 4000 ? managerUsersJson.Substring(0, 4000) : managerUsersJson);
 #endif
-                    users = ParseUsers(json, orgValue);
+                    users = ParseUsers(managerUsersJson, orgValue);
                 }
             }
             catch (Exception ex)
@@ -355,6 +346,7 @@ namespace YEJI_AW_Client
             }
 
             EnsureManagerUserExists(users, orgValue);
+            await EnsureManagerOrgCodeFromUsersAsync(managerUsersJson, orgValue);
             PopulateUserComboFromDict(users);
 
             // 본인 사번이 목록에 있으면 기본 선택
@@ -364,8 +356,7 @@ namespace YEJI_AW_Client
             }
             else if (userCombo.Items.Count == 0)
             {
-                var name = string.IsNullOrWhiteSpace(managerDisplayName) ? "개인" : managerDisplayName.Trim();
-                userCombo.Items.Add(new ComboItem($"{name} ({managerEmpId})", managerEmpId));
+                userCombo.Items.Add(new ComboItem("담당자 없음", string.Empty));
                 userCombo.SelectedIndex = 0;
             }
             else
@@ -501,6 +492,159 @@ namespace YEJI_AW_Client
             users[managerEmpId] = display;
         }
 
+        private async Task EnsureManagerOrgCodeAsync()
+        {
+            try
+            {
+                var url = new StringBuilder();
+                url.Append($"{serverBaseUrl}/api/client/manager-users?");
+                url.Append("orgCode=ALL&orgName=ALL&orgPath=ALL&");
+                url.Append($"managerId={Uri.EscapeDataString(managerEmpId)}&");
+                url.Append($"employeeId={Uri.EscapeDataString(managerEmpId)}&empNo={Uri.EscapeDataString(managerEmpId)}");
+
+                using var response = await httpClient.GetAsync(url.ToString());
+                if (!response.IsSuccessStatusCode)
+                {
+                    return;
+                }
+
+                string json = await response.Content.ReadAsStringAsync();
+                bool allowOverride = string.IsNullOrWhiteSpace(managerDefaultOrgCode);
+                TrySetManagerOrgFromJson(json, "ALL", allowOverride);
+            }
+            catch
+            {
+                // 무시: 기본 조직을 설정하지 못해도 실행은 계속한다
+            }
+        }
+
+        private async Task EnsureManagerOrgCodeFromUsersAsync(string? json, string orgValue)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return;
+            }
+
+            bool allowOverride = string.IsNullOrWhiteSpace(managerDefaultOrgCode);
+            await Task.Run(() => TrySetManagerOrgFromJson(json, orgValue, allowOverride));
+        }
+
+        private bool TrySetManagerOrgFromJson(string json, string orgValue, bool allowOverride)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                bool TryHandleElement(JsonElement el)
+                {
+                    string id = GetProp(el, "employeeId", "empNo", "emp_no", "id", "userId", "empId");
+                    if (!string.Equals(id, managerEmpId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    if (!allowOverride && !string.IsNullOrWhiteSpace(managerDefaultOrgCode))
+                    {
+                        return true;
+                    }
+
+                    string path = ExtractOrgPath(el);
+                    if (string.IsNullOrWhiteSpace(path))
+                    {
+                        return false;
+                    }
+
+                    // orgValue가 ALL일 때만 덮어쓰거나, 동일 경로일 때 설정
+                    if (string.Equals(orgValue, "ALL", StringComparison.OrdinalIgnoreCase) || MatchesOrganization(el, orgValue))
+                    {
+                        managerDefaultOrgCode = NormalizeOrg(path);
+                        return true;
+                    }
+
+                    return false;
+                }
+
+                if (root.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var it in root.EnumerateArray())
+                    {
+                        if (TryHandleElement(it)) return true;
+                    }
+                    return false;
+                }
+
+                string[] arrayNames = new[] { "users", "data", "items", "content", "employees", "members" };
+                foreach (var n in arrayNames)
+                {
+                    if (root.TryGetProperty(n, out var arr) && arr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var it in arr.EnumerateArray())
+                        {
+                            if (TryHandleElement(it)) return true;
+                        }
+                    }
+                }
+
+                foreach (var prop in root.EnumerateObject())
+                {
+                    var v = prop.Value;
+                    if (v.ValueKind == JsonValueKind.Object && TryHandleElement(v)) return true;
+                    if (v.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var it in v.EnumerateArray())
+                        {
+                            if (TryHandleElement(it)) return true;
+                        }
+                    }
+                }
+
+                return TryHandleElement(root);
+            }
+            catch
+            {
+                // 기본 조직을 찾지 못한 경우 그대로 진행
+            }
+
+            return false;
+        }
+
+        private static string ExtractOrgPath(JsonElement el)
+        {
+            string[] fields = new[] { "orgPath", "org", "orgName", "organization", "department", "departmentPath", "dept", "deptPath" };
+            foreach (var f in fields)
+            {
+                var val = GetProp(el, f);
+                if (!string.IsNullOrWhiteSpace(val))
+                {
+                    return NormalizeOrg(val);
+                }
+            }
+
+            var parts = new[] { GetProp(el, "catcode"), GetProp(el, "catcode2"), GetProp(el, "catcode3") }
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim());
+            var combined = string.Join("/", parts);
+            return NormalizeOrg(combined);
+        }
+
+        private static string NormalizeOrg(string? value)
+        {
+            return (value ?? string.Empty).Trim();
+        }
+
+        private static bool IsOrgMatch(string? source, string target)
+        {
+            var normalized = NormalizeOrg(source);
+            if (string.Equals(normalized, target, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return normalized.IndexOf(target, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   target.IndexOf(normalized, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private void PopulateUserComboFromDict(Dictionary<string, string> users)
         {
             userCombo.Items.Clear();
@@ -540,7 +684,14 @@ namespace YEJI_AW_Client
             try
             {
                 var userItem = userCombo.SelectedItem as ComboItem;
-                var empId = userItem?.Value ?? managerEmpId; // 디폴트: 개인
+                var empId = userItem?.Value ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(empId))
+                {
+                    listView.Items.Clear();
+                    ShowEmptyState(true, "선택된 담당자가 없습니다.");
+                    return;
+                }
 
                 var startDateKst = startPicker.Value.Date;
                 var endDateKst = endPicker.Value.Date;
