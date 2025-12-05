@@ -24,6 +24,7 @@ namespace YEJI_AW_Client
         private DateTimePicker startPicker;
         private DateTimePicker endPicker;
         private Button searchButton;
+        private Label orgGuideLabel;
         private ListView listView;
         private Label emptyLabel;
 
@@ -41,8 +42,12 @@ namespace YEJI_AW_Client
                 await LoadManagerDisplayNameAsync();
                 await EnsureManagerOrgCodeAsync();
                 await LoadOrganizationsAsync();
-                await LoadUsersForSelectedOrgAsync();
-                await LoadIdleEventsAsync();
+
+                if (!IsOrgSelectionPending())
+                {
+                    await LoadUsersForSelectedOrgAsync();
+                    await LoadIdleEventsAsync();
+                }
             };
         }
 
@@ -63,7 +68,25 @@ namespace YEJI_AW_Client
             endPicker.Value = DateTime.Today;
 
             searchButton = new Button { Left = 12, Top = 44, Width = 120, Height = 26, Text = "조회" };
-            searchButton.Click += async (s, e) => await LoadIdleEventsAsync();
+            searchButton.Click += async (s, e) =>
+            {
+                if (IsOrgSelectionPending())
+                {
+                    MessageBox.Show("조직을 선택하세요.", "안내", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                await LoadIdleEventsAsync();
+            };
+
+            orgGuideLabel = new Label
+            {
+                Left = searchButton.Right + 18,
+                Top = searchButton.Top + 6,
+                AutoSize = true,
+                Text = "조직을 선택하세요",
+                ForeColor = Color.DimGray
+            };          
 
             listView = new ListView { Left = 12, Top = 76, Width = 848, Height = 452, View = View.Details, FullRowSelect = true, GridLines = true };
             listView.Columns.Add("사번", 100);
@@ -95,6 +118,7 @@ namespace YEJI_AW_Client
             Controls.Add(startPicker);
             Controls.Add(endPicker);
             Controls.Add(searchButton);
+            Controls.Add(orgGuideLabel);
             Controls.Add(listView);
             Controls.Add(emptyLabel);
             emptyLabel.BringToFront();
@@ -208,6 +232,10 @@ namespace YEJI_AW_Client
         private void PopulateOrgCombo(List<OrgDto> orgs)
         {
             orgCombo.Items.Clear();
+
+            var placeholder = new ComboItem("조직 선택", string.Empty, true);
+            orgCombo.Items.Add(placeholder);
+
             foreach (var o in orgs)
             {
                 orgCombo.Items.Add(new ComboItem(o.Name, string.IsNullOrWhiteSpace(o.Code) ? o.Name : o.Code));
@@ -260,6 +288,16 @@ namespace YEJI_AW_Client
 
         private void SetDefaultOrgSelection()
         {
+            var placeholder = orgCombo.Items.Cast<object>()
+                .Select((item, idx) => (item, idx))
+                .FirstOrDefault(tuple => tuple.item is ComboItem ci && ci.IsPlaceholder);
+
+            if (placeholder.item is ComboItem)
+            {
+                orgCombo.SelectedIndex = placeholder.idx;
+                return;
+            }
+
             if (!string.IsNullOrWhiteSpace(managerOrgPath))
             {
                 string targetText = NormalizeOrg(managerOrgPath);
@@ -292,12 +330,27 @@ namespace YEJI_AW_Client
 
             orgCombo.SelectedIndex = orgCombo.Items.Count > 0 ? 0 : -1;
         }
-         
+
+        private bool IsOrgSelectionPending()
+        {
+            return orgCombo.SelectedItem is ComboItem ci && (ci.IsPlaceholder || string.IsNullOrWhiteSpace(ci.Value));
+        }
+
         private async Task LoadUsersForSelectedOrgAsync()
         {
             var selected = orgCombo.SelectedItem as ComboItem;
             string orgValue = selected?.Value ?? "ALL"; // 코드 또는 경로
             string orgText = selected?.Text ?? orgValue; // 표시명
+
+            if (selected == null || selected.IsPlaceholder || string.IsNullOrWhiteSpace(orgValue))
+            {
+                userCombo.Items.Clear();
+                userCombo.Items.Add(new ComboItem("조직을 먼저 선택하세요", string.Empty, true));
+                userCombo.SelectedIndex = 0;
+                listView.Items.Clear();
+                emptyLabel.Visible = false;
+                return;
+            }
 
             var url = new StringBuilder();
             url.Append($"{serverBaseUrl}/api/client/manager-users?");
@@ -388,9 +441,9 @@ namespace YEJI_AW_Client
 #endif
                 }
             }
-
-            EnsureManagerUserExists(users, orgValue);
+                        
             await EnsureManagerOrgCodeFromUsersAsync(managerUsersJson, orgValue);
+            EnsureManagerUserExists(users, orgValue);
             PopulateUserComboFromDict(users);
 
             // 본인 사번이 목록에 있으면 기본 선택
@@ -516,10 +569,18 @@ namespace YEJI_AW_Client
                 return;
             }
 
-            // 관리자가 속한 기본 조직이 아닌 경우에는 노출하지 않는다
-            if (!string.IsNullOrWhiteSpace(managerDefaultOrgCode) &&
-                !string.Equals(orgValue, managerDefaultOrgCode, StringComparison.OrdinalIgnoreCase))
+            string baseOrg = managerDefaultOrgCode ?? managerOrgPath;
+            if (!string.IsNullOrWhiteSpace(baseOrg))
             {
+                var normalizedBase = NormalizeOrg(baseOrg);
+                if (!IsOrgMatch(orgValue, normalizedBase) && !IsOrgMatch(normalizedBase, orgValue))
+                {
+                    return;
+                }
+            }
+            else
+            {
+                // 관리자의 조직을 알 수 없으면 자동 추가를 건너뛰어 잘못된 조직에 섞이지 않도록 한다
                 return;
             }
 
@@ -878,7 +939,14 @@ namespace YEJI_AW_Client
         {
             public string Text { get; }
             public string Value { get; }
-            public ComboItem(string text, string value) { Text = text; Value = value; }
+            public bool IsPlaceholder { get; }
+
+            public ComboItem(string text, string value, bool isPlaceholder = false)
+            {
+                Text = text;
+                Value = value;
+                IsPlaceholder = isPlaceholder;
+            }
             public override string ToString() => Text;
         }
 
