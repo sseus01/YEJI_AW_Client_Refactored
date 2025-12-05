@@ -111,6 +111,15 @@ namespace YEJI_AW_Client
 
                 currentItems = new BindingList<ManagerNotificationRow>(notifications);
                 dgvNotifications.DataSource = currentItems;
+
+                // 목록이 있으면 첫 행을 자동 선택하여 버튼 활성화가 되도록 처리
+                if (dgvNotifications.Rows.Count > 0)
+                {
+                    dgvNotifications.ClearSelection();
+                    dgvNotifications.Rows[0].Selected = true;
+                    dgvNotifications.CurrentCell = dgvNotifications.Rows[0].Cells[0];
+                }
+
                 lblStatus.Text = $"총 {notifications.Count}건";
             }
             catch (Exception ex)
