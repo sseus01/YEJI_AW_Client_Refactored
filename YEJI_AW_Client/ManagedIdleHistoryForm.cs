@@ -354,7 +354,7 @@ namespace YEJI_AW_Client
                 }
             }
 
-            EnsureManagerUserExists(users);
+            EnsureManagerUserExists(users, orgValue);
             PopulateUserComboFromDict(users);
 
             // 본인 사번이 목록에 있으면 기본 선택
@@ -474,9 +474,16 @@ namespace YEJI_AW_Client
             return users;
         }
 
-        private void EnsureManagerUserExists(Dictionary<string, string> users)
+        private void EnsureManagerUserExists(Dictionary<string, string> users, string orgValue)
         {
             if (string.IsNullOrWhiteSpace(managerEmpId))
+            {
+                return;
+            }
+
+            // 관리자가 속한 기본 조직이 아닌 경우에는 노출하지 않는다
+            if (!string.IsNullOrWhiteSpace(managerDefaultOrgCode) &&
+                !string.Equals(orgValue, managerDefaultOrgCode, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
