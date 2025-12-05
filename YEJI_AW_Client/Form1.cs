@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -114,6 +115,11 @@ namespace YEJI_AW_Client
         private Label? shutdownCountdownLabel;
         private Label? pcOffStatusLabel;
         private bool isTemporaryDisableActive;
+
+        private Timer? managerNotificationTimer;
+        private bool isCheckingManagerNotifications;
+        private HashSet<string> lastAlertedManagerNotificationIds = new();
+        private ToolStripMenuItem? managerNotificationsMenuItem;
 
         private bool isManagerUser;
 
@@ -255,6 +261,7 @@ namespace YEJI_AW_Client
             };
 
             InitializeTrayMenu();
+            notifyIcon.BalloonTipClicked += async (s, e) => await OnManagerNotificationBalloonClickedAsync();
 
             // 종료 시 SHUTDOWN 이벤트 전송
             this.FormClosing += Form1_FormClosing;
@@ -1788,6 +1795,12 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("연장 근무 신청", null, OnOpenOvertimeRequest);
             trayMenu.Items.Add("연장 근무 결과 확인", null, OnOpenOvertimeStatus);
 
+            managerNotificationsMenuItem = new ToolStripMenuItem("연장 근무 승인 요청 확인", null, async (s, e) => await OpenManagerNotificationsAsync(null))
+            {
+                Visible = false
+            };
+            trayMenu.Items.Add(managerNotificationsMenuItem);
+
 #if DEBUG
             trayMenu.Items.Add("디버그: 자리비움 사유 창 열기", null, OnDebugOpenIdleReason);
             trayMenu.Items.Add("디버그: PC오프 알림 확인", null, OnDebugShowPcOffAlert);
@@ -1797,6 +1810,7 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("디버그: 현재 시각 모의 설정", null, OnDebugSetCurrentTime);
             trayMenu.Items.Add("디버그: 현재 시각 모의 해제", null, OnDebugClearCurrentTime);
             trayMenu.Items.Add("디버그: 관리자 진단", null, async (s, e) => await CheckAndAddManagerMenuAsync());
+            trayMenu.Items.Add("디버그: 연장근무 관리자 알림 확인", null, async (s, e) => await CheckManagerNotificationsAsync(forceShowPopup: true));
 #endif
 
             notifyIcon.ContextMenuStrip = trayMenu;
@@ -1828,6 +1842,25 @@ namespace YEJI_AW_Client
             public List<ManagerPermission>? Permissions { get; set; }
         }
 
+        private class ManagerNotificationItem
+        {
+            public string Id { get; set; } = string.Empty;
+            public string NotificationStatus { get; set; } = string.Empty;
+            public OvertimeRequestSummary OvertimeRequest { get; set; } = new();
+        }
+
+        private class OvertimeRequestSummary
+        {
+            public string Id { get; set; } = string.Empty;
+            public string EmployeeId { get; set; } = string.Empty;
+            public string EmployeeName { get; set; } = string.Empty;
+            public string WorkDate { get; set; } = string.Empty;
+            public string StartTime { get; set; } = string.Empty;
+            public string EndTime { get; set; } = string.Empty;
+            public string Reason { get; set; } = string.Empty;
+            public string Status { get; set; } = string.Empty;
+        }
+
         // 관리자 여부 확인 후 트레이 메뉴에 관리용 항목 추가
         private async Task CheckAndAddManagerMenuAsync()
         {
@@ -1848,11 +1881,231 @@ namespace YEJI_AW_Client
                 var mgr = await JsonSerializer.DeserializeAsync<ManagerInfoResponse>(stream, JsonOptions);
                 bool isManager = mgr?.Success == true && (mgr.Manager != null || (mgr.Permissions != null && mgr.Permissions.Count > 0));
                 isManagerUser = isManager;
-                // 트레이에 별도 관리 메뉴는 추가하지 않음 (요청에 따라 제거)
+                if (isManager)
+                {
+                    EnableManagerNotificationMenu();
+                    StartManagerNotificationPolling();
+                }
             }
             catch
             {
                 // 실패 시 조용히 무시
+            }
+        }
+
+        private static bool IsDebugBuild()
+        {
+#if DEBUG
+            return true;
+#else
+            return false;
+#endif
+        }
+
+        private void EnableManagerNotificationMenu()
+        {
+            if (managerNotificationsMenuItem == null)
+                return;
+
+            managerNotificationsMenuItem.Visible = true;
+            UpdateManagerNotificationMenuLabel(0);
+        }
+
+        private void UpdateManagerNotificationMenuLabel(int newCount)
+        {
+            if (managerNotificationsMenuItem == null)
+                return;
+
+            string baseText = "연장 근무 승인 요청 확인";
+            managerNotificationsMenuItem.Text = newCount > 0
+                ? $"{baseText} ({newCount}건 대기)"
+                : baseText;
+
+            var targetStyle = newCount > 0 ? FontStyle.Bold : FontStyle.Regular;
+            if (managerNotificationsMenuItem.Font.Style != targetStyle)
+            {
+                managerNotificationsMenuItem.Font = new Font(managerNotificationsMenuItem.Font, targetStyle);
+            }
+        }
+
+        private void StartManagerNotificationPolling()
+        {
+            if (managerNotificationTimer != null)
+                return;
+
+            managerNotificationTimer = new Timer
+            {
+                Interval = (int)TimeSpan.FromSeconds(45).TotalMilliseconds
+            };
+            managerNotificationTimer.Tick += async (s, e) => await CheckManagerNotificationsAsync();
+            managerNotificationTimer.Start();
+
+            _ = CheckManagerNotificationsAsync();
+        }
+
+        private async Task CheckManagerNotificationsAsync(bool forceShowPopup = false)
+        {
+            if (isCheckingManagerNotifications)
+                return;
+
+            if (!isManagerUser && !forceShowPopup)
+                return;
+
+            if (string.IsNullOrWhiteSpace(employeeId))
+                return;
+
+            isCheckingManagerNotifications = true;
+            try
+            {
+                var notifications = await FetchManagerNotificationsAsync();
+                int newCount = notifications.Count(n => string.Equals(n.NotificationStatus, "NEW", StringComparison.OrdinalIgnoreCase));
+                UpdateManagerNotificationMenuLabel(newCount);
+
+                var newIds = notifications
+                    .Where(n => string.Equals(n.NotificationStatus, "NEW", StringComparison.OrdinalIgnoreCase))
+                    .Select(n => n.Id)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .ToHashSet();
+
+                if (newIds.Count == 0)
+                {
+                    lastAlertedManagerNotificationIds.Clear();
+                    return;
+                }
+
+                bool isNewSet = !newIds.SetEquals(lastAlertedManagerNotificationIds);
+                if (forceShowPopup || isNewSet)
+                {
+                    lastAlertedManagerNotificationIds = newIds;
+                    ShowManagerNotificationAlert(notifications.Where(n => newIds.Contains(n.Id)).ToList());
+                }
+            }
+            catch
+            {
+                // 조용히 무시 (폴링 실패 시 재시도)
+            }
+            finally
+            {
+                isCheckingManagerNotifications = false;
+            }
+        }
+
+        private async Task<List<ManagerNotificationItem>> FetchManagerNotificationsAsync()
+        {
+            var list = new List<ManagerNotificationItem>();
+
+            try
+            {
+                string url = $"{ServerBaseUrl}/api/client/manager-notifications?employeeId={Uri.EscapeDataString(employeeId)}";
+                using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return list;
+                }
+
+                string json = await response.Content.ReadAsStringAsync();
+                list = ParseManagerNotifications(json);
+            }
+            catch
+            {
+                // 실패 시 빈 리스트 반환
+            }
+
+            return list;
+        }
+
+        private List<ManagerNotificationItem> ParseManagerNotifications(string json)
+        {
+            var list = new List<ManagerNotificationItem>();
+
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                var source = root;
+                if (root.TryGetProperty("notifications", out var arr))
+                {
+                    source = arr;
+                }
+
+                foreach (var item in EnumerateArrayLike(source))
+                {
+                    var overtime = item;
+                    if (item.TryGetProperty("overtimeRequest", out var o))
+                    {
+                        overtime = o;
+                    }
+                    else if (item.TryGetProperty("overtime_request", out var o2))
+                    {
+                        overtime = o2;
+                    }
+
+                    list.Add(new ManagerNotificationItem
+                    {
+                        Id = GetElementString(item, "id", "_id", "notificationId"),
+                        NotificationStatus = GetElementString(item, "notificationStatus", "status"),
+                        OvertimeRequest = new OvertimeRequestSummary
+                        {
+                            Id = GetElementString(overtime, "id", "_id", "requestId", "request_id"),
+                            EmployeeId = GetElementString(overtime, "employeeId", "employee_id", "empNo", "emp_no"),
+                            EmployeeName = GetElementString(overtime, "employeeName", "employee_name", "empName", "emp_name"),
+                            WorkDate = GetElementString(overtime, "workDate", "work_date", "date"),
+                            StartTime = GetElementString(overtime, "startTime", "start_time", "start"),
+                            EndTime = GetElementString(overtime, "endTime", "end_time", "end"),
+                            Reason = GetElementString(overtime, "reason", "description", "comment"),
+                            Status = GetElementString(overtime, "status", "approvalStatus", "approval_status", "result"),
+                        }
+                    });
+                }
+            }
+            catch
+            {
+                // 파싱 실패 시 빈 리스트 반환
+            }
+
+            return list;
+        }
+
+        private void ShowManagerNotificationAlert(List<ManagerNotificationItem> newNotifications)
+        {
+            if (newNotifications.Count == 0)
+                return;
+
+            notifyIcon.BalloonTipTitle = "연장 근무 승인 요청";
+            notifyIcon.BalloonTipText = $"새 연장 근무 신청 {newNotifications.Count}건이 도착했습니다. 클릭하여 확인하세요.";
+            notifyIcon.ShowBalloonTip(4000);
+        }
+
+        private async Task OnManagerNotificationBalloonClickedAsync()
+        {
+            if (lastAlertedManagerNotificationIds.Count == 0)
+            {
+                await OpenManagerNotificationsAsync(null);
+                return;
+            }
+
+            await OpenManagerNotificationsAsync(lastAlertedManagerNotificationIds);
+        }
+
+        private async Task OpenManagerNotificationsAsync(IEnumerable<string>? notificationIdsToMark)
+        {
+            if (!isManagerUser && !IsDebugBuild())
+            {
+                MessageBox.Show("관리자 전용 기능입니다.");
+                return;
+            }
+
+            try
+            {
+                using var form = new ManagerNotificationListForm(ServerBaseUrl, HttpClient, employeeId, employeeName, notificationIdsToMark);
+                form.ShowDialog();
+                await CheckManagerNotificationsAsync();
+            }
+            catch (Exception ex)
+            {
+#if DEBUG
+                MessageBox.Show($"연장 근무 알림을 여는 중 오류가 발생했습니다.\n{ex.Message}");
+#endif
             }
         }
 
