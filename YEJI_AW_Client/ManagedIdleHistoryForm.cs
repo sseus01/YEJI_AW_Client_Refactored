@@ -119,8 +119,30 @@ namespace YEJI_AW_Client
 #endif
                     var mgr = JsonSerializer.Deserialize<ManagerInfoResponse>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                     managerDisplayName = mgr?.Manager?.DisplayName;
+                    // 기존 로직: 권한 목록에서 기본 조직 추출
                     SetManagerDefaultOrgCodeIfEmpty(mgr);
-                    if (string.IsNullOrWhiteSpace(managerDisplayName))
+
+                    // manager 객체에 조직 경로가 있으면 이를 우선 사용
+                    if (string.IsNullOrWhiteSpace(managerDefaultOrgCode))
+                    {
+                        using var doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("manager", out var managerEl))
+                        {
+                            var candidate = managerEl.EnumerateObject()
+                                .Where(p => p.Value.ValueKind == JsonValueKind.String)
+                                .Select(p => p.Value.GetString())
+                                .Where(v => !string.IsNullOrWhiteSpace(v) && v.Contains("/"))
+                                .OrderByDescending(v => v.Count(c => c == '/'))   // "/" 개수가 많은 경로 우선
+                                .ThenByDescending(v => v.Length)                 // 길이가 긴 경로 우선
+                                .FirstOrDefault();
+                            if (!string.IsNullOrWhiteSpace(candidate))
+                            {
+                                managerDefaultOrgCode = candidate;
+                            }
+                        }
+                    }
+
+                        if (string.IsNullOrWhiteSpace(managerDisplayName))
                     {
                         managerDisplayName = mgr?.Manager?.Username;
                     }
@@ -212,16 +234,18 @@ namespace YEJI_AW_Client
                 return;
             }
 
-            var first = mgr.Permissions.FirstOrDefault();
-            if (first == null)
-            {
-                return;
-            }
+            // catcode3 → catcode2 → catcode 순으로 가장 깊은 조직을 찾음
+            ManagerPermission? selected = mgr.Permissions
+                .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.Catcode3))
+                ?? mgr.Permissions.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.Catcode2))
+                ?? mgr.Permissions.FirstOrDefault();
+
+            if (selected == null) return;           
 
             var parts = new List<string>();
-            if (!string.IsNullOrWhiteSpace(first.Catcode)) parts.Add(first.Catcode);
-            if (!string.IsNullOrWhiteSpace(first.Catcode2)) parts.Add(first.Catcode2);
-            if (!string.IsNullOrWhiteSpace(first.Catcode3)) parts.Add(first.Catcode3);
+            if (!string.IsNullOrWhiteSpace(selected.Catcode)) parts.Add(selected.Catcode);
+            if (!string.IsNullOrWhiteSpace(selected.Catcode2)) parts.Add(selected.Catcode2);
+            if (!string.IsNullOrWhiteSpace(selected.Catcode3)) parts.Add(selected.Catcode3);
 
             if (parts.Count > 0)
             {
