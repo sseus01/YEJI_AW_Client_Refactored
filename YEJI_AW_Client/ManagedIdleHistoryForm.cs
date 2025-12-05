@@ -17,14 +17,12 @@ namespace YEJI_AW_Client
         private readonly HttpClient httpClient;
         private readonly string managerEmpId;
         private string? managerDefaultOrgCode;
-        private string? managerOrgPath;
 
         private ComboBox orgCombo;
         private ComboBox userCombo;
         private DateTimePicker startPicker;
         private DateTimePicker endPicker;
         private Button searchButton;
-        private Label orgGuideLabel;
         private ListView listView;
         private Label emptyLabel;
 
@@ -42,12 +40,8 @@ namespace YEJI_AW_Client
                 await LoadManagerDisplayNameAsync();
                 await EnsureManagerOrgCodeAsync();
                 await LoadOrganizationsAsync();
-
-                if (!IsOrgSelectionPending())
-                {
-                    await LoadUsersForSelectedOrgAsync();
-                    await LoadIdleEventsAsync();
-                }
+                await LoadUsersForSelectedOrgAsync();
+                await LoadIdleEventsAsync();
             };
         }
 
@@ -68,25 +62,7 @@ namespace YEJI_AW_Client
             endPicker.Value = DateTime.Today;
 
             searchButton = new Button { Left = 12, Top = 44, Width = 120, Height = 26, Text = "조회" };
-            searchButton.Click += async (s, e) =>
-            {
-                if (IsOrgSelectionPending())
-                {
-                    MessageBox.Show("조직을 선택하세요.", "안내", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-
-                await LoadIdleEventsAsync();
-            };
-
-            orgGuideLabel = new Label
-            {
-                Left = searchButton.Right + 18,
-                Top = searchButton.Top + 6,
-                AutoSize = true,
-                Text = "조직을 선택하세요",
-                ForeColor = Color.DimGray
-            };          
+            searchButton.Click += async (s, e) => await LoadIdleEventsAsync();
 
             listView = new ListView { Left = 12, Top = 76, Width = 848, Height = 452, View = View.Details, FullRowSelect = true, GridLines = true };
             listView.Columns.Add("사번", 100);
@@ -118,7 +94,6 @@ namespace YEJI_AW_Client
             Controls.Add(startPicker);
             Controls.Add(endPicker);
             Controls.Add(searchButton);
-            Controls.Add(orgGuideLabel);
             Controls.Add(listView);
             Controls.Add(emptyLabel);
             emptyLabel.BringToFront();
@@ -143,25 +118,41 @@ namespace YEJI_AW_Client
                     DebugLog("manager-info 응답", json);
 #endif
                     var mgr = JsonSerializer.Deserialize<ManagerInfoResponse>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                    managerDisplayName = mgr?.Manager?.DisplayName ?? mgr?.Manager?.Username;
+                    managerDisplayName = mgr?.Manager?.DisplayName;
 
-                    if (string.IsNullOrWhiteSpace(managerOrgPath))
+                    // 서버에서 제공하는 기본 조직 코드를 우선 사용
+                    if (!string.IsNullOrWhiteSpace(mgr?.Manager?.DefaultOrgCode))
+                    {
+                        managerDefaultOrgCode = mgr.Manager.DefaultOrgCode;
+                    }
+
+                    // 기존 로직: 권한 목록에서 기본 조직 추출
+                    SetManagerDefaultOrgCodeIfEmpty(mgr);
+
+                    // manager 객체에 조직 경로가 있으면 이를 우선 사용
+                    if (string.IsNullOrWhiteSpace(managerDefaultOrgCode))
                     {
                         using var doc = JsonDocument.Parse(json);
                         if (doc.RootElement.TryGetProperty("manager", out var managerEl))
                         {
-                            managerOrgPath = managerEl.EnumerateObject()
+                            var candidate = managerEl.EnumerateObject()
                                 .Where(p => p.Value.ValueKind == JsonValueKind.String)
                                 .Select(p => p.Value.GetString())
                                 .Where(v => !string.IsNullOrWhiteSpace(v) && v.Contains("/"))
-                                .OrderByDescending(v => v.Count(c => c == '/'))
-                                .ThenByDescending(v => v.Length)
-                                .FirstOrDefault();                            
+                                .OrderByDescending(v => v.Count(c => c == '/'))   // "/" 개수가 많은 경로 우선
+                                .ThenByDescending(v => v.Length)                 // 길이가 긴 경로 우선
+                                .FirstOrDefault();
+                            if (!string.IsNullOrWhiteSpace(candidate))
+                            {
+                                managerDefaultOrgCode = candidate;
+                            }
                         }
                     }
 
-                    // 권한 목록에서 기본 조직 추출 (관리자 소속과 일치하는 권한 우선)
-                    SetManagerDefaultOrgCodeIfEmpty(mgr);
+                    if (string.IsNullOrWhiteSpace(managerDisplayName))
+                    {
+                        managerDisplayName = mgr?.Manager?.Username;
+                    }
                 }
             }
             catch (Exception ex)
@@ -232,10 +223,6 @@ namespace YEJI_AW_Client
         private void PopulateOrgCombo(List<OrgDto> orgs)
         {
             orgCombo.Items.Clear();
-
-            var placeholder = new ComboItem("조직 선택", string.Empty, true);
-            orgCombo.Items.Add(placeholder);
-
             foreach (var o in orgs)
             {
                 orgCombo.Items.Add(new ComboItem(o.Name, string.IsNullOrWhiteSpace(o.Code) ? o.Name : o.Code));
@@ -254,22 +241,9 @@ namespace YEJI_AW_Client
                 return;
             }
 
-            ManagerPermission? selected = null;
-
-            if (!string.IsNullOrWhiteSpace(managerOrgPath))
-            {
-                selected = mgr.Permissions.FirstOrDefault(p =>
-                {
-                    var names = new List<string>();
-                    if (!string.IsNullOrWhiteSpace(p.Catname)) names.Add(p.Catname);
-                    if (!string.IsNullOrWhiteSpace(p.Catname2)) names.Add(p.Catname2);
-                    if (!string.IsNullOrWhiteSpace(p.Catname3)) names.Add(p.Catname3);
-                    return names.Count > 0 && string.Join("/", names) == managerOrgPath;
-                });
-            }
-
             // catcode3 → catcode2 → catcode 순으로 가장 깊은 조직을 찾음
-            selected ??= mgr.Permissions.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.Catcode3))
+            ManagerPermission? selected = mgr.Permissions
+                .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.Catcode3))
                 ?? mgr.Permissions.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.Catcode2))
                 ?? mgr.Permissions.FirstOrDefault();
 
@@ -288,31 +262,6 @@ namespace YEJI_AW_Client
 
         private void SetDefaultOrgSelection()
         {
-            var placeholder = orgCombo.Items.Cast<object>()
-                .Select((item, idx) => (item, idx))
-                .FirstOrDefault(tuple => tuple.item is ComboItem ci && ci.IsPlaceholder);
-
-            if (placeholder.item is ComboItem)
-            {
-                orgCombo.SelectedIndex = placeholder.idx;
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(managerOrgPath))
-            {
-                string targetText = NormalizeOrg(managerOrgPath);
-                var matchByText = orgCombo.Items.Cast<object>()
-                    .Select((item, idx) => (item, idx))
-                    .FirstOrDefault(tuple => tuple.item is ComboItem ci &&
-                        string.Equals(NormalizeOrg(ci.Text), targetText, StringComparison.OrdinalIgnoreCase));
-
-                if (matchByText.item is ComboItem)
-                {
-                    orgCombo.SelectedIndex = matchByText.idx;
-                    return;
-                }
-            }
-
             if (!string.IsNullOrWhiteSpace(managerDefaultOrgCode))
             {
                 string target = NormalizeOrg(managerDefaultOrgCode);
@@ -331,26 +280,11 @@ namespace YEJI_AW_Client
             orgCombo.SelectedIndex = orgCombo.Items.Count > 0 ? 0 : -1;
         }
 
-        private bool IsOrgSelectionPending()
-        {
-            return orgCombo.SelectedItem is ComboItem ci && (ci.IsPlaceholder || string.IsNullOrWhiteSpace(ci.Value));
-        }
-
         private async Task LoadUsersForSelectedOrgAsync()
         {
             var selected = orgCombo.SelectedItem as ComboItem;
             string orgValue = selected?.Value ?? "ALL"; // 코드 또는 경로
             string orgText = selected?.Text ?? orgValue; // 표시명
-
-            if (selected == null || selected.IsPlaceholder || string.IsNullOrWhiteSpace(orgValue))
-            {
-                userCombo.Items.Clear();
-                userCombo.Items.Add(new ComboItem("조직을 먼저 선택하세요", string.Empty, true));
-                userCombo.SelectedIndex = 0;
-                listView.Items.Clear();
-                emptyLabel.Visible = false;
-                return;
-            }
 
             var url = new StringBuilder();
             url.Append($"{serverBaseUrl}/api/client/manager-users?");
@@ -441,9 +375,9 @@ namespace YEJI_AW_Client
 #endif
                 }
             }
-                        
-            await EnsureManagerOrgCodeFromUsersAsync(managerUsersJson, orgValue);
+
             EnsureManagerUserExists(users, orgValue);
+            await EnsureManagerOrgCodeFromUsersAsync(managerUsersJson, orgValue);
             PopulateUserComboFromDict(users);
 
             // 본인 사번이 목록에 있으면 기본 선택
@@ -569,18 +503,10 @@ namespace YEJI_AW_Client
                 return;
             }
 
-            string baseOrg = managerDefaultOrgCode ?? managerOrgPath;
-            if (!string.IsNullOrWhiteSpace(baseOrg))
+            // 관리자가 속한 기본 조직이 아닌 경우에는 노출하지 않는다
+            if (!string.IsNullOrWhiteSpace(managerDefaultOrgCode) &&
+                !string.Equals(orgValue, managerDefaultOrgCode, StringComparison.OrdinalIgnoreCase))
             {
-                var normalizedBase = NormalizeOrg(baseOrg);
-                if (!IsOrgMatch(orgValue, normalizedBase) && !IsOrgMatch(normalizedBase, orgValue))
-                {
-                    return;
-                }
-            }
-            else
-            {
-                // 관리자의 조직을 알 수 없으면 자동 추가를 건너뛰어 잘못된 조직에 섞이지 않도록 한다
                 return;
             }
 
@@ -663,13 +589,7 @@ namespace YEJI_AW_Client
                     // orgValue가 ALL일 때만 덮어쓰거나, 동일 경로일 때 설정
                     if (string.Equals(orgValue, "ALL", StringComparison.OrdinalIgnoreCase) || MatchesOrganization(el, orgValue))
                     {
-                        var normalizedPath = NormalizeOrg(path);
-                        if (string.IsNullOrWhiteSpace(managerOrgPath))
-                        {
-                            managerOrgPath = normalizedPath;
-                        }
-
-                        managerDefaultOrgCode = normalizedPath;
+                        managerDefaultOrgCode = NormalizeOrg(path);
                         return true;
                     }
 
@@ -939,14 +859,7 @@ namespace YEJI_AW_Client
         {
             public string Text { get; }
             public string Value { get; }
-            public bool IsPlaceholder { get; }
-
-            public ComboItem(string text, string value, bool isPlaceholder = false)
-            {
-                Text = text;
-                Value = value;
-                IsPlaceholder = isPlaceholder;
-            }
+            public ComboItem(string text, string value) { Text = text; Value = value; }
             public override string ToString() => Text;
         }
 
@@ -968,15 +881,13 @@ namespace YEJI_AW_Client
             public string Catcode { get; set; } = string.Empty;
             public string Catcode2 { get; set; } = string.Empty;
             public string Catcode3 { get; set; } = string.Empty;
-            public string Catname { get; set; } = string.Empty;
-            public string Catname2 { get; set; } = string.Empty;
-            public string Catname3 { get; set; } = string.Empty;
         }
 
         private class Manager
         {
             public string? DisplayName { get; set; }
             public string? Username { get; set; }
+            public string? DefaultOrgCode { get; set; }
         }
 
         private class IdleEvt
