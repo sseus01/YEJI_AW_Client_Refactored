@@ -17,6 +17,7 @@ namespace YEJI_AW_Client
         private readonly HttpClient httpClient;
         private readonly string managerEmpId;
         private string? managerDefaultOrgCode;
+        private string? managerOrgPath;
 
         private ComboBox orgCombo;
         private ComboBox userCombo;
@@ -118,34 +119,25 @@ namespace YEJI_AW_Client
                     DebugLog("manager-info 응답", json);
 #endif
                     var mgr = JsonSerializer.Deserialize<ManagerInfoResponse>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                    managerDisplayName = mgr?.Manager?.DisplayName;
-                    // 기존 로직: 권한 목록에서 기본 조직 추출
-                    SetManagerDefaultOrgCodeIfEmpty(mgr);
+                    managerDisplayName = mgr?.Manager?.DisplayName ?? mgr?.Manager?.Username;
 
-                    // manager 객체에 조직 경로가 있으면 이를 우선 사용
-                    if (string.IsNullOrWhiteSpace(managerDefaultOrgCode))
+                    if (string.IsNullOrWhiteSpace(managerOrgPath))
                     {
                         using var doc = JsonDocument.Parse(json);
                         if (doc.RootElement.TryGetProperty("manager", out var managerEl))
                         {
-                            var candidate = managerEl.EnumerateObject()
+                            managerOrgPath = managerEl.EnumerateObject()
                                 .Where(p => p.Value.ValueKind == JsonValueKind.String)
                                 .Select(p => p.Value.GetString())
                                 .Where(v => !string.IsNullOrWhiteSpace(v) && v.Contains("/"))
-                                .OrderByDescending(v => v.Count(c => c == '/'))   // "/" 개수가 많은 경로 우선
-                                .ThenByDescending(v => v.Length)                 // 길이가 긴 경로 우선
-                                .FirstOrDefault();
-                            if (!string.IsNullOrWhiteSpace(candidate))
-                            {
-                                managerDefaultOrgCode = candidate;
-                            }
+                                .OrderByDescending(v => v.Count(c => c == '/'))
+                                .ThenByDescending(v => v.Length)
+                                .FirstOrDefault();                            
                         }
                     }
 
-                        if (string.IsNullOrWhiteSpace(managerDisplayName))
-                    {
-                        managerDisplayName = mgr?.Manager?.Username;
-                    }
+                    // 권한 목록에서 기본 조직 추출 (관리자 소속과 일치하는 권한 우선)
+                    SetManagerDefaultOrgCodeIfEmpty(mgr);
                 }
             }
             catch (Exception ex)
@@ -234,13 +226,26 @@ namespace YEJI_AW_Client
                 return;
             }
 
+            ManagerPermission? selected = null;
+
+            if (!string.IsNullOrWhiteSpace(managerOrgPath))
+            {
+                selected = mgr.Permissions.FirstOrDefault(p =>
+                {
+                    var names = new List<string>();
+                    if (!string.IsNullOrWhiteSpace(p.Catname)) names.Add(p.Catname);
+                    if (!string.IsNullOrWhiteSpace(p.Catname2)) names.Add(p.Catname2);
+                    if (!string.IsNullOrWhiteSpace(p.Catname3)) names.Add(p.Catname3);
+                    return names.Count > 0 && string.Join("/", names) == managerOrgPath;
+                });
+            }
+
             // catcode3 → catcode2 → catcode 순으로 가장 깊은 조직을 찾음
-            ManagerPermission? selected = mgr.Permissions
-                .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.Catcode3))
+            selected ??= mgr.Permissions.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.Catcode3))
                 ?? mgr.Permissions.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.Catcode2))
                 ?? mgr.Permissions.FirstOrDefault();
 
-            if (selected == null) return;           
+            if (selected == null) return;
 
             var parts = new List<string>();
             if (!string.IsNullOrWhiteSpace(selected.Catcode)) parts.Add(selected.Catcode);
@@ -255,6 +260,21 @@ namespace YEJI_AW_Client
 
         private void SetDefaultOrgSelection()
         {
+            if (!string.IsNullOrWhiteSpace(managerOrgPath))
+            {
+                string targetText = NormalizeOrg(managerOrgPath);
+                var matchByText = orgCombo.Items.Cast<object>()
+                    .Select((item, idx) => (item, idx))
+                    .FirstOrDefault(tuple => tuple.item is ComboItem ci &&
+                        string.Equals(NormalizeOrg(ci.Text), targetText, StringComparison.OrdinalIgnoreCase));
+
+                if (matchByText.item is ComboItem)
+                {
+                    orgCombo.SelectedIndex = matchByText.idx;
+                    return;
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(managerDefaultOrgCode))
             {
                 string target = NormalizeOrg(managerDefaultOrgCode);
@@ -582,7 +602,13 @@ namespace YEJI_AW_Client
                     // orgValue가 ALL일 때만 덮어쓰거나, 동일 경로일 때 설정
                     if (string.Equals(orgValue, "ALL", StringComparison.OrdinalIgnoreCase) || MatchesOrganization(el, orgValue))
                     {
-                        managerDefaultOrgCode = NormalizeOrg(path);
+                        var normalizedPath = NormalizeOrg(path);
+                        if (string.IsNullOrWhiteSpace(managerOrgPath))
+                        {
+                            managerOrgPath = normalizedPath;
+                        }
+
+                        managerDefaultOrgCode = normalizedPath;
                         return true;
                     }
 
@@ -874,6 +900,9 @@ namespace YEJI_AW_Client
             public string Catcode { get; set; } = string.Empty;
             public string Catcode2 { get; set; } = string.Empty;
             public string Catcode3 { get; set; } = string.Empty;
+            public string Catname { get; set; } = string.Empty;
+            public string Catname2 { get; set; } = string.Empty;
+            public string Catname3 { get; set; } = string.Empty;
         }
 
         private class Manager
