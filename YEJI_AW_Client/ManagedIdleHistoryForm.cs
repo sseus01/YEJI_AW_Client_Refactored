@@ -262,19 +262,56 @@ namespace YEJI_AW_Client
 
         private void SetDefaultOrgSelection()
         {
+#if DEBUG
+            DebugLog("SetDefaultOrgSelection 시작", $"managerDefaultOrgCode={managerDefaultOrgCode}, 콤보박스 항목 수={orgCombo.Items.Count}");
+#endif
             if (!string.IsNullOrWhiteSpace(managerDefaultOrgCode))
             {
                 string target = NormalizeOrg(managerDefaultOrgCode);
-                var match = orgCombo.Items.Cast<object>()
+#if DEBUG
+                DebugLog("조직 선택 대상", $"target={target}");
+                for (int i = 0; i < orgCombo.Items.Count; i++)
+                {
+                    if (orgCombo.Items[i] is ComboItem ci)
+                    {
+                        DebugLog($"콤보박스 항목 [{i}]", $"Text={ci.Text}, Value={ci.Value}");
+                    }
+                }
+#endif
+
+                // 먼저 정확히 일치하는 항목 찾기
+                var exactMatch = orgCombo.Items.Cast<object>()
+                    .Select((item, idx) => (item, idx))
+                    .FirstOrDefault(tuple => tuple.item is ComboItem ci &&
+                      (string.Equals(NormalizeOrg(ci.Value), target, StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(NormalizeOrg(ci.Text), target, StringComparison.OrdinalIgnoreCase)));
+
+                if (exactMatch.item is ComboItem exactCi)
+                {
+#if DEBUG
+                    DebugLog("정확한 일치 발견", $"idx={exactMatch.idx}, Text={exactCi.Text}, Value={exactCi.Value}");
+#endif
+                    orgCombo.SelectedIndex = exactMatch.idx;
+                    return;
+                }
+
+                // 정확히 일치하는 항목이 없으면 부분 일치 시도
+                var partialMatch = orgCombo.Items.Cast<object>()
                     .Select((item, idx) => (item, idx))
                     .FirstOrDefault(tuple => tuple.item is ComboItem ci &&
                       (IsOrgMatch(ci.Value, target) || IsOrgMatch(ci.Text, target)));
 
-                if (match.item is ComboItem)
+                if (partialMatch.item is ComboItem partialCi)
                 {
-                    orgCombo.SelectedIndex = match.idx;
+#if DEBUG
+                    DebugLog("부분 일치 발견", $"idx={partialMatch.idx}, Text={partialCi.Text}, Value={partialCi.Value}");
+#endif
+                    orgCombo.SelectedIndex = partialMatch.idx;
                     return;
                 }
+#if DEBUG
+                DebugLog("일치하는 조직 없음", "기본값으로 설정");
+#endif
             }
 
             orgCombo.SelectedIndex = orgCombo.Items.Count > 0 ? 0 : -1;
