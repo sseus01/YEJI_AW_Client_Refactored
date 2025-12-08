@@ -23,6 +23,10 @@ namespace YEJI_AW_Client
         private readonly Button btnReject = new();
         private readonly Button btnClose = new();
         private readonly Label lblStatus = new();
+        private readonly Label lblStartDate = new();
+        private readonly Label lblEndDate = new();
+        private readonly DateTimePicker startPicker = new();
+        private readonly DateTimePicker endPicker = new();
 
         private BindingList<ManagerNotificationRow> currentItems = new();
 
@@ -42,42 +46,40 @@ namespace YEJI_AW_Client
         private void BuildLayout()
         {
             Text = "연장 근무 승인 요청";
-            ClientSize = new System.Drawing.Size(940, 520);
+            ClientSize = new System.Drawing.Size(940, 560);
             StartPosition = FormStartPosition.CenterParent;
 
-            dgvNotifications.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            dgvNotifications.Location = new System.Drawing.Point(12, 50);
-            dgvNotifications.Size = new System.Drawing.Size(916, 420);
-            dgvNotifications.ReadOnly = true;
-            dgvNotifications.AllowUserToAddRows = false;
-            dgvNotifications.AllowUserToDeleteRows = false;
-            dgvNotifications.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            dgvNotifications.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            dgvNotifications.MultiSelect = false;
-            dgvNotifications.DataBindingComplete += (s, e) =>
-            {
-                HideInternalColumns();
-                // 데이터 바인딩 후 첫 행 자동 선택 및 버튼 상태 갱신
-                if (dgvNotifications.Rows.Count > 0)
-                {
-                    dgvNotifications.ClearSelection();
-                    dgvNotifications.Rows[0].Selected = true;
-                    dgvNotifications.CurrentCell = dgvNotifications.Rows[0].Cells[0];
-                }
-                UpdateButtons();
-            };
-            dgvNotifications.SelectionChanged += (s, e) => UpdateButtons();
+            // 조회 기간 선택 UI
+            lblStartDate.Text = "시작일";
+            lblStartDate.AutoSize = true;
+            lblStartDate.Location = new System.Drawing.Point(12, 16);
 
-            btnRefresh.Text = "새로고침";
-            btnRefresh.Location = new System.Drawing.Point(12, 12);
+            startPicker.Format = DateTimePickerFormat.Custom;
+            startPicker.CustomFormat = "yyyy-MM-dd";
+            startPicker.Width = 110;
+            startPicker.Location = new System.Drawing.Point(56, 12);
+            startPicker.Value = DateTime.Today.AddDays(-7);
+
+            lblEndDate.Text = "종료일";
+            lblEndDate.AutoSize = true;
+            lblEndDate.Location = new System.Drawing.Point(176, 16);
+
+            endPicker.Format = DateTimePickerFormat.Custom;
+            endPicker.CustomFormat = "yyyy-MM-dd";
+            endPicker.Width = 110;
+            endPicker.Location = new System.Drawing.Point(220, 12);
+            endPicker.Value = DateTime.Today;
+
+            btnRefresh.Text = "조회";
+            btnRefresh.Location = new System.Drawing.Point(340, 11);
             btnRefresh.Click += async (s, e) => await RefreshNotificationsAsync();
 
             btnApprove.Text = "승인";
-            btnApprove.Location = new System.Drawing.Point(100, 12);
+            btnApprove.Location = new System.Drawing.Point(420, 12);
             btnApprove.Click += async (s, e) => await UpdateSelectedStatusAsync("APPROVED");
 
             btnReject.Text = "반려";
-            btnReject.Location = new System.Drawing.Point(188, 12);
+            btnReject.Location = new System.Drawing.Point(500, 12);
             btnReject.Click += async (s, e) => await UpdateSelectedStatusAsync("REJECTED");
 
             btnClose.Text = "닫기";
@@ -90,7 +92,29 @@ namespace YEJI_AW_Client
             lblStatus.Location = new System.Drawing.Point(560, 18);
             lblStatus.Size = new System.Drawing.Size(285, 15);
 
-            Controls.AddRange(new Control[] { dgvNotifications, btnRefresh, btnApprove, btnReject, btnClose, lblStatus });
+            dgvNotifications.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            dgvNotifications.Location = new System.Drawing.Point(12, 50);
+            dgvNotifications.Size = new System.Drawing.Size(916, 490);
+            dgvNotifications.ReadOnly = true;
+            dgvNotifications.AllowUserToAddRows = false;
+            dgvNotifications.AllowUserToDeleteRows = false;
+            dgvNotifications.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            dgvNotifications.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            dgvNotifications.MultiSelect = false;
+            dgvNotifications.DataBindingComplete += (s, e) =>
+            {
+                HideInternalColumns();
+                if (dgvNotifications.Rows.Count > 0)
+                {
+                    dgvNotifications.ClearSelection();
+                    dgvNotifications.Rows[0].Selected = true;
+                    dgvNotifications.CurrentCell = dgvNotifications.Rows[0].Cells[0];
+                }
+                UpdateButtons();
+            };
+            dgvNotifications.SelectionChanged += (s, e) => UpdateButtons();
+
+            Controls.AddRange(new Control[] { lblStartDate, startPicker, lblEndDate, endPicker, btnRefresh, btnApprove, btnReject, btnClose, lblStatus, dgvNotifications });
         }
 
         private async void ManagerNotificationListForm_Load(object? sender, EventArgs e)
@@ -111,19 +135,31 @@ namespace YEJI_AW_Client
             try
             {
                 var notifications = await FetchNotificationsAsync();
-                var newIds = notifications.Where(n => string.Equals(n.NotificationStatus, "NEW", StringComparison.OrdinalIgnoreCase))
-                                          .Select(n => n.NotificationId)
-                                          .Where(id => !string.IsNullOrWhiteSpace(id))
-                                          .ToList();
+
+                // 조회 기간 필터 적용 (WorkDate 기반)
+                DateTime from = startPicker.Value.Date;
+                DateTime to = endPicker.Value.Date;
+                var filtered = notifications.Where(n =>
+                {
+                    if (DateTime.TryParse(n.WorkDate, out var d))
+                    {
+                        return d.Date >= from && d.Date <= to;
+                    }
+                    return true; // 파싱 실패 시 표시
+                }).ToList();
+
+                var newIds = filtered.Where(n => string.Equals(n.NotificationStatus, "NEW", StringComparison.OrdinalIgnoreCase))
+                                      .Select(n => n.NotificationId)
+                                      .Where(id => !string.IsNullOrWhiteSpace(id))
+                                      .ToList();
                 if (newIds.Count > 0)
                 {
                     await MarkNotificationsViewedAsync(newIds);
                 }
 
-                currentItems = new BindingList<ManagerNotificationRow>(notifications);
+                currentItems = new BindingList<ManagerNotificationRow>(filtered);
                 dgvNotifications.DataSource = currentItems;
 
-                // 목록이 있으면 첫 행을 자동 선택하여 버튼 활성화가 되도록 처리
                 if (dgvNotifications.Rows.Count > 0)
                 {
                     dgvNotifications.ClearSelection();
@@ -131,7 +167,7 @@ namespace YEJI_AW_Client
                     dgvNotifications.CurrentCell = dgvNotifications.Rows[0].Cells[0];
                 }
 
-                lblStatus.Text = $"총 {notifications.Count}건";
+                lblStatus.Text = $"총 {filtered.Count}건";
             }
             catch (Exception ex)
             {
@@ -150,9 +186,11 @@ namespace YEJI_AW_Client
             if (dgvNotifications.CurrentRow?.DataBoundItem is ManagerNotificationRow row)
             {
                 bool hasValidRequest = !string.IsNullOrWhiteSpace(row.RequestId);
-                bool canModify = CanModifyRequest(row.RawRequestStatus);
-                btnApprove.Enabled = hasValidRequest && canModify;
-                btnReject.Enabled = hasValidRequest && canModify;
+                string status = (row.RawRequestStatus ?? string.Empty).Trim().ToUpperInvariant();
+                bool approveEnabled = hasValidRequest && (status == "PENDING" || status == "REJECTED" || string.IsNullOrWhiteSpace(status));
+                bool rejectEnabled = hasValidRequest && (status == "PENDING" || status == "APPROVED" || string.IsNullOrWhiteSpace(status));
+                btnApprove.Enabled = approveEnabled;
+                btnReject.Enabled = rejectEnabled;
             }
             else
             {
