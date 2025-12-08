@@ -490,8 +490,23 @@ namespace YEJI_AW_Client
                     return;
                 }
 
+                // 성공 시 현재 목록에서 해당 행을 즉시 업데이트하여 리스트에서 사라지지 않도록 처리
+                var target = currentItems.FirstOrDefault(x => string.Equals(x.RequestId, requestId, StringComparison.OrdinalIgnoreCase));
+                if (target != null)
+                {
+                    target.RawRequestStatus = status;
+                    target.RequestStatus = TranslateStatus(status);
+                    // 신청자 이름이 사라지는 문제 방지: 값이 비어있으면 기존 값을 유지
+                    if (string.IsNullOrWhiteSpace(target.EmployeeName))
+                    {
+                        // 서버 응답으로 대체 값이 없으므로 그대로 유지 (target 이미 바인딩됨)
+                    }
+                }
+                dgvNotifications.Refresh();
+
                 MessageBox.Show("처리가 완료되었습니다.");
-                await RefreshNotificationsAsync();
+                // 전체 새로고침은 생략하여 항목이 사라지지 않게 함
+                // await RefreshNotificationsAsync();
             }
             catch (Exception ex)
             {
