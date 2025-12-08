@@ -18,6 +18,8 @@ namespace YEJI_AW_Client
         private TextBox txtReason = new TextBox();
         private Button btnSubmit = new Button();
 
+        private TimeSpan? _pendingStartTimeOverride = null; // 추가 신청 시 기존 종료 시각 이후로 시작
+
         public OvertimeRequestForm(string serverBaseUrl, HttpClient httpClient, string employeeId, Func<DateTime> currentTimeProvider)
         {
             this.serverBaseUrl = serverBaseUrl;
@@ -122,21 +124,99 @@ namespace YEJI_AW_Client
                 return;
             }
 
+            // 사유 필수 입력
+            var reasonText = txtReason.Text.Trim();
+            if (string.IsNullOrWhiteSpace(reasonText))
+            {
+                MessageBox.Show("사유를 입력해주세요.", "입력 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtReason.Focus();
+                return;
+            }
+
+            // 기존 신청과 겹치는지 확인 (같은 날짜의 최대 종료 시각과 비교)
+            try
+            {
+                string date = dtpWorkDate.Value.ToString("yyyy-MM-dd");
+                string url = $"{serverBaseUrl}/api/overtime-requests?employeeId={Uri.EscapeDataString(employeeId)}&startDate={date}&endDate={date}";
+                string json = await httpClient.GetStringAsync(url);
+
+                TimeSpan ParseTime(string s)
+                {
+                    return TimeSpan.TryParse(s, out var t) ? t : TimeSpan.Zero;
+                }
+
+                TimeSpan newEnd = TimeSpan.Parse(dtpEndTime.Value.ToString("HH:mm"));
+                TimeSpan maxExistingEnd = TimeSpan.Zero;
+                TimeSpan newStartForAdditional = new TimeSpan(17, 30, 0);
+
+                using (var doc = JsonDocument.Parse(json))
+                {
+                    var root = doc.RootElement;
+                    IEnumerable<JsonElement> Enumerate(JsonElement el)
+                    {
+                        if (el.ValueKind == JsonValueKind.Array) return el.EnumerateArray();
+                        if (el.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.Array) return dataEl.EnumerateArray();
+                        if (el.TryGetProperty("items", out var itemsEl) && itemsEl.ValueKind == JsonValueKind.Array) return itemsEl.EnumerateArray();
+                        return Array.Empty<JsonElement>();
+                    }
+
+                    foreach (var item in Enumerate(root))
+                    {
+                        var startStr = item.TryGetProperty("startTime", out var st) ? st.ToString() :
+                                       item.TryGetProperty("start_time", out var st2) ? st2.ToString() : "17:30";
+                        var endStr = item.TryGetProperty("endTime", out var et) ? et.ToString() :
+                                     item.TryGetProperty("end_time", out var et2) ? et2.ToString() : string.Empty;
+                        var startTs = ParseTime(startStr);
+                        var endTs = ParseTime(endStr);
+                        if (endTs > maxExistingEnd)
+                        {
+                            maxExistingEnd = endTs;
+                            newStartForAdditional = endTs; // 추가 신청은 기존 종료 이후부터 시작
+                        }
+                    }
+                }
+
+                if (maxExistingEnd >= newEnd)
+                {
+                    MessageBox.Show("해당 날짜의 연장 시간은 이미 신청되었습니다.", "중복 신청", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                else if (maxExistingEnd > TimeSpan.Zero && newEnd > maxExistingEnd)
+                {
+                    var added = newEnd - maxExistingEnd;
+                    var confirm = MessageBox.Show($"이미 신청한 시간을 제외한 {added.Hours:D2}:{added.Minutes:D2} 만큼 추가 신청됩니다. 계속 진행하시겠습니까?",
+                        "추가 신청", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (confirm != DialogResult.Yes)
+                    {
+                        return;
+                    }
+
+                    // 추가 시간은 신규 등록: 시작 시각을 기존 종료 시각으로 설정
+                    _pendingStartTimeOverride = newStartForAdditional;
+                }
+            }
+            catch
+            {
+                // 겹침 확인 실패 시 계속 진행 (서버에서 검증)
+            }
+
             btnSubmit.Enabled = false;
-                  
+
+            var startOverride = _pendingStartTimeOverride.HasValue ? _pendingStartTimeOverride.Value.ToString(@"hh\:mm") : "17:30";
+
             var payload = new
             {
                 employeeId = employeeId,
                 workDate = dtpWorkDate.Value.ToString("yyyy-MM-dd"),
-                startTime = "17:30",
+                startTime = startOverride,
                 endTime = dtpEndTime.Value.ToString("HH:mm"),
-                reason = txtReason.Text.Trim()
+                reason = reasonText
             };
 
             try
             {
-                string json = JsonSerializer.Serialize(payload);
-                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                string jsonOut = JsonSerializer.Serialize(payload);
+                using var content = new StringContent(jsonOut, Encoding.UTF8, "application/json");
                 using var response = await httpClient.PostAsync($"{serverBaseUrl}/api/overtime-requests", content);
 
                 if (!response.IsSuccessStatusCode)
