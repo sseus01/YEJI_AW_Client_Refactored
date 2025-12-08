@@ -139,9 +139,9 @@ namespace YEJI_AW_Client
             if (dgvNotifications.CurrentRow?.DataBoundItem is ManagerNotificationRow row)
             {
                 bool hasValidRequest = !string.IsNullOrWhiteSpace(row.RequestId);
-                bool isPending = IsPending(row.RequestStatus);
-                btnApprove.Enabled = hasValidRequest && isPending;
-                btnReject.Enabled = hasValidRequest && isPending;
+                bool canModify = CanModifyRequest(row.RequestStatus);
+                btnApprove.Enabled = hasValidRequest && canModify;
+                btnReject.Enabled = hasValidRequest && canModify;
             }
             else
             {
@@ -412,9 +412,22 @@ namespace YEJI_AW_Client
             return textBox.Text.Trim();
         }
 
-        private static bool IsPending(string requestStatus)
+        private const string STATUS_APPROVED = "APPROVED";
+        private const string STATUS_REJECTED = "REJECTED";
+
+        private static bool CanModifyRequest(string requestStatus)
         {
-            return string.Equals(requestStatus?.Trim(), "PENDING", StringComparison.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(requestStatus))
+            {
+                // 상태가 없으면 수정 가능한 것으로 간주 (기본값)
+                // 서버에서 상태가 아직 설정되지 않았거나, API 응답 형식이 다를 수 있음
+                // 실제 승인/반려 시 서버에서 권한 검증이 이루어지므로 UX를 위해 버튼 활성화
+                return true;
+            }
+
+            string normalized = requestStatus.Trim().ToUpperInvariant();
+            // 이미 승인되었거나 반려된 요청은 수정 불가
+            return normalized != STATUS_APPROVED && normalized != STATUS_REJECTED;
         }
     }
 
