@@ -16,16 +16,13 @@ namespace YEJI_AW_Client
         private readonly string employeeId;
 
         private Label lblStartDate = new Label();
-        private TextBox txtStartDate = new TextBox();
+        private DateTimePicker dtpStartDate = new DateTimePicker();
         private Label lblEndDate = new Label();
-        private TextBox txtEndDate = new TextBox();
+        private DateTimePicker dtpEndDate = new DateTimePicker();
         private Button btnSearch = new Button();
         private Button btnDelete = new Button();
         private DataGridView dgvRequests = new DataGridView();
         private Label lblStatus = new Label();
-        private Label lblEmployeeLabel = new Label();
-        private TextBox txtEmployeeId = new TextBox();
-        private Label lblDateHint = new Label();
 
         private BindingList<OvertimeRequestEntry> currentItems = new BindingList<OvertimeRequestEntry>();
 
@@ -36,7 +33,6 @@ namespace YEJI_AW_Client
             this.employeeId = employeeId;
 
             BuildLayout();
-            txtEmployeeId.Text = employeeId;
 
             Load += OvertimeRequestListForm_Load;
         }
@@ -46,35 +42,39 @@ namespace YEJI_AW_Client
             Text = "연장 근무 신청 결과";
             ClientSize = new Size(820, 480);
 
-            lblStartDate.Text = "시작일(선택)";
+            lblStartDate.Text = "시작일";
             lblStartDate.AutoSize = true;
             lblStartDate.Location = new Point(12, 15);
 
-            txtStartDate.Location = new Point(93, 12);
-            txtStartDate.Size = new Size(110, 23);
-            txtStartDate.PlaceholderText = "YYYY-MM-DD";
+            dtpStartDate.Format = DateTimePickerFormat.Custom;
+            dtpStartDate.CustomFormat = "yyyy-MM-dd";
+            dtpStartDate.Location = new Point(73, 12);
+            dtpStartDate.Size = new Size(120, 23);
+            dtpStartDate.Value = DateTime.Today; // 기본 오늘
 
-            lblEndDate.Text = "종료일(선택)";
+            lblEndDate.Text = "종료일";
             lblEndDate.AutoSize = true;
-            lblEndDate.Location = new Point(209, 15);
+            lblEndDate.Location = new Point(199, 15);
 
-            txtEndDate.Location = new Point(290, 12);
-            txtEndDate.Size = new Size(110, 23);
-            txtEndDate.PlaceholderText = "YYYY-MM-DD";
+            dtpEndDate.Format = DateTimePickerFormat.Custom;
+            dtpEndDate.CustomFormat = "yyyy-MM-dd";
+            dtpEndDate.Location = new Point(256, 12);
+            dtpEndDate.Size = new Size(120, 23);
+            dtpEndDate.Value = DateTime.Today; // 기본 오늘
 
             btnSearch.Text = "조회";
-            btnSearch.Location = new Point(406, 11);
+            btnSearch.Location = new Point(382, 11);
             btnSearch.Size = new Size(75, 25);
             btnSearch.Click += BtnSearch_Click;
 
-            btnDelete.Text = "삭제";
-            btnDelete.Location = new Point(487, 11);
+            btnDelete.Text = "취소"; // 삭제 → 취소
+            btnDelete.Location = new Point(463, 11);
             btnDelete.Size = new Size(75, 25);
             btnDelete.Enabled = false;
             btnDelete.Click += BtnDelete_Click;
 
-            dgvRequests.Location = new Point(12, 72);
-            dgvRequests.Size = new Size(796, 396);
+            dgvRequests.Location = new Point(12, 50);
+            dgvRequests.Size = new Size(796, 418);
             dgvRequests.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             dgvRequests.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             dgvRequests.ReadOnly = true;
@@ -91,23 +91,10 @@ namespace YEJI_AW_Client
             lblStatus.Size = new Size(223, 15);
             lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 
-            lblEmployeeLabel.Text = "사번(필수)";
-            lblEmployeeLabel.AutoSize = true;
-            lblEmployeeLabel.Location = new Point(12, 44);
-
-            txtEmployeeId.Location = new Point(93, 41);
-            txtEmployeeId.ReadOnly = true;
-            txtEmployeeId.Size = new Size(110, 23);
-
-            lblDateHint.Text = "입력하지 않으면 최근 30일을 기본으로 조회합니다.";
-            lblDateHint.AutoSize = true;
-            lblDateHint.Font = new Font("Segoe UI", 8.25F, FontStyle.Regular, GraphicsUnit.Point);
-            lblDateHint.Location = new Point(209, 45);
-
             Controls.AddRange(new Control[]
             {
-                lblStartDate, txtStartDate, lblEndDate, txtEndDate, btnSearch, btnDelete,
-                dgvRequests, lblStatus, lblEmployeeLabel, txtEmployeeId, lblDateHint
+                lblStartDate, dtpStartDate, lblEndDate, dtpEndDate, btnSearch, btnDelete,
+                dgvRequests, lblStatus
             });
         }
 
@@ -130,15 +117,9 @@ namespace YEJI_AW_Client
             {
                 var urlBuilder = new StringBuilder($"{serverBaseUrl}/api/overtime-requests?employeeId={Uri.EscapeDataString(employeeId)}");
 
-                if (!string.IsNullOrWhiteSpace(txtStartDate.Text))
-                {
-                    urlBuilder.Append($"&startDate={Uri.EscapeDataString(txtStartDate.Text.Trim())}");
-                }
-
-                if (!string.IsNullOrWhiteSpace(txtEndDate.Text))
-                {
-                    urlBuilder.Append($"&endDate={Uri.EscapeDataString(txtEndDate.Text.Trim())}");
-                }
+                // 날짜 피커 값 항상 포함
+                urlBuilder.Append($"&startDate={Uri.EscapeDataString(dtpStartDate.Value.ToString("yyyy-MM-dd"))}");
+                urlBuilder.Append($"&endDate={Uri.EscapeDataString(dtpEndDate.Value.ToString("yyyy-MM-dd"))}");
 
                 using var response = await httpClient.GetAsync(urlBuilder.ToString());
                 if (!response.IsSuccessStatusCode)
@@ -213,7 +194,7 @@ namespace YEJI_AW_Client
         {
             if (dgvRequests.CurrentRow?.DataBoundItem is not OvertimeRequestEntry entry)
             {
-                MessageBox.Show("삭제할 신청을 선택해주세요.");
+                MessageBox.Show("취소할 신청을 선택해주세요.");
                 return;
             }
 
@@ -225,11 +206,11 @@ namespace YEJI_AW_Client
 
             if (!IsPending(entry.RawStatus))
             {
-                MessageBox.Show("접수 중 상태의 신청만 삭제할 수 있습니다.");
+                MessageBox.Show("접수 중 상태의 신청만 취소할 수 있습니다.");
                 return;
             }
 
-            var confirm = MessageBox.Show("선택한 신청을 삭제하시겠습니까?", "삭제 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            var confirm = MessageBox.Show("선택한 신청을 취소하시겠습니까?", "취소 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (confirm != DialogResult.Yes)
             {
                 return;
@@ -238,14 +219,14 @@ namespace YEJI_AW_Client
             btnDelete.Enabled = false;
             try
             {
-            var request = new HttpRequestMessage(HttpMethod.Delete,
-                 $"{serverBaseUrl}/api/overtime-requests/{Uri.EscapeDataString(entry.Id)}")
-            {
-                 Content = new StringContent(
-                    JsonSerializer.Serialize(new { employeeId }),
-                    Encoding.UTF8,
-                    "application/json")
-                };
+                var request = new HttpRequestMessage(HttpMethod.Delete,
+                     $"{serverBaseUrl}/api/overtime-requests/{Uri.EscapeDataString(entry.Id)}")
+                {
+                     Content = new StringContent(
+                        JsonSerializer.Serialize(new { employeeId }),
+                        Encoding.UTF8,
+                        "application/json")
+                    };
 
                 using var response = await httpClient.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
@@ -255,12 +236,12 @@ namespace YEJI_AW_Client
                     return;
                 }
 
-                MessageBox.Show("신청 건이 삭제되었습니다.");
+                MessageBox.Show("신청 건이 취소되었습니다.");
                 await RefreshListAsync();
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"삭제 중 오류가 발생했습니다.\\n{ex.Message}");
+                MessageBox.Show($"취소 중 오류가 발생했습니다.\\n{ex.Message}");
             }
             finally
             {
@@ -379,7 +360,8 @@ namespace YEJI_AW_Client
                 Reason = GetString("reason", "description", "comment"),
                 RawStatus = rawStatus,
                 Status = TranslateStatus(rawStatus),
-                Approver = GetString("approver", "approverName", "approvedBy", "approver_name"),
+                // 승인자 이름: 다양한 필드명 지원 (approvedBy, approved_by, approver, approverName, approver_name)
+                Approver = GetString("approver", "approverName", "approvedBy", "approved_by", "approver_name"),
                 SubmittedAt = NormalizeDateTime(GetString("createdAt", "created_at", "submittedAt", "submitted_at", "requestDate", "request_date")),
                 Id = GetString("id", "requestId", "request_id")
             };
