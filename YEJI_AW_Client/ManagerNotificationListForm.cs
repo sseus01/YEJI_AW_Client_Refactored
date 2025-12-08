@@ -136,9 +136,18 @@ namespace YEJI_AW_Client
 
         private void UpdateButtons()
         {
-            var hasSelection = dgvNotifications.CurrentRow?.DataBoundItem is ManagerNotificationRow row && !string.IsNullOrWhiteSpace(row.RequestId);
-            btnApprove.Enabled = hasSelection;
-            btnReject.Enabled = hasSelection;
+            if (dgvNotifications.CurrentRow?.DataBoundItem is ManagerNotificationRow row)
+            {
+                bool hasValidRequest = !string.IsNullOrWhiteSpace(row.RequestId);
+                bool isPending = IsPending(row.RequestStatus);
+                btnApprove.Enabled = hasValidRequest && isPending;
+                btnReject.Enabled = hasValidRequest && isPending;
+            }
+            else
+            {
+                btnApprove.Enabled = false;
+                btnReject.Enabled = false;
+            }
         }
 
         private void HideInternalColumns()
@@ -401,6 +410,11 @@ namespace YEJI_AW_Client
             }
 
             return textBox.Text.Trim();
+        }
+
+        private static bool IsPending(string requestStatus)
+        {
+            return string.Equals(requestStatus?.Trim(), "PENDING", StringComparison.OrdinalIgnoreCase);
         }
     }
 
