@@ -223,9 +223,66 @@ namespace YEJI_AW_Client
                 list = ParseResponse(json);
             }
 
-            // 당일 승인/반려된 요청도 표시되도록 당일 연장근무 요청을 병합
-            var todayList = await FetchTodayRequestsAsync();
-            list = MergeRequests(list, todayList);
+            // 선택한 기간의 연장근무 요청을 병합 (승인/반려 포함하여 전체 표시)
+            var rangeRequests = await FetchRequestsForRangeAsync(startPicker.Value.Date, endPicker.Value.Date);
+            list = MergeRequests(list, rangeRequests);
+            return list;
+        }
+
+        private async System.Threading.Tasks.Task<List<ManagerNotificationRow>> FetchRequestsForRangeAsync(DateTime fromDate, DateTime toDate)
+        {
+            var list = new List<ManagerNotificationRow>();
+            try
+            {
+                string url = $"{serverBaseUrl}/api/overtime-requests?startDate={fromDate:yyyy-MM-dd}&endDate={toDate:yyyy-MM-dd}&managerId={Uri.EscapeDataString(managerEmployeeId)}";
+                using var response = await httpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return list;
+                }
+
+                string json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                IEnumerable<JsonElement> Enumerate(JsonElement el)
+                {
+                    if (el.ValueKind == JsonValueKind.Array) return el.EnumerateArray();
+                    if (el.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.Array) return dataEl.EnumerateArray();
+                    if (el.TryGetProperty("items", out var itemsEl) && itemsEl.ValueKind == JsonValueKind.Array) return itemsEl.EnumerateArray();
+                    return Array.Empty<JsonElement>();
+                }
+
+                string NormalizeDate(string value) => DateTime.TryParse(value, out var dt) ? dt.ToString("yyyy-MM-dd") : value;
+                string NormalizeDateTime(string value) => DateTime.TryParse(value, out var dt) ? dt.ToString("yyyy-MM-dd HH:mm") : value;
+
+                foreach (var e in Enumerate(root))
+                {
+                    var row = new ManagerNotificationRow
+                    {
+                        NotificationId = string.Empty,
+                        NotificationStatus = string.Empty,
+                        RequestId = GetString(e, "id", "requestId", "request_id", "reqId", "req_id"),
+                        EmployeeId = GetString(e, "employeeId", "employee_id", "empNo", "emp_no"),
+                        EmployeeName = GetString(e, "employeeName", "employee_name", "empName", "emp_name"),
+                        WorkDate = NormalizeDate(GetString(e, "workDate", "work_date", "date")),
+                        StartTime = GetString(e, "startTime", "start_time", "start"),
+                        EndTime = GetString(e, "endTime", "end_time", "end"),
+                        Reason = GetString(e, "reason", "description", "comment"),
+                        RawRequestStatus = GetString(e, "status", "approvalStatus", "approval_status", "result"),
+                        RequestStatus = TranslateStatus(GetString(e, "status", "approvalStatus", "approval_status", "result")),
+                        SubmittedAt = NormalizeDateTime(GetString(e, "createdAt", "created_at", "submittedAt", "submitted_at")),
+                    };
+                    if (!string.IsNullOrWhiteSpace(row.RequestId))
+                    {
+                        list.Add(row);
+                    }
+                }
+            }
+            catch
+            {
+                // 무시
+            }
             return list;
         }
 
@@ -242,6 +299,15 @@ namespace YEJI_AW_Client
                     existing.Reason = string.IsNullOrWhiteSpace(r.Reason) ? existing.Reason : r.Reason;
                     existing.StartTime = string.IsNullOrWhiteSpace(r.StartTime) ? existing.StartTime : r.StartTime;
                     existing.EndTime = string.IsNullOrWhiteSpace(r.EndTime) ? existing.EndTime : r.EndTime;
+                    // 이름/사번이 비어있는 경우 요청 데이터로 보강
+                    if (string.IsNullOrWhiteSpace(existing.EmployeeName) && !string.IsNullOrWhiteSpace(r.EmployeeName))
+                    {
+                        existing.EmployeeName = r.EmployeeName;
+                    }
+                    if (string.IsNullOrWhiteSpace(existing.EmployeeId) && !string.IsNullOrWhiteSpace(r.EmployeeId))
+                    {
+                        existing.EmployeeId = r.EmployeeId;
+                    }
                 }
                 else
                 {
@@ -496,10 +562,14 @@ namespace YEJI_AW_Client
                 {
                     target.RawRequestStatus = status;
                     target.RequestStatus = TranslateStatus(status);
-                    // 신청자 이름이 사라지는 문제 방지: 값이 비어있으면 기존 값을 유지
+                    // 승인/반려 후 이름이 빈칸으로 표시되는 문제 방지: 이름/사번이 비었으면 그대로 유지
                     if (string.IsNullOrWhiteSpace(target.EmployeeName))
                     {
-                        // 서버 응답으로 대체 값이 없으므로 그대로 유지 (target 이미 바인딩됨)
+                        target.EmployeeName = target.EmployeeName; // no-op to emphasize keep
+                    }
+                    if (string.IsNullOrWhiteSpace(target.EmployeeId))
+                    {
+                        target.EmployeeId = target.EmployeeId; // no-op
                     }
                 }
                 dgvNotifications.Refresh();
