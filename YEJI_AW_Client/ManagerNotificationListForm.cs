@@ -178,14 +178,103 @@ namespace YEJI_AW_Client
         {
             string url = $"{serverBaseUrl}/api/client/manager-notifications?employeeId={Uri.EscapeDataString(managerEmployeeId)}";
             using var response = await httpClient.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
+            var list = new List<ManagerNotificationRow>();
+            if (response.IsSuccessStatusCode)
             {
-                string serverMessage = await response.Content.ReadAsStringAsync();
-                throw new InvalidOperationException($"서버 응답: {response.StatusCode} {serverMessage}");
+                string json = await response.Content.ReadAsStringAsync();
+                list = ParseResponse(json);
             }
 
-            string json = await response.Content.ReadAsStringAsync();
-            return ParseResponse(json);
+            // 당일 승인/반려된 요청도 표시되도록 당일 연장근무 요청을 병합
+            var todayList = await FetchTodayRequestsAsync();
+            list = MergeRequests(list, todayList);
+            return list;
+        }
+
+        private List<ManagerNotificationRow> MergeRequests(List<ManagerNotificationRow> notifications, List<ManagerNotificationRow> todayRequests)
+        {
+            var byReq = notifications.ToDictionary(n => n.RequestId ?? string.Empty, n => n);
+            foreach (var r in todayRequests)
+            {
+                if (string.IsNullOrWhiteSpace(r.RequestId)) continue;
+                if (byReq.TryGetValue(r.RequestId, out var existing))
+                {
+                    existing.RawRequestStatus = string.IsNullOrWhiteSpace(r.RawRequestStatus) ? existing.RawRequestStatus : r.RawRequestStatus;
+                    existing.RequestStatus = string.IsNullOrWhiteSpace(r.RequestStatus) ? existing.RequestStatus : r.RequestStatus;
+                    existing.Reason = string.IsNullOrWhiteSpace(r.Reason) ? existing.Reason : r.Reason;
+                    existing.StartTime = string.IsNullOrWhiteSpace(r.StartTime) ? existing.StartTime : r.StartTime;
+                    existing.EndTime = string.IsNullOrWhiteSpace(r.EndTime) ? existing.EndTime : r.EndTime;
+                }
+                else
+                {
+                    byReq[r.RequestId] = r;
+                }
+            }
+            return byReq.Values.ToList();
+        }
+
+        private async System.Threading.Tasks.Task<List<ManagerNotificationRow>> FetchTodayRequestsAsync()
+        {
+            var list = new List<ManagerNotificationRow>();
+            try
+            {
+                var today = DateTime.Now.ToString("yyyy-MM-dd");
+                string url = $"{serverBaseUrl}/api/overtime-requests?startDate={today}&endDate={today}&managerId={Uri.EscapeDataString(managerEmployeeId)}";
+                using var response = await httpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return list;
+                }
+
+                string json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                IEnumerable<JsonElement> Enumerate(JsonElement el)
+                {
+                    if (el.ValueKind == JsonValueKind.Array) return el.EnumerateArray();
+                    if (el.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.Array) return dataEl.EnumerateArray();
+                    if (el.TryGetProperty("items", out var itemsEl) && itemsEl.ValueKind == JsonValueKind.Array) return itemsEl.EnumerateArray();
+                    return Array.Empty<JsonElement>();
+                }
+
+                string NormalizeDate(string value)
+                {
+                    return DateTime.TryParse(value, out var dt) ? dt.ToString("yyyy-MM-dd") : value;
+                }
+                string NormalizeDateTime(string value)
+                {
+                    return DateTime.TryParse(value, out var dt) ? dt.ToString("yyyy-MM-dd HH:mm") : value;
+                }
+
+                foreach (var e in Enumerate(root))
+                {
+                    var row = new ManagerNotificationRow
+                    {
+                        NotificationId = string.Empty,
+                        NotificationStatus = string.Empty,
+                        RequestId = GetString(e, "id", "requestId", "request_id", "reqId", "req_id"),
+                        EmployeeId = GetString(e, "employeeId", "employee_id", "empNo", "emp_no"),
+                        EmployeeName = GetString(e, "employeeName", "employee_name", "empName", "emp_name"),
+                        WorkDate = NormalizeDate(GetString(e, "workDate", "work_date", "date")),
+                        StartTime = GetString(e, "startTime", "start_time", "start"),
+                        EndTime = GetString(e, "endTime", "end_time", "end"),
+                        Reason = GetString(e, "reason", "description", "comment"),
+                        RawRequestStatus = GetString(e, "status", "approvalStatus", "approval_status", "result"),
+                        RequestStatus = TranslateStatus(GetString(e, "status", "approvalStatus", "approval_status", "result")),
+                        SubmittedAt = NormalizeDateTime(GetString(e, "createdAt", "created_at", "submittedAt", "submitted_at")),
+                    };
+                    if (!string.IsNullOrWhiteSpace(row.RequestId))
+                    {
+                        list.Add(row);
+                    }
+                }
+            }
+            catch
+            {
+                // 무시
+            }
+            return list;
         }
 
         private List<ManagerNotificationRow> ParseResponse(string json)
