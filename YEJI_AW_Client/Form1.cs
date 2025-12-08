@@ -103,6 +103,7 @@ namespace YEJI_AW_Client
         private DateTime idleKeyDate;
         private bool hasShownPcOffAlert = false;
         private DateTime? pcOffAlertTargetTime;
+        private readonly TimeSpan employeeOvertimeCheckInterval = TimeSpan.FromSeconds(60);
         private DateTime pcOffKeyDate;
         private DateTime? scheduledShutdownTime;
         private bool? cachedShutdownExempt;
@@ -122,6 +123,10 @@ namespace YEJI_AW_Client
         private ToolStripMenuItem? managerNotificationsMenuItem;
 
         private bool isManagerUser;
+
+        private Timer? employeeOvertimeStatusTimer;
+        private bool isCheckingEmployeeOvertimeStatus;
+        private Dictionary<string, string> lastKnownOvertimeStatuses = new();
 
 #if DEBUG
         private DateTime? debugBaseDateTime;
@@ -247,6 +252,10 @@ namespace YEJI_AW_Client
             updateCheckTimer.Interval = (int)TimeSpan.FromHours(1).TotalMilliseconds; // 1시간 간격
             updateCheckTimer.Tick += async (s, e) => await CheckClientUpdateAsync();
 
+            employeeOvertimeStatusTimer = new Timer();
+            employeeOvertimeStatusTimer.Interval = (int)employeeOvertimeCheckInterval.TotalMilliseconds;
+            employeeOvertimeStatusTimer.Tick += async (s, e) => await CheckEmployeeOvertimeStatusAsync();
+
             this.Load += async (s, e) =>
             {
                 this.Hide();
@@ -258,6 +267,7 @@ namespace YEJI_AW_Client
                 await CheckAfterHoursOnStartupAsync();
                 heartbeatTimer.Start();
                 updateCheckTimer.Start();
+                employeeOvertimeStatusTimer.Start();
             };
 
             InitializeTrayMenu();
@@ -1811,6 +1821,7 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("디버그: 현재 시각 모의 해제", null, OnDebugClearCurrentTime);
             trayMenu.Items.Add("디버그: 관리자 진단", null, async (s, e) => await CheckAndAddManagerMenuAsync());
             trayMenu.Items.Add("디버그: 연장근무 관리자 알림 확인", null, async (s, e) => await CheckManagerNotificationsAsync(forceShowPopup: true));
+            trayMenu.Items.Add("디버그: 연장근무 직원 알림 확인", null, async (s, e) => await CheckEmployeeOvertimeStatusAsync());
 #endif
 
             notifyIcon.ContextMenuStrip = trayMenu;
@@ -2107,6 +2118,132 @@ namespace YEJI_AW_Client
                 MessageBox.Show($"연장 근무 알림을 여는 중 오류가 발생했습니다.\n{ex.Message}");
 #endif
             }
+        }
+
+        // 직원의 연장근무 신청 상태 확인 (승인/반려 시 알림)
+        private async Task CheckEmployeeOvertimeStatusAsync()
+        {
+            if (isCheckingEmployeeOvertimeStatus)
+                return;
+
+            if (string.IsNullOrWhiteSpace(employeeId))
+                return;
+
+            isCheckingEmployeeOvertimeStatus = true;
+            try
+            {
+                var overtimeRequests = await FetchEmployeeOvertimeRequestsAsync();
+
+                foreach (var request in overtimeRequests)
+                {
+                    if (string.IsNullOrWhiteSpace(request.Id))
+                        continue;
+
+                    string currentStatus = request.Status?.Trim().ToUpperInvariant() ?? string.Empty;
+
+                    // 이전에 알려진 상태가 있는지 확인
+                    if (lastKnownOvertimeStatuses.TryGetValue(request.Id, out var previousStatus))
+                    {
+                        // 상태가 변경되었고, 승인 또는 반려 상태로 변경된 경우에만 알림
+                        if (!string.Equals(previousStatus, currentStatus, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (currentStatus == "APPROVED" || currentStatus == "REJECTED")
+                            {
+                                ShowEmployeeOvertimeStatusNotification(request);
+                            }
+                            // 상태 업데이트 (PENDING으로 돌아가는 경우도 처리)
+                            lastKnownOvertimeStatuses[request.Id] = currentStatus;
+                        }
+                    }
+                    else
+                    {
+                        // 처음 본 요청인 경우, 상태만 기록하고 알림은 표시하지 않음
+                        // (프로그램 시작 시 이미 처리된 요청에 대해 알림을 피하기 위함)
+                        lastKnownOvertimeStatuses[request.Id] = currentStatus;
+                    }
+                }
+            }
+            catch
+            {
+                // 조용히 무시 (폴링 실패 시 재시도)
+            }
+            finally
+            {
+                isCheckingEmployeeOvertimeStatus = false;
+            }
+        }
+
+        private async Task<List<EmployeeOvertimeRequest>> FetchEmployeeOvertimeRequestsAsync()
+        {
+            var list = new List<EmployeeOvertimeRequest>();
+
+            try
+            {
+                // 최근 7일간의 연장근무 신청 조회
+                var today = GetCurrentDateTime();
+                var startDate = today.AddDays(-7).ToString("yyyy-MM-dd");
+                var endDate = today.ToString("yyyy-MM-dd");
+
+                string url = $"{ServerBaseUrl}/api/overtime-requests?employeeId={Uri.EscapeDataString(employeeId)}&startDate={startDate}&endDate={endDate}";
+                using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return list;
+                }
+
+                string json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                foreach (var item in EnumerateArrayLike(root))
+                {
+                    var request = new EmployeeOvertimeRequest
+                    {
+                        Id = GetElementString(item, "id", "requestId", "request_id"),
+                        WorkDate = GetElementString(item, "workDate", "work_date", "date"),
+                        StartTime = GetElementString(item, "startTime", "start_time", "start"),
+                        EndTime = GetElementString(item, "endTime", "end_time", "end"),
+                        Reason = GetElementString(item, "reason", "description", "comment"),
+                        Status = GetElementString(item, "status", "approvalStatus", "approval_status", "result"),
+                        Approver = GetElementString(item, "approver", "approverName", "approvedBy", "approved_by", "approver_name")
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(request.Id))
+                    {
+                        list.Add(request);
+                    }
+                }
+            }
+            catch
+            {
+                // 실패 시 빈 리스트 반환
+            }
+
+            return list;
+        }
+
+        private void ShowEmployeeOvertimeStatusNotification(EmployeeOvertimeRequest request)
+        {
+            if (notifyIcon == null)
+                return;
+
+            string statusText = request.Status?.Trim().ToUpperInvariant() == "APPROVED" ? "승인" : "반려";
+            string approverInfo = !string.IsNullOrWhiteSpace(request.Approver) ? $" (승인자: {request.Approver})" : string.Empty;
+
+            notifyIcon.BalloonTipTitle = $"연장근무 신청 {statusText}";
+            notifyIcon.BalloonTipText = $"{request.WorkDate} {request.StartTime}~{request.EndTime}\n{request.Reason}{approverInfo}";
+            notifyIcon.ShowBalloonTip(5000);
+        }
+
+        private class EmployeeOvertimeRequest
+        {
+            public string Id { get; set; } = string.Empty;
+            public string WorkDate { get; set; } = string.Empty;
+            public string StartTime { get; set; } = string.Empty;
+            public string EndTime { get; set; } = string.Empty;
+            public string Reason { get; set; } = string.Empty;
+            public string Status { get; set; } = string.Empty;
+            public string Approver { get; set; } = string.Empty;
         }
 
 #if DEBUG
