@@ -54,7 +54,18 @@ namespace YEJI_AW_Client
             dgvNotifications.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             dgvNotifications.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             dgvNotifications.MultiSelect = false;
-            dgvNotifications.DataBindingComplete += (s, e) => HideInternalColumns();
+            dgvNotifications.DataBindingComplete += (s, e) =>
+            {
+                HideInternalColumns();
+                // 데이터 바인딩 후 첫 행 자동 선택 및 버튼 상태 갱신
+                if (dgvNotifications.Rows.Count > 0)
+                {
+                    dgvNotifications.ClearSelection();
+                    dgvNotifications.Rows[0].Selected = true;
+                    dgvNotifications.CurrentCell = dgvNotifications.Rows[0].Cells[0];
+                }
+                UpdateButtons();
+            };
             dgvNotifications.SelectionChanged += (s, e) => UpdateButtons();
 
             btnRefresh.Text = "새로고침";
@@ -139,7 +150,7 @@ namespace YEJI_AW_Client
             if (dgvNotifications.CurrentRow?.DataBoundItem is ManagerNotificationRow row)
             {
                 bool hasValidRequest = !string.IsNullOrWhiteSpace(row.RequestId);
-                bool canModify = CanModifyRequest(row.RequestStatus);
+                bool canModify = CanModifyRequest(row.RawRequestStatus);
                 btnApprove.Enabled = hasValidRequest && canModify;
                 btnReject.Enabled = hasValidRequest && canModify;
             }
@@ -219,18 +230,34 @@ namespace YEJI_AW_Client
                     return value;
                 }
 
+                string rawStatus = GetString(overtime, "status", "approvalStatus", "approval_status", "result");
+
+                // RequestId 우선 후보: 중첩 객체(overtime)에서 id 파싱
+                var parsedRequestId = GetString(
+                    overtime,
+                    "id", "_id", "requestId", "request_id", "reqId", "req_id", "overtimeRequestId", "overtime_request_id");
+                // fallback: 루트(알림 객체)에서도 다양한 필드명으로 시도
+                if (string.IsNullOrWhiteSpace(parsedRequestId))
+                {
+                    parsedRequestId = GetString(
+                        item,
+                        "overtimeRequestId", "overtime_request_id",
+                        "requestId", "request_id", "reqId", "req_id");
+                }
+
                 list.Add(new ManagerNotificationRow
                 {
                     NotificationId = GetString(item, "id", "_id", "notificationId"),
                     NotificationStatus = GetString(item, "notificationStatus", "status", "state"),
-                    RequestId = GetString(overtime, "id", "_id", "requestId", "request_id"),
+                    RequestId = parsedRequestId,
                     EmployeeId = GetString(overtime, "employeeId", "employee_id", "empNo", "emp_no"),
                     EmployeeName = GetString(overtime, "employeeName", "employee_name", "empName", "emp_name"),
                     WorkDate = NormalizeDate(GetString(overtime, "workDate", "work_date", "date")),
                     StartTime = GetString(overtime, "startTime", "start_time", "start"),
                     EndTime = GetString(overtime, "endTime", "end_time", "end"),
                     Reason = GetString(overtime, "reason", "description", "comment"),
-                    RequestStatus = GetString(overtime, "status", "approvalStatus", "approval_status", "result"),
+                    RawRequestStatus = rawStatus,
+                    RequestStatus = TranslateStatus(rawStatus),
                     SubmittedAt = NormalizeDateTime(GetString(overtime, "createdAt", "created_at", "submittedAt", "submitted_at")),
                 });
             }
@@ -238,41 +265,32 @@ namespace YEJI_AW_Client
             return list;
         }
 
-        private static string GetString(JsonElement element, params string[] names)
+        private static string TranslateStatus(string rawStatus)
         {
-            foreach (var name in names)
+            if (string.IsNullOrWhiteSpace(rawStatus)) return string.Empty;
+            string normalized = rawStatus.Trim().ToUpperInvariant();
+            return normalized switch
             {
-                if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var prop) && prop.ValueKind != JsonValueKind.Null)
-                {
-                    if (prop.ValueKind == JsonValueKind.String)
-                        return prop.GetString() ?? string.Empty;
-                    return prop.ToString();
-                }
-            }
-            return string.Empty;
+                "PENDING" => "승인대기",
+                "APPROVED" => "승인",
+                "REJECTED" => "반려",
+                _ => rawStatus
+            };
         }
 
-        private static IEnumerable<JsonElement> EnumerateArrayLike(JsonElement element)
+        private static bool CanModifyRequest(string requestStatus)
         {
-            if (element.ValueKind == JsonValueKind.Array)
+            if (string.IsNullOrWhiteSpace(requestStatus))
             {
-                foreach (var child in element.EnumerateArray())
-                {
-                    yield return child;
-                }
-                yield break;
+                // 상태가 없으면 수정 가능한 것으로 간주 (기본값)
+                // 서버에서 상태가 아직 설정되지 않았거나, API 응답 형식이 다를 수 있음
+                // 실제 승인/반려 시 서버에서 권한 검증이 이루어지므로 UX를 위해 버튼 활성화
+                return true;
             }
 
-            if (element.ValueKind == JsonValueKind.Object)
-            {
-                if (element.TryGetProperty("data", out var dataProp) && dataProp.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var child in dataProp.EnumerateArray())
-                    {
-                        yield return child;
-                    }
-                }
-            }
+            string normalized = requestStatus.Trim().ToUpperInvariant();
+            // 이미 승인되었거나 반려된 요청은 수정 불가
+            return normalized != STATUS_APPROVED && normalized != STATUS_REJECTED;
         }
 
         private async System.Threading.Tasks.Task MarkNotificationsViewedAsync(IEnumerable<string> ids)
@@ -415,19 +433,41 @@ namespace YEJI_AW_Client
         private const string STATUS_APPROVED = "APPROVED";
         private const string STATUS_REJECTED = "REJECTED";
 
-        private static bool CanModifyRequest(string requestStatus)
+        private static string GetString(JsonElement element, params string[] names)
         {
-            if (string.IsNullOrWhiteSpace(requestStatus))
+            foreach (var name in names)
             {
-                // 상태가 없으면 수정 가능한 것으로 간주 (기본값)
-                // 서버에서 상태가 아직 설정되지 않았거나, API 응답 형식이 다를 수 있음
-                // 실제 승인/반려 시 서버에서 권한 검증이 이루어지므로 UX를 위해 버튼 활성화
-                return true;
+                if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var prop) && prop.ValueKind != JsonValueKind.Null)
+                {
+                    if (prop.ValueKind == JsonValueKind.String)
+                        return prop.GetString() ?? string.Empty;
+                    return prop.ToString();
+                }
+            }
+            return string.Empty;
+        }
+
+        private static IEnumerable<JsonElement> EnumerateArrayLike(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var child in element.EnumerateArray())
+                {
+                    yield return child;
+                }
+                yield break;
             }
 
-            string normalized = requestStatus.Trim().ToUpperInvariant();
-            // 이미 승인되었거나 반려된 요청은 수정 불가
-            return normalized != STATUS_APPROVED && normalized != STATUS_REJECTED;
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                if (element.TryGetProperty("data", out var dataProp) && dataProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var child in dataProp.EnumerateArray())
+                    {
+                        yield return child;
+                    }
+                }
+            }
         }
     }
 
@@ -456,6 +496,9 @@ namespace YEJI_AW_Client
 
         [DisplayName("사유")]
         public string Reason { get; set; } = string.Empty;
+
+        [Browsable(false)]
+        public string RawRequestStatus { get; set; } = string.Empty;
 
         [DisplayName("신청 상태")]
         public string RequestStatus { get; set; } = string.Empty;
