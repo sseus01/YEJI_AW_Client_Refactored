@@ -39,7 +39,7 @@ namespace YEJI_AW_Client
 
         private void BuildLayout()
         {
-            Text = "연장 근무 신청 결과";
+            Text = "연장근무신청 확인";
             ClientSize = new Size(820, 480);
 
             lblStartDate.Text = "시작일";
@@ -363,6 +363,7 @@ namespace YEJI_AW_Client
                 // 승인자 이름: 다양한 필드명 지원 (approvedBy, approved_by, approver, approverName, approver_name)
                 Approver = GetString("approver", "approverName", "approvedBy", "approved_by", "approver_name"),
                 SubmittedAt = NormalizeDateTime(GetString("createdAt", "created_at", "submittedAt", "submitted_at", "requestDate", "request_date")),
+                ApprovedAt = NormalizeDateTime(GetString("approvedAt", "approved_at", "approvalDate", "approval_date", "processedAt", "processed_at")),
                 Id = GetString("id", "requestId", "request_id")
             };
         }
@@ -418,5 +419,8 @@ namespace YEJI_AW_Client
 
         [DisplayName("신청 일시")]
         public string SubmittedAt { get; set; } = string.Empty;
+
+        [DisplayName("승인 일시")]
+        public string ApprovedAt { get; set; } = string.Empty;
     }
 }

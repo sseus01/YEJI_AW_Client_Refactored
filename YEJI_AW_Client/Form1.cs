@@ -1804,7 +1804,7 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("자리비움 이력 보기", null, OnViewIdleHistory);
             trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
             trayMenu.Items.Add("연장 근무 신청", null, OnOpenOvertimeRequest);
-            trayMenu.Items.Add("연장 근무 결과 확인", null, OnOpenOvertimeStatus);
+            trayMenu.Items.Add("연장근무신청 확인", null, OnOpenOvertimeStatus);
 
             managerNotificationsMenuItem = new ToolStripMenuItem("연장 근무 승인 요청 확인", null, async (s, e) => await OpenManagerNotificationsAsync(null))
             {
@@ -2247,7 +2247,7 @@ namespace YEJI_AW_Client
             // WorkDate도 한국 시간으로 표시
             string workDateKst = FormatDateToKst(request.WorkDate);
 
-            notifyIcon.BalloonTipTitle = $"연장근무 신청 {statusText}";
+            notifyIcon.BalloonTipTitle = $"[{statusText}] 연장근무신청";
             notifyIcon.BalloonTipText = $"{workDateKst} {startTimeKst}~{endTimeKst}\n{request.Reason}{approverInfo}";
             notifyIcon.ShowBalloonTip(5000);
         }

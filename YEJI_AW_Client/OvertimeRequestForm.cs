@@ -162,6 +162,18 @@ namespace YEJI_AW_Client
 
                     foreach (var item in Enumerate(root))
                     {
+                        // 상태 확인: 반려된 신청은 중복 체크에서 제외
+                        var statusStr = item.TryGetProperty("status", out var statusProp) ? statusProp.ToString() :
+                                        item.TryGetProperty("approvalStatus", out var statusProp2) ? statusProp2.ToString() :
+                                        item.TryGetProperty("approval_status", out var statusProp3) ? statusProp3.ToString() :
+                                        item.TryGetProperty("result", out var statusProp4) ? statusProp4.ToString() : string.Empty;
+
+                        // 반려(REJECTED) 상태인 경우 무시
+                        if (string.Equals(statusStr?.Trim(), "REJECTED", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
                         var startStr = item.TryGetProperty("startTime", out var st) ? st.ToString() :
                                        item.TryGetProperty("start_time", out var st2) ? st2.ToString() : "17:30";
                         var endStr = item.TryGetProperty("endTime", out var et) ? et.ToString() :
