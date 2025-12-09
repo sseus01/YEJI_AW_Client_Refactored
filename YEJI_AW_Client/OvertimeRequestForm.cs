@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
+using System.Drawing;
 
 namespace YEJI_AW_Client
 {
@@ -32,72 +33,152 @@ namespace YEJI_AW_Client
 
         private void InitializeComponents()
         {
-            this.Text = "연장 근무 신청";
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.ClientSize = new System.Drawing.Size(400, 220);
-            this.MinimumSize = new System.Drawing.Size(400, 220);
-            this.Load += (_, __) => CenterForm();
+            Text = "연장 근무 신청";
+            StartPosition = FormStartPosition.CenterScreen;
+            ClientSize = new Size(600, 440);
+            MinimumSize = new Size(600, 440);
+            BackColor = Color.White;
+            Load += (_, __) => CenterForm();
 
-            var lblWorkDate = new Label { Text = "근무일", AutoSize = true };
-            dtpWorkDate.Format = DateTimePickerFormat.Custom;
-            dtpWorkDate.CustomFormat = "yyyy-MM-dd";
-            dtpWorkDate.Value = currentTimeProvider().Date;
-
-            var lblEndTime = new Label { Text = "연장 종료 시각 (HH:mm)", AutoSize = true };
-            dtpEndTime.Format = DateTimePickerFormat.Custom;
-            dtpEndTime.CustomFormat = "HH:mm";
-            dtpEndTime.ShowUpDown = true;
-            dtpEndTime.Width = 120;
-            dtpEndTime.Value = currentTimeProvider().Date.AddHours(18);
-
-            var lblReason = new Label { Text = "사유", AutoSize = true };
-            txtReason.Multiline = true;
-            txtReason.Height = 80;
-            txtReason.MinimumSize = new System.Drawing.Size(200, 50);
-            txtReason.ScrollBars = ScrollBars.Vertical;
-            txtReason.Dock = DockStyle.Fill;
-
-            btnSubmit.Text = "신청";
-            btnSubmit.Width = 100;
-            btnSubmit.Anchor = AnchorStyles.None;
-            btnSubmit.Click += async (s, e) => await SubmitAsync();
-
-            var buttonPanel = new FlowLayoutPanel
+            // 헤더 영역
+            var headerPanel = new Panel
             {
-                FlowDirection = FlowDirection.RightToLeft,
-                Dock = DockStyle.Fill,
-                Padding = new Padding(0),
-                AutoSize = true
+                Dock = DockStyle.Top,
+                Height = 72,
+                BackColor = Color.FromArgb(245, 247, 250)
             };
-            buttonPanel.Controls.Add(btnSubmit);          
+            var headerIcon = new PictureBox
+            {
+                Width = 48,
+                Height = 48,
+                Location = new Point(18, 12),
+                Image = SystemIcons.Information.ToBitmap(),
+                SizeMode = PictureBoxSizeMode.StretchImage
+            };
+            var headerTitle = new Label
+            {
+                Text = "연장 근무 신청",
+                Font = new Font(FontFamily.GenericSansSerif, 14, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(74, 16)
+            };
+            var headerSubtitle = new Label
+            {
+                Text = "업무 종료 이후 필요 시간을 신청해주세요",
+                Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Regular),
+                ForeColor = Color.DimGray,
+                AutoSize = true,
+                Location = new Point(76, 42)
+            };
+            headerPanel.Controls.Add(headerIcon);
+            headerPanel.Controls.Add(headerTitle);
+            headerPanel.Controls.Add(headerSubtitle);
+
+            // 입력 그룹
+            var group = new GroupBox
+            {
+                Dock = DockStyle.Fill,
+                Text = "신청 정보",
+                Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Bold)
+            };
 
             var layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount = 4,
-                Padding = new Padding(12),
+                RowCount = 5,
+                Padding = new Padding(16),
                 AutoSize = false
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 68));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
+
+            var lblWorkDate = new Label { Text = "근무일", AutoSize = true, Anchor = AnchorStyles.Left };
+            dtpWorkDate = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Custom,
+                CustomFormat = "yyyy-MM-dd",
+                Value = currentTimeProvider().Date,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                Width = 160
+            };
+
+            var lblEndTime = new Label { Text = "연장 종료 시각", AutoSize = true, Anchor = AnchorStyles.Left };
+            dtpEndTime = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Custom,
+                CustomFormat = "HH:mm",
+                ShowUpDown = true,
+                Width = 120,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                Value = currentTimeProvider().Date.AddHours(18)
+            };
+
+            var lblReason = new Label { Text = "사유 (필수)", AutoSize = true, Anchor = AnchorStyles.Left };
+            txtReason = new TextBox
+            {
+                Multiline = true,
+                Height = 180,
+                MinimumSize = new Size(200, 120),
+                ScrollBars = ScrollBars.Vertical,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                PlaceholderText = "사유를 입력하세요(필수)",
+                Margin = new Padding(0, 4, 0, 4)
+            };
+
+            var buttonPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.RightToLeft,
+                Dock = DockStyle.Fill,
+                Padding = new Padding(0, 12, 0, 12),
+                AutoSize = true
+            };
+
+            btnSubmit = new Button
+            {
+                Text = "신청",
+                Width = 120,
+                Height = 36,
+                BackColor = Color.FromArgb(33, 150, 243),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Margin = new Padding(8, 0, 0, 0)
+            };
+            btnSubmit.FlatAppearance.BorderSize = 0;
+            btnSubmit.Click += async (s, e) => await SubmitAsync();
+
+            var btnCancel = new Button
+            {
+                Text = "닫기",
+                Width = 96,
+                Height = 36,
+                Margin = new Padding(8, 0, 0, 0)
+            };
+            btnCancel.Click += (s, e) => Close();
+
+            buttonPanel.Controls.Add(btnSubmit);
+            buttonPanel.Controls.Add(btnCancel);
 
             layout.Controls.Add(lblWorkDate, 0, 0);
             layout.Controls.Add(dtpWorkDate, 1, 0);
             layout.Controls.Add(lblEndTime, 0, 1);
             layout.Controls.Add(dtpEndTime, 1, 1);
             layout.Controls.Add(lblReason, 0, 2);
-            layout.Controls.Add(txtReason, 1, 2);
-            layout.Controls.Add(buttonPanel, 0, 3);
-
-            layout.SetColumnSpan(txtReason, 1);
+            layout.Controls.Add(txtReason, 0, 3);
+            layout.SetColumnSpan(txtReason, 2);
+            layout.Controls.Add(buttonPanel, 0, 4);
             layout.SetColumnSpan(buttonPanel, 2);
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
 
-            this.Controls.Add(layout);
+            group.Controls.Add(layout);
+
+            Controls.Clear();
+            Controls.Add(group);
+            Controls.Add(headerPanel);
         }
 
         private void CenterForm()

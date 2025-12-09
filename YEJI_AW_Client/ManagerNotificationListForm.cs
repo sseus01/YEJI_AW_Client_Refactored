@@ -627,7 +627,9 @@ namespace YEJI_AW_Client
                 StartPosition = FormStartPosition.CenterParent,
                 ClientSize = new System.Drawing.Size(380, 160),
                 MinimizeBox = false,
-                MaximizeBox = false
+                MaximizeBox = false,
+                TopMost = true,               // 리스트창보다 위에 표시
+                ShowInTaskbar = false
             };
 
             var label = new Label
@@ -662,6 +664,10 @@ namespace YEJI_AW_Client
             form.Controls.AddRange(new Control[] { label, textBox, btnOk, btnCancel });
             form.AcceptButton = btnOk;
             form.CancelButton = btnCancel;
+
+            // 부모 활성화 후 다이얼로그를 맨 위로 띄움
+            this.Activate();
+            form.BringToFront();
 
             var result = form.ShowDialog(this);
             if (result != DialogResult.OK)
