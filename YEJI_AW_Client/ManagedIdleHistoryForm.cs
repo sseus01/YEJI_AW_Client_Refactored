@@ -53,6 +53,17 @@ namespace YEJI_AW_Client
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
 
+            // 애플리케이션 아이콘 설정
+            try
+            {
+                var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TrayIcon_Y_orange.ico");
+                if (System.IO.File.Exists(iconPath))
+                {
+                    Icon = new Icon(iconPath);
+                }
+            }
+            catch { /* 아이콘 로드 실패 시 무시 */ }
+
             orgCombo = new ComboBox { Left = 12, Top = 12, Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
             userCombo = new ComboBox { Left = 280, Top = 12, Width = 240, DropDownStyle = ComboBoxStyle.DropDownList };
 

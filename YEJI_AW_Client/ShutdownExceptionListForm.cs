@@ -42,6 +42,17 @@ namespace YEJI_AW_Client
             Text = "PC 종료 예외 조회";
             ClientSize = new Size(800, 450);
 
+            // 애플리케이션 아이콘 설정
+            try
+            {
+                var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TrayIcon_Y_orange.ico");
+                if (System.IO.File.Exists(iconPath))
+                {
+                    Icon = new Icon(iconPath);
+                }
+            }
+            catch { /* 아이콘 로드 실패 시 무시 */ }
+
             lblStartDate.Text = "시작일(선택)";
             lblStartDate.AutoSize = true;
             lblStartDate.Location = new Point(12, 15);

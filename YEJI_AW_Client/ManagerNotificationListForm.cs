@@ -50,6 +50,17 @@ namespace YEJI_AW_Client
             StartPosition = FormStartPosition.Manual;
             TopMost = true;
 
+            // 애플리케이션 아이콘 설정
+            try
+            {
+                var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TrayIcon_Y_orange.ico");
+                if (System.IO.File.Exists(iconPath))
+                {
+                    Icon = new System.Drawing.Icon(iconPath);
+                }
+            }
+            catch { /* 아이콘 로드 실패 시 무시 */ }
+
             // 조회 기간 선택 UI
             lblStartDate.Text = "시작일";
             lblStartDate.AutoSize = true;
