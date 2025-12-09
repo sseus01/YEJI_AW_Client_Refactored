@@ -2119,7 +2119,7 @@ namespace YEJI_AW_Client
                 lastManagerNotificationAlertTime = DateTime.MinValue;
 
                 using var form = new ManagerNotificationListForm(ServerBaseUrl, HttpClient, employeeId, employeeName, notificationIdsToMark);
-                form.ShowDialog();
+                ShowDialogManaged(form);
                 await CheckManagerNotificationsAsync();
             }
             catch (Exception ex)
@@ -2389,33 +2389,22 @@ namespace YEJI_AW_Client
             if (isManagerUser)
             {
                 using var form = new ManagedIdleHistoryForm(ServerBaseUrl, HttpClient, employeeId);
-                form.ShowDialog();
+                ShowDialogManaged(form);
                 return;
             }
 
             // 일반 사용자: 본인 이력, 기본 당일
-            var history = await FetchIdleHistoryForDateRangeAsync(employeeId, GetCurrentDate(), GetCurrentDate());
-            using IdleHistoryForm form2 = new IdleHistoryForm(history);
-            form2.ShowDialog();
+            _ = OpenIdleHistoryForUserAsync();
         }
 
-        private async Task<List<IdleEventData>> FetchIdleHistoryForDateRangeAsync(string targetEmpId, DateTime fromDate, DateTime toDate)
+        private async Task OpenIdleHistoryForUserAsync()
         {
-            try
-            {
-                var client = HttpClient;
-                string url = $"{ServerBaseUrl}/api/idle-events?employeeId={Uri.EscapeDataString(targetEmpId)}&startDate={fromDate:yyyy-MM-dd}&endDate={toDate:yyyy-MM-dd}";
-                string json = await client.GetStringAsync(url);
-                var history = JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions);
-                return history ?? new List<IdleEventData>();
-            }
-            catch
-            {
-                return new List<IdleEventData>();
-            }
+            var history = await FetchIdleHistoryForDateRangeAsync(employeeId, GetCurrentDate(), GetCurrentDate());
+            using var form2 = new IdleHistoryForm(history);
+            ShowDialogManaged(form2);
         }
 
-        private void OnEditUserInfo(object? sender, EventArgs e)
+        private async void OnEditUserInfo(object? sender, EventArgs e)
         {
             using UserInfoForm userInfoForm = new UserInfoForm();
             userInfoForm.SetUserInfo(employeeName, employeeId);
@@ -2445,229 +2434,47 @@ namespace YEJI_AW_Client
                 return;
             }
             using var form = new OvertimeRequestForm(ServerBaseUrl, HttpClient, employeeId, GetCurrentDateTime);
-            form.ShowDialog();
+            ShowDialogManaged(form);
         }
 
         private void OnOpenOvertimeStatus(object? sender, EventArgs e)
         {
             using var form = new OvertimeRequestListForm(ServerBaseUrl, HttpClient, employeeId);
-            form.ShowDialog();
+            ShowDialogManaged(form);
         }
 
-        // ===== 보강: 누락된 핸들러/메서드 구현 (기존 호출 시그니처 유지) =====
-
-        private async void OnDebugOpenIdleReason(object? sender, EventArgs e)
+        private void InitializeTrayMenu()
         {
-#if DEBUG
-            var now = GetCurrentDateTime();
-            await ShowIdleReasonPopupAsync(now.AddMinutes(-5), now);
-#endif
-        }
+            trayMenu = new ContextMenuStrip();
+            trayMenu.Items.Add("자리비움 이력 보기", null, OnViewIdleHistory);
+            trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
+            trayMenu.Items.Add("연장 근무 신청", null, OnOpenOvertimeRequest);
+            trayMenu.Items.Add("연장근무신청 확인", null, OnOpenOvertimeStatus);
 
-        private void OnDebugShowPcOffAlert(object? sender, EventArgs e)
-        {
-#if DEBUG
-            // 실제 알림창을 테스트로 띄우도록 변경
-            var now = GetCurrentDateTime();
-            var offTime = GetCurrentDate().Add(pcShutdownTime);
-            _ = ShowPcOffAlertAsync(now, offTime, triggeredAfterBoot: false, isFollowUpAlert: false);
-#endif
-        }
-
-        private void OnDebugOpenOvertimeRequest(object? sender, EventArgs e)
-        {
-#if DEBUG
-            OnOpenOvertimeRequest(sender, e);
-#endif
-        }
-
-        private void OnDebugOpenOvertimeStatus(object? sender, EventArgs e)
-        {
-#if DEBUG
-            OnOpenOvertimeStatus(sender, e);
-#endif
-        }
-
-        private void OnDebugOpenShutdownExceptions(object? sender, EventArgs e)
-        {
-#if DEBUG
-            using var form = new ShutdownExceptionListForm(ServerBaseUrl, HttpClient, employeeId);
-            form.ShowDialog();
-#endif
-        }
-
-        private void OnDebugSetCurrentTime(object? sender, EventArgs e)
-        {
-#if DEBUG
-            // 간단히 현재 시각을 입력받아 설정
-            var selected = PromptForDebugTime();
-            if (selected.HasValue)
+            managerNotificationsMenuItem = new ToolStripMenuItem("연장 근무 승인 요청 확인", null, async (s, e) => await OpenManagerNotificationsAsync(null))
             {
-                SetDebugCurrentTime(selected.Value);
-                MessageBox.Show($"모의 시각이 {selected.Value:yyyy-MM-dd HH:mm}으로 설정되었습니다.");
-            }
-#endif
-        }
-
-        private void OnDebugClearCurrentTime(object? sender, EventArgs e)
-        {
-#if DEBUG
-            ClearDebugCurrentTime();
-            MessageBox.Show("모의 시각 설정이 해제되었습니다.");
-#endif
-        }
-
-        private async void Form1_DebugKeyDown(object? sender, KeyEventArgs e)
-        {
-#if DEBUG
-            if (e.Control && e.Shift && e.KeyCode == Keys.R)
-            {
-                e.Handled = true;
-                var now = GetCurrentDateTime();
-                await ShowIdleReasonPopupAsync(now.AddMinutes(-5), now);
-            }
-#endif
-        }
-
-        private async Task<List<IdleEventData>> FetchIdleHistoryFromServerAsync()
-        {
-            try
-            {
-                var client = HttpClient;
-                string url = $"{ServerBaseUrl}/api/idle-events?employeeId={employeeId}";
-                string json = await client.GetStringAsync(url);
-                var history = JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions);
-                return history ?? new List<IdleEventData>();
-            }
-            catch
-            {
-#if DEBUG
-                MessageBox.Show("자리비움 이력을 가져오는데 실패했습니다.");
-#endif
-                return new List<IdleEventData>();
-            }
-        }
-
-        private List<IdleEventData> ParseIdleEventsFromJson(string json)
-        {
-            try
-            {
-                var list = JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions);
-                if (list != null) return list;
-            }
-            catch
-            {
-                // 무시하고 시도 계속
-            }
-
-            var result = new List<IdleEventData>();
-            try
-            {
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-                foreach (var item in EnumerateArrayLike(root))
-                {
-                    var e = new IdleEventData
-                    {
-                        Id = GetElementString(item, "id", "_id"),
-                        EmployeeId = GetElementString(item, "employeeId", "employee_id", "empNo", "emp_no"),
-                        EmployeeName = GetElementString(item, "employeeName", "employee_name", "empName", "emp_name"),
-                        ComputerName = GetElementString(item, "computerName", "computer_name", "pcName", "pc_name"),
-                        ComputerIP = GetElementString(item, "computerIp", "computer_ip", "ip"),
-                        IdleStartTime = GetElementString(item, "idleStartTime", "idle_start_time", "startTime", "start_time"),
-                        IdleEndTime = GetElementString(item, "idleEndTime", "idle_end_time", "endTime", "end_time"),
-                        ReasonCategory = GetElementString(item, "reasonCategory", "reason_category" , "category"),
-                        ReasonDetail = GetElementString(item, "reasonDetail", "reason_detail", "detail"),
-                        ReasonCode = GetElementString(item, "reasonCode", "reason_code"),
-                        ReasonLevel1 = GetElementString(item, "reasonLevel1", "reason_level1"),
-                        ReasonLevel2 = GetElementString(item, "reasonLevel2", "reason_level2"),
-                        ReasonLevel3 = GetElementString(item, "reasonLevel3", "reason_level3")
-                    };
-
-                    result.Add(e);
-                }
-            }
-            catch
-            {
-                // 파싱 실패 시 빈 리스트 반환
-            }
-
-            return result;
-        }
-
-        private string GetLocalIPAddress()
-        {
-            try
-            {
-                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
-                foreach (var ip in host.AddressList)
-                {
-                    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                        return ip.ToString();
-                }
-            }
-            catch { }
-            return "IP Not Found";
-        }
-
-        private DateTime? PromptForDebugTime()
-        {
-#if DEBUG
-            using var form = new Form
-            {
-                Text = "디버그용 현재 시각 설정",
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                StartPosition = FormStartPosition.CenterParent,
-                ClientSize = new Size(330, 140),
-                MinimizeBox = false,
-                MaximizeBox = false
+                Visible = false
             };
+            trayMenu.Items.Add(managerNotificationsMenuItem);
 
-            var label = new Label
-            {
-                AutoSize = true,
-                Text = "테스트용 기준 시각을 선택하세요.",
-                Location = new Point(12, 15)
-            };
-
-            var picker = new DateTimePicker
-            {
-                Format = DateTimePickerFormat.Custom,
-                CustomFormat = "yyyy-MM-dd HH:mm",
-                ShowUpDown = true,
-                Width = 200,
-                Location = new Point(12, 40),
-                Value = GetCurrentDateTime()
-            };
-
-            var okButton = new Button
-            {
-                Text = "확인",
-                DialogResult = DialogResult.OK,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-                Location = new Point(150, 90)
-            };
-
-            var cancelButton = new Button
-            {
-                Text = "취소",
-                DialogResult = DialogResult.Cancel,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-                Location = new Point(230, 90)
-            };
-
-            form.Controls.Add(label);
-            form.Controls.Add(picker);
-            form.Controls.Add(okButton);
-            form.Controls.Add(cancelButton);
-
-            form.AcceptButton = okButton;
-            form.CancelButton = cancelButton;
-
-            return form.ShowDialog(this) == DialogResult.OK ? picker.Value : null;
-#else
-            return null;
+#if DEBUG
+            trayMenu.Items.Add("디버그: 자리비움 사유 창 열기", null, OnDebugOpenIdleReason);
+            trayMenu.Items.Add("디버그: PC오프 알림 확인", null, OnDebugShowPcOffAlert);
+            trayMenu.Items.Add("디버그: 연장 근무 신청 창 열기", null, OnDebugOpenOvertimeRequest);
+            trayMenu.Items.Add("디버그: 연장 근무 결과 확인", null, OnDebugOpenOvertimeStatus);
+            trayMenu.Items.Add("디버그: PC 종료 예외 조회", null, OnDebugOpenShutdownExceptions);
+            trayMenu.Items.Add("디버그: 현재 시각 모의 설정", null, OnDebugSetCurrentTime);
+            trayMenu.Items.Add("디버그: 현재 시각 모의 해제", null, OnDebugClearCurrentTime);
+            trayMenu.Items.Add("디버그: 관리자 진단", null, async (s, e) => await CheckAndAddManagerMenuAsync());
+            trayMenu.Items.Add("디버그: 연장근무 관리자 알림 확인", null, async (s, e) => await CheckManagerNotificationsAsync(forceShowPopup: true));
+            trayMenu.Items.Add("디버그: 연장근무 직원 알림 확인", null, async (s, e) => await CheckEmployeeOvertimeStatusAsync());
 #endif
+
+            notifyIcon.ContextMenuStrip = trayMenu;
+            notifyIcon.Visible = true;
+
+            // 관리자 여부 비동기 확인: 관리자라면 관리용 메뉴 추가
+            _ = CheckAndAddManagerMenuAsync();
         }
     }
 
