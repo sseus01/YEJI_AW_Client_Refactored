@@ -40,8 +40,7 @@ namespace YEJI_AW_Client
         private void BuildLayout()
         {
             Text = "연장근무신청 확인";
-            ClientSize = new Size(820, 480);
-            TopMost = true;
+            ClientSize = new Size(820, 480);            
             StartPosition = FormStartPosition.Manual;
 
             lblStartDate.Text = "시작일";

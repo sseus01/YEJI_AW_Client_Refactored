@@ -2432,6 +2432,10 @@ namespace YEJI_AW_Client
             ClosePreviousTrayMenuForm();
             currentTrayMenuForm = form;
 
+            // 요청한 창을 최상단에 배치하여 뒤로 가려지는 문제를 방지합니다.
+            form.TopMost = true;
+            form.BringToFront();
+
             // 올바른 핸들러 타입으로 구독
             FormClosedEventHandler? formClosedHandler = null;
             formClosedHandler = (s, e) =>
