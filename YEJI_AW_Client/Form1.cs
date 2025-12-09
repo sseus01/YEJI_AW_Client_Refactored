@@ -2230,9 +2230,45 @@ namespace YEJI_AW_Client
             string statusText = request.Status?.Trim().ToUpperInvariant() == "APPROVED" ? "승인" : "반려";
             string approverInfo = !string.IsNullOrWhiteSpace(request.Approver) ? $" (승인자: {request.Approver})" : string.Empty;
 
+            // 시간을 한국 시간(KST)으로 표시
+            string startTimeKst = FormatTimeToKst(request.StartTime);
+            string endTimeKst = FormatTimeToKst(request.EndTime);
+
             notifyIcon.BalloonTipTitle = $"연장근무 신청 {statusText}";
-            notifyIcon.BalloonTipText = $"{request.WorkDate} {request.StartTime}~{request.EndTime}\n{request.Reason}{approverInfo}";
+            notifyIcon.BalloonTipText = $"{request.WorkDate} {startTimeKst}~{endTimeKst}\n{request.Reason}{approverInfo}";
             notifyIcon.ShowBalloonTip(5000);
+        }
+
+        private static string FormatTimeToKst(string? timeString)
+        {
+            if (string.IsNullOrWhiteSpace(timeString))
+                return string.Empty;
+
+            // 이미 HH:mm 형식인 경우 그대로 반환 (서버에서 KST로 저장된 경우)
+            if (TimeSpan.TryParse(timeString, out _))
+            {
+                return timeString;
+            }
+
+            // ISO 8601 datetime 형식인 경우 KST로 변환
+            if (DateTime.TryParse(timeString, out var dt))
+            {
+                try
+                {
+                    var koreaTz = TimeZoneInfo.FindSystemTimeZoneById("Korea Standard Time");
+                    var utcTime = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+                    var kstTime = TimeZoneInfo.ConvertTimeFromUtc(utcTime, koreaTz);
+                    return kstTime.ToString("HH:mm");
+                }
+                catch
+                {
+                    // Fallback: UTC+9 수동 변환
+                    var kstTime = dt.AddHours(9);
+                    return kstTime.ToString("HH:mm");
+                }
+            }
+
+            return timeString;
         }
 
         private class EmployeeOvertimeRequest
@@ -2245,6 +2281,8 @@ namespace YEJI_AW_Client
             public string Status { get; set; } = string.Empty;
             public string Approver { get; set; } = string.Empty;
         }
+
+
 
 #if DEBUG
         // 트레이에서 관리자 진단을 즉시 실행할 수 있는 디버그 메뉴 추가
