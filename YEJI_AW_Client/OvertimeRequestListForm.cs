@@ -42,6 +42,7 @@ namespace YEJI_AW_Client
             Text = "연장근무신청 확인";
             ClientSize = new Size(820, 480);
             TopMost = true;
+            StartPosition = FormStartPosition.Manual;
 
             lblStartDate.Text = "시작일";
             lblStartDate.AutoSize = true;
@@ -101,7 +102,25 @@ namespace YEJI_AW_Client
 
         private async void OvertimeRequestListForm_Load(object? sender, EventArgs e)
         {
+            // Position the form above the system tray
+            PositionFormNearTray();
             await RefreshListAsync();
+        }
+
+        private void PositionFormNearTray()
+        {
+            // Get the working area of the screen (excluding taskbar)
+            Rectangle workingArea = Screen.PrimaryScreen.WorkingArea;
+
+            // Position form in bottom-right corner, just above the taskbar
+            int x = workingArea.Right - Width - 10; // 10px margin from right edge
+            int y = workingArea.Bottom - Height - 10; // 10px margin from bottom edge
+
+            // Ensure the form stays within screen bounds
+            if (x < workingArea.Left) x = workingArea.Left;
+            if (y < workingArea.Top) y = workingArea.Top;
+
+            Location = new Point(x, y);
         }
 
         private async void BtnSearch_Click(object? sender, EventArgs e)

@@ -47,7 +47,7 @@ namespace YEJI_AW_Client
         {
             Text = "연장 근무 승인 요청";
             ClientSize = new System.Drawing.Size(940, 560);
-            StartPosition = FormStartPosition.CenterParent;
+            StartPosition = FormStartPosition.Manual;
             TopMost = true;
 
             // 조회 기간 선택 UI
@@ -120,12 +120,31 @@ namespace YEJI_AW_Client
 
         private async void ManagerNotificationListForm_Load(object? sender, EventArgs e)
         {
+            // Position the form above the system tray
+            PositionFormNearTray();
+
             if (initialNotificationsToMark.Count > 0)
             {
                 await MarkNotificationsViewedAsync(initialNotificationsToMark);
             }
 
             await RefreshNotificationsAsync();
+        }
+
+        private void PositionFormNearTray()
+        {
+            // Get the working area of the screen (excluding taskbar)
+            Rectangle workingArea = Screen.PrimaryScreen.WorkingArea;
+
+            // Position form in bottom-right corner, just above the taskbar
+            int x = workingArea.Right - Width - 10; // 10px margin from right edge
+            int y = workingArea.Bottom - Height - 10; // 10px margin from bottom edge
+
+            // Ensure the form stays within screen bounds
+            if (x < workingArea.Left) x = workingArea.Left;
+            if (y < workingArea.Top) y = workingArea.Top;
+
+            Location = new System.Drawing.Point(x, y);
         }
 
         private async System.Threading.Tasks.Task RefreshNotificationsAsync()
