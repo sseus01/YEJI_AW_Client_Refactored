@@ -41,6 +41,7 @@ namespace YEJI_AW_Client
         {
             Text = "연장근무신청 확인";
             ClientSize = new Size(820, 480);
+            TopMost = true;
 
             lblStartDate.Text = "시작일";
             lblStartDate.AutoSize = true;
@@ -136,6 +137,15 @@ namespace YEJI_AW_Client
                 };
 
                 var items = ParseResponse(json, jsonOptions);
+                // Sort by SubmittedAt in descending order (newest first)
+                items.Sort((a, b) =>
+                {
+                    if (DateTime.TryParse(a.SubmittedAt, out var dateA) && DateTime.TryParse(b.SubmittedAt, out var dateB))
+                    {
+                        return dateB.CompareTo(dateA); // Descending order
+                    }
+                    return string.Compare(b.SubmittedAt, a.SubmittedAt, StringComparison.Ordinal);
+                });
                 currentItems = new BindingList<OvertimeRequestEntry>(items);
                 dgvRequests.AutoGenerateColumns = true;
                 dgvRequests.DataSource = currentItems;

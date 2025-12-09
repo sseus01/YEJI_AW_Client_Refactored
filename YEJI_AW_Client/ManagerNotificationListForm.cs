@@ -48,6 +48,7 @@ namespace YEJI_AW_Client
             Text = "연장 근무 승인 요청";
             ClientSize = new System.Drawing.Size(940, 560);
             StartPosition = FormStartPosition.CenterParent;
+            TopMost = true;
 
             // 조회 기간 선택 UI
             lblStartDate.Text = "시작일";
@@ -156,6 +157,16 @@ namespace YEJI_AW_Client
                 {
                     await MarkNotificationsViewedAsync(newIds);
                 }
+
+                // Sort by SubmittedAt in descending order (newest first)
+                filtered.Sort((a, b) =>
+                {
+                    if (DateTime.TryParse(a.SubmittedAt, out var dateA) && DateTime.TryParse(b.SubmittedAt, out var dateB))
+                    {
+                        return dateB.CompareTo(dateA); // Descending order
+                    }
+                    return string.Compare(b.SubmittedAt, a.SubmittedAt, StringComparison.Ordinal);
+                });
 
                 currentItems = new BindingList<ManagerNotificationRow>(filtered);
                 dgvNotifications.DataSource = currentItems;
