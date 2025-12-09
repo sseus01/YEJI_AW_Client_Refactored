@@ -188,12 +188,24 @@ namespace YEJI_AW_Client
                     await MarkNotificationsViewedAsync(newIds);
                 }
 
-                // Sort by SubmittedAt in descending order (newest first)
+                // 정렬: 승인대기/NEW 최상단, 그 외는 신청 일시 내림차순
                 filtered.Sort((a, b) =>
                 {
-                    if (DateTime.TryParse(a.SubmittedAt, out var dateA) && DateTime.TryParse(b.SubmittedAt, out var dateB))
+                    int Rank(ManagerNotificationRow r)
                     {
-                        return dateB.CompareTo(dateA); // Descending order
+                        bool isPending = string.Equals(r.RawRequestStatus?.Trim(), "PENDING", StringComparison.OrdinalIgnoreCase)
+                                         || string.Equals(r.RequestStatus?.Trim(), "승인대기", StringComparison.OrdinalIgnoreCase);
+                        bool isNew = string.Equals(r.NotificationStatus?.Trim(), "NEW", StringComparison.OrdinalIgnoreCase);
+                        return (isPending || isNew) ? 0 : 1;
+                    }
+
+                    int ra = Rank(a);
+                    int rb = Rank(b);
+                    if (ra != rb) return ra.CompareTo(rb);
+
+                    if (DateTime.TryParse(a.SubmittedAt, out var da) && DateTime.TryParse(b.SubmittedAt, out var db))
+                    {
+                        return db.CompareTo(da);
                     }
                     return string.Compare(b.SubmittedAt, a.SubmittedAt, StringComparison.Ordinal);
                 });
