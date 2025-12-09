@@ -127,9 +127,8 @@ namespace YEJI_AW_Client
 
         private Timer? employeeOvertimeStatusTimer;
         private bool isCheckingEmployeeOvertimeStatus;
-        private Dictionary<string, string> lastKnownOvertimeStatuses = new();
+        private Dictionary<string, string> lastKnownOvertimeStatuses = new();        
 
-        private Form? currentTrayMenuForm;
 
 #if DEBUG
         private DateTime? debugBaseDateTime;
@@ -2385,33 +2384,7 @@ namespace YEJI_AW_Client
             {
                 MessageBox.Show("관리 조직의 자리비움 이력을 가져오는데 실패했습니다.");
             }
-        }
-
-        /// <summary>
-        /// 새 창을 열기 전에 이전에 열린 트레이 메뉴 폼을 닫습니다.
-        /// 중첩된 모달 다이얼로그로 인해 한 창이 다른 창에 접근을 막는 문제를 방지합니다.
-        /// </summary>
-        private void ClosePreviousTrayMenuForm()
-        {
-            if (currentTrayMenuForm != null && !currentTrayMenuForm.IsDisposed)
-            {
-                // 재진입을 방지하기 위해 지우기 전에 참조를 저장
-                var formToClose = currentTrayMenuForm;
-
-                // Close()가 이벤트를 트리거하여 currentTrayMenuForm을 확인하는 문제를 방지하기 위해 먼저 참조를 지웁니다.
-                // ShowTrayMenuFormInternal의 FormClosed 이벤트 핸들러도 안전 장치로 null로 설정합니다.
-                currentTrayMenuForm = null;
-
-                // 폼을 닫습니다 - 이렇게 하면 ShowDialog()가 반환됩니다
-                formToClose.Close();
-
-                // 폼이 완전히 닫힐 수 있도록 대기 중인 Windows 메시지를 처리합니다.
-                // 참고: Application.DoEvents()는 일반적으로 재진입 문제를 일으킬 수 있지만,
-                // 여기서는 모든 트레이 메뉴 작업이 UI 스레드에서 실행되고
-                // 중첩 호출을 방지하기 위해 이미 currentTrayMenuForm을 지웠기 때문에 안전합니다.
-                Application.DoEvents();
-            }
-        }
+        }        
 
         private void ShowTrayMenuForm(Form form)
         {
@@ -2424,30 +2397,13 @@ namespace YEJI_AW_Client
         }
 
         /// <summary>
-        /// 트레이 메뉴 폼을 모달 다이얼로그로 표시하며, 한 번에 하나의 트레이 메뉴 폼만 열리도록 보장합니다.
-        /// 이 메서드는 새 폼을 표시하기 전에 이전에 열린 트레이 메뉴 폼을 닫습니다.
+        /// 트레이 메뉴 폼을 모달 다이얼로그로 표시합니다.
         /// </summary>
         private DialogResult ShowTrayMenuFormInternal(Form form)
         {
-            ClosePreviousTrayMenuForm();
-            currentTrayMenuForm = form;
-
             // 요청한 창을 최상단에 배치하여 뒤로 가려지는 문제를 방지합니다.
             form.TopMost = true;
             form.BringToFront();
-
-            // 올바른 핸들러 타입으로 구독
-            FormClosedEventHandler? formClosedHandler = null;
-            formClosedHandler = (s, e) =>
-            {
-                if (currentTrayMenuForm == form)
-                {
-                    currentTrayMenuForm = null;
-                }
-                // Remove the event handler to prevent memory leaks
-                form.FormClosed -= formClosedHandler;
-            };
-            form.FormClosed += formClosedHandler;
 
             return form.ShowDialog(); // 닫힐 때까지 블록됨
         }
