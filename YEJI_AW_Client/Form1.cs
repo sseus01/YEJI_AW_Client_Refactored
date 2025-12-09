@@ -2411,19 +2411,19 @@ namespace YEJI_AW_Client
             ClosePreviousTrayMenuForm();
             currentTrayMenuForm = form;
 
-            // subscribe with correct handler type
-            FormClosedEventHandler formClosedHandler = null!;
+            FormClosedEventHandler? formClosedHandler = null;
             formClosedHandler = (s, e) =>
             {
                 if (currentTrayMenuForm == form)
                 {
                     currentTrayMenuForm = null;
                 }
+                // Remove the event handler to prevent memory leaks
                 form.FormClosed -= formClosedHandler;
             };
             form.FormClosed += formClosedHandler;
 
-            return form.ShowDialog(); // blocks until closed
+            return form.ShowDialog(); // This call blocks until the form is closed
         }
 
         private async void OnViewIdleHistory(object? sender, EventArgs e)
@@ -2460,7 +2460,7 @@ namespace YEJI_AW_Client
             }
         }
 
-        private async void OnEditUserInfo(object? sender, EventArgs e)
+        private void OnEditUserInfo(object? sender, EventArgs e)
         {
             var userInfoForm = new UserInfoForm();
             userInfoForm.SetUserInfo(employeeName, employeeId);
