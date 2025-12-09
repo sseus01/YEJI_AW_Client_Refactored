@@ -121,6 +121,7 @@ namespace YEJI_AW_Client
         private bool isCheckingManagerNotifications;
         private HashSet<string> lastAlertedManagerNotificationIds = new();
         private ToolStripMenuItem? managerNotificationsMenuItem;
+        private DateTime lastManagerNotificationAlertTime = DateTime.MinValue;
 
         private bool isManagerUser;
 
@@ -1981,13 +1982,19 @@ namespace YEJI_AW_Client
                 if (newIds.Count == 0)
                 {
                     lastAlertedManagerNotificationIds.Clear();
+                    lastManagerNotificationAlertTime = DateTime.MinValue;
                     return;
                 }
 
+                // 10분마다 알림을 반복적으로 표시 (확인하지 않은 경우)
                 bool isNewSet = !newIds.SetEquals(lastAlertedManagerNotificationIds);
-                if (forceShowPopup || isNewSet)
+                bool shouldShowReminder = lastManagerNotificationAlertTime != DateTime.MinValue
+                    && (DateTime.Now - lastManagerNotificationAlertTime) >= TimeSpan.FromMinutes(10);
+
+                if (forceShowPopup || isNewSet || shouldShowReminder)
                 {
                     lastAlertedManagerNotificationIds = newIds;
+                    lastManagerNotificationAlertTime = DateTime.Now;
                     ShowManagerNotificationAlert(notifications.Where(n => newIds.Contains(n.Id)).ToList());
                 }
             }
@@ -2108,6 +2115,9 @@ namespace YEJI_AW_Client
 
             try
             {
+                // 알림 목록을 열 때 알림 타이머 리셋 (확인한 것으로 간주)
+                lastManagerNotificationAlertTime = DateTime.MinValue;
+
                 using var form = new ManagerNotificationListForm(ServerBaseUrl, HttpClient, employeeId, employeeName, notificationIdsToMark);
                 form.ShowDialog();
                 await CheckManagerNotificationsAsync();
@@ -2234,9 +2244,29 @@ namespace YEJI_AW_Client
             string startTimeKst = FormatTimeToKst(request.StartTime);
             string endTimeKst = FormatTimeToKst(request.EndTime);
 
+            // WorkDate도 한국 시간으로 표시
+            string workDateKst = FormatDateToKst(request.WorkDate);
+
             notifyIcon.BalloonTipTitle = $"연장근무 신청 {statusText}";
-            notifyIcon.BalloonTipText = $"{request.WorkDate} {startTimeKst}~{endTimeKst}\n{request.Reason}{approverInfo}";
+            notifyIcon.BalloonTipText = $"{workDateKst} {startTimeKst}~{endTimeKst}\n{request.Reason}{approverInfo}";
             notifyIcon.ShowBalloonTip(5000);
+        }
+
+        private static DateTime ConvertToUtc(DateTime dt)
+        {
+            if (dt.Kind == DateTimeKind.Utc)
+            {
+                return dt;
+            }
+            else if (dt.Kind == DateTimeKind.Local)
+            {
+                return dt.ToUniversalTime();
+            }
+            else
+            {
+                // Unspecified인 경우 UTC로 간주 (서버에서 UTC로 저장된 것으로 가정)
+                return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+            }
         }
 
         private static string FormatTimeToKst(string? timeString)
@@ -2256,19 +2286,55 @@ namespace YEJI_AW_Client
                 try
                 {
                     var koreaTz = TimeZoneInfo.FindSystemTimeZoneById("Korea Standard Time");
-                    var utcTime = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+                    var utcTime = ConvertToUtc(dt);
                     var kstTime = TimeZoneInfo.ConvertTimeFromUtc(utcTime, koreaTz);
                     return kstTime.ToString("HH:mm");
                 }
-                catch
+                catch (TimeZoneNotFoundException)
                 {
                     // Fallback: UTC+9 수동 변환
-                    var kstTime = dt.AddHours(9);
+                    var utcTime = ConvertToUtc(dt);
+                    var kstTime = utcTime.AddHours(9);
                     return kstTime.ToString("HH:mm");
                 }
             }
 
             return timeString;
+        }
+
+        private static string FormatDateToKst(string? dateString)
+        {
+            if (string.IsNullOrWhiteSpace(dateString))
+                return string.Empty;
+
+            // ISO 8601 datetime 형식인 경우 (예: 2025-12-08T15:00:00Z)
+            // 이것이 UTC 시간이므로 KST로 변환하면 날짜가 바뀔 수 있음
+            if (DateTime.TryParse(dateString, out var dt))
+            {
+                // 'Z' 또는 ISO 8601 형식인지 확인
+                if (dateString.Contains('T') || dateString.EndsWith('Z'))
+                {
+                    try
+                    {
+                        var koreaTz = TimeZoneInfo.FindSystemTimeZoneById("Korea Standard Time");
+                        var utcTime = ConvertToUtc(dt);
+                        var kstTime = TimeZoneInfo.ConvertTimeFromUtc(utcTime, koreaTz);
+                        return kstTime.ToString("yyyy-MM-dd");
+                    }
+                    catch (TimeZoneNotFoundException)
+                    {
+                        // Fallback: UTC+9 수동 변환
+                        var utcTime = ConvertToUtc(dt);
+                        var kstTime = utcTime.AddHours(9);
+                        return kstTime.ToString("yyyy-MM-dd");
+                    }
+                }
+
+                // 단순 날짜 형식 (yyyy-MM-dd)인 경우 그대로 반환
+                return dt.ToString("yyyy-MM-dd");
+            }
+
+            return dateString;
         }
 
         private class EmployeeOvertimeRequest
