@@ -23,6 +23,8 @@ namespace YEJI_AW_Client
         private Button btnDelete = new Button();
         private DataGridView dgvRequests = new DataGridView();
         private Label lblStatus = new Label();
+        private Font? buttonFont;
+        private Font? gridHeaderFont;
 
         private BindingList<OvertimeRequestEntry> currentItems = new BindingList<OvertimeRequestEntry>();
 
@@ -42,6 +44,7 @@ namespace YEJI_AW_Client
             Text = "연장근무신청 확인";
             ClientSize = new Size(820, 480);            
             StartPosition = FormStartPosition.Manual;
+            BackColor = Color.FromArgb(240, 240, 240);
 
             // 애플리케이션 아이콘 설정
             try
@@ -76,12 +79,27 @@ namespace YEJI_AW_Client
 
             btnSearch.Text = "조회";
             btnSearch.Location = new Point(382, 11);
-            btnSearch.Size = new Size(75, 25);
+            btnSearch.Size = new Size(75, 30);
+            btnSearch.BackColor = Color.FromArgb(70, 130, 180);
+            btnSearch.ForeColor = Color.White;
+            btnSearch.FlatStyle = FlatStyle.Flat;
+            buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
+            btnSearch.Font = buttonFont;
+            btnSearch.Cursor = Cursors.Hand;
+            btnSearch.FlatAppearance.BorderSize = 0;
+            btnSearch.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 150, 200);
             btnSearch.Click += BtnSearch_Click;
 
             btnDelete.Text = "취소"; // 삭제 → 취소
             btnDelete.Location = new Point(463, 11);
-            btnDelete.Size = new Size(75, 25);
+            btnDelete.Size = new Size(75, 30);
+            btnDelete.BackColor = Color.FromArgb(70, 130, 180);
+            btnDelete.ForeColor = Color.White;
+            btnDelete.FlatStyle = FlatStyle.Flat;
+            btnDelete.Font = buttonFont;
+            btnDelete.Cursor = Cursors.Hand;
+            btnDelete.FlatAppearance.BorderSize = 0;
+            btnDelete.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 150, 200);
             btnDelete.Enabled = false;
             btnDelete.Click += BtnDelete_Click;
 
@@ -97,6 +115,9 @@ namespace YEJI_AW_Client
             dgvRequests.DataBindingComplete += DgvRequests_DataBindingComplete;
             dgvRequests.SelectionChanged += DgvRequests_SelectionChanged;
 
+            // DataGridView 스타일 개선
+            ImproveDataGridViewStyle(dgvRequests);
+
             lblStatus.AutoSize = false;
             lblStatus.TextAlign = ContentAlignment.MiddleRight;
             lblStatus.Location = new Point(585, 17);
@@ -108,6 +129,30 @@ namespace YEJI_AW_Client
                 lblStartDate, dtpStartDate, lblEndDate, dtpEndDate, btnSearch, btnDelete,
                 dgvRequests, lblStatus
             });
+        }
+
+        private void ImproveDataGridViewStyle(DataGridView dgv)
+        {
+            // 헤더 스타일
+            dgv.EnableHeadersVisualStyles = false;
+            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(70, 130, 180); // Steel Blue
+            dgv.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            gridHeaderFont = new Font(dgv.Font.FontFamily, 9F, FontStyle.Bold);
+            dgv.ColumnHeadersDefaultCellStyle.Font = gridHeaderFont;
+            dgv.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            dgv.ColumnHeadersHeight = 32;
+
+            // 셀 스타일
+            dgv.DefaultCellStyle.SelectionBackColor = Color.FromArgb(173, 216, 230); // Light Blue
+            dgv.DefaultCellStyle.SelectionForeColor = Color.Black;
+            dgv.DefaultCellStyle.BackColor = Color.White;
+            dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(245, 245, 245);
+            dgv.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
+            dgv.RowTemplate.Height = 28;
+
+            // 그리드 라인
+            dgv.GridColor = Color.FromArgb(220, 220, 220);
+            dgv.BorderStyle = BorderStyle.Fixed3D;
         }
 
         private async void OvertimeRequestListForm_Load(object? sender, EventArgs e)
@@ -427,6 +472,16 @@ namespace YEJI_AW_Client
         private static bool IsPending(string rawStatus)
         {
             return string.Equals(rawStatus?.Trim(), "PENDING", StringComparison.OrdinalIgnoreCase);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                buttonFont?.Dispose();
+                gridHeaderFont?.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 

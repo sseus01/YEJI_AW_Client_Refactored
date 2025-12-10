@@ -26,6 +26,8 @@ namespace YEJI_AW_Client
         private Button searchButton;
         private ListView listView;
         private Label emptyLabel;
+        private Font? buttonFont;
+        private Font? headerFont;
 
         private static readonly TimeZoneInfo KoreaTz = SafeGetKoreaTz();
         private string? managerDisplayName;
@@ -53,6 +55,7 @@ namespace YEJI_AW_Client
             StartPosition = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
+            BackColor = Color.FromArgb(240, 240, 240);
 
             // 애플리케이션 아이콘 설정
             try
@@ -73,10 +76,25 @@ namespace YEJI_AW_Client
             startPicker.Value = DateTime.Today;
             endPicker.Value = DateTime.Today;
 
-            searchButton = new Button { Left = 12, Top = 44, Width = 120, Height = 26, Text = "조회" };
+            searchButton = new Button
+            {
+                Left = 12,
+                Top = 44,
+                Width = 120,
+                Height = 30,
+                Text = "조회",
+                BackColor = Color.FromArgb(70, 130, 180),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
+            searchButton.Font = buttonFont;
+            searchButton.FlatAppearance.BorderSize = 0;
+            searchButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 150, 200);
             searchButton.Click += async (s, e) => await LoadIdleEventsAsync();
 
-            listView = new ListView { Left = 12, Top = 76, Width = 848, Height = 452, View = View.Details, FullRowSelect = true, GridLines = true };
+            listView = new ListView { Left = 12, Top = 80, Width = 848, Height = 448, View = View.Details, FullRowSelect = true, GridLines = true };
             listView.Columns.Add("사번", 100);
             listView.Columns.Add("이름", 140);
             // PC 컬럼 제거 요청 반영
@@ -84,6 +102,48 @@ namespace YEJI_AW_Client
             listView.Columns.Add("종료시간", 170);
             listView.Columns.Add("자리비움시간", 120);
             listView.Columns.Add("상세사유", 220);
+
+            // ListView 스타일 개선
+            listView.BackColor = Color.White;
+            listView.BorderStyle = BorderStyle.Fixed3D;
+            listView.Font = new Font(Font.FontFamily, 9F);
+            listView.OwnerDraw = true;
+            headerFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
+            listView.DrawColumnHeader += (s, e) =>
+            {
+                using (var headerBrush = new SolidBrush(Color.FromArgb(70, 130, 180)))
+                {
+                    e.Graphics.FillRectangle(headerBrush, e.Bounds);
+                }
+                using (var textBrush = new SolidBrush(Color.White))
+                {
+                    var sf = new StringFormat
+                    {
+                        Alignment = StringAlignment.Center,
+                        LineAlignment = StringAlignment.Center
+                    };
+                    e.Graphics.DrawString(e.Header.Text, headerFont, textBrush, e.Bounds, sf);
+                }
+            };
+            listView.DrawItem += (s, e) =>
+            {
+                e.DrawDefault = true;
+            };
+            listView.DrawSubItem += (s, e) =>
+            {
+                var backColor = e.ItemIndex % 2 == 0 ? Color.White : Color.FromArgb(245, 245, 245);
+                if ((e.ItemState & ListViewItemStates.Selected) != 0)
+                {
+                    backColor = Color.FromArgb(173, 216, 230);
+                }
+                using (var brush = new SolidBrush(backColor))
+                {
+                    e.Graphics.FillRectangle(brush, e.Bounds);
+                }
+                var textColor = Color.Black;
+                TextRenderer.DrawText(e.Graphics, e.SubItem.Text, e.Item.Font, e.Bounds, textColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            };
 
             emptyLabel = new Label
             {
@@ -1239,5 +1299,14 @@ namespace YEJI_AW_Client
             Debug.WriteLine($"[ManagedIdleHistory] {title}: {content}");
         }
 #endif
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                buttonFont?.Dispose();
+                headerFont?.Dispose();
+            }
+            base.Dispose(disposing);
+        }
     }
 }

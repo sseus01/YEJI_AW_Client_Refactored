@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Drawing;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -27,6 +28,8 @@ namespace YEJI_AW_Client
         private readonly Label lblEndDate = new();
         private readonly DateTimePicker startPicker = new();
         private readonly DateTimePicker endPicker = new();
+        private Font? buttonFont;
+        private Font? gridHeaderFont;
 
         private BindingList<ManagerNotificationRow> currentItems = new();
 
@@ -49,6 +52,7 @@ namespace YEJI_AW_Client
             ClientSize = new System.Drawing.Size(940, 560);
             StartPosition = FormStartPosition.Manual;
             TopMost = true;
+            BackColor = Color.FromArgb(240, 240, 240);
 
             // 애플리케이션 아이콘 설정
             try
@@ -84,19 +88,52 @@ namespace YEJI_AW_Client
 
             btnRefresh.Text = "조회";
             btnRefresh.Location = new System.Drawing.Point(340, 11);
+            btnRefresh.Size = new System.Drawing.Size(75, 30);
+            btnRefresh.BackColor = Color.FromArgb(70, 130, 180);
+            btnRefresh.ForeColor = Color.White;
+            btnRefresh.FlatStyle = FlatStyle.Flat;
+            buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
+            btnRefresh.Font = buttonFont;
+            btnRefresh.Cursor = Cursors.Hand;
+            btnRefresh.FlatAppearance.BorderSize = 0;
+            btnRefresh.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 150, 200);
             btnRefresh.Click += async (s, e) => await RefreshNotificationsAsync();
 
             btnApprove.Text = "승인";
-            btnApprove.Location = new System.Drawing.Point(420, 12);
+            btnApprove.Location = new System.Drawing.Point(420, 11);
+            btnApprove.Size = new System.Drawing.Size(75, 30);
+            btnApprove.BackColor = Color.FromArgb(70, 130, 180);
+            btnApprove.ForeColor = Color.White;
+            btnApprove.FlatStyle = FlatStyle.Flat;
+            btnApprove.Font = buttonFont;
+            btnApprove.Cursor = Cursors.Hand;
+            btnApprove.FlatAppearance.BorderSize = 0;
+            btnApprove.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 150, 200);
             btnApprove.Click += async (s, e) => await UpdateSelectedStatusAsync("APPROVED");
 
             btnReject.Text = "반려";
-            btnReject.Location = new System.Drawing.Point(500, 12);
+            btnReject.Location = new System.Drawing.Point(500, 11);
+            btnReject.Size = new System.Drawing.Size(75, 30);
+            btnReject.BackColor = Color.FromArgb(70, 130, 180);
+            btnReject.ForeColor = Color.White;
+            btnReject.FlatStyle = FlatStyle.Flat;
+            btnReject.Font = buttonFont;
+            btnReject.Cursor = Cursors.Hand;
+            btnReject.FlatAppearance.BorderSize = 0;
+            btnReject.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 150, 200);
             btnReject.Click += async (s, e) => await UpdateSelectedStatusAsync("REJECTED");
 
             btnClose.Text = "닫기";
             btnClose.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnClose.Location = new System.Drawing.Point(853, 12);
+            btnClose.Location = new System.Drawing.Point(853, 11);
+            btnClose.Size = new System.Drawing.Size(75, 30);
+            btnClose.BackColor = Color.FromArgb(70, 130, 180);
+            btnClose.ForeColor = Color.White;
+            btnClose.FlatStyle = FlatStyle.Flat;
+            btnClose.Font = buttonFont;
+            btnClose.Cursor = Cursors.Hand;
+            btnClose.FlatAppearance.BorderSize = 0;
+            btnClose.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 150, 200);
             btnClose.Click += (s, e) => Close();
 
             lblStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
@@ -125,8 +162,35 @@ namespace YEJI_AW_Client
                 UpdateButtons();
             };
             dgvNotifications.SelectionChanged += (s, e) => UpdateButtons();
+            
+            // DataGridView 스타일 개선
+            ImproveDataGridViewStyle(dgvNotifications);
 
             Controls.AddRange(new Control[] { lblStartDate, startPicker, lblEndDate, endPicker, btnRefresh, btnApprove, btnReject, btnClose, lblStatus, dgvNotifications });
+        }
+
+        private void ImproveDataGridViewStyle(DataGridView dgv)
+        {
+            // 헤더 스타일
+            dgv.EnableHeadersVisualStyles = false;
+            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(70, 130, 180); // Steel Blue
+            dgv.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            gridHeaderFont = new Font(dgv.Font.FontFamily, 9F, FontStyle.Bold);
+            dgv.ColumnHeadersDefaultCellStyle.Font = gridHeaderFont;
+            dgv.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            dgv.ColumnHeadersHeight = 32;
+
+            // 셀 스타일
+            dgv.DefaultCellStyle.SelectionBackColor = Color.FromArgb(173, 216, 230); // Light Blue
+            dgv.DefaultCellStyle.SelectionForeColor = Color.Black;
+            dgv.DefaultCellStyle.BackColor = Color.White;
+            dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(245, 245, 245);
+            dgv.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
+            dgv.RowTemplate.Height = 28;
+
+            // 그리드 라인
+            dgv.GridColor = Color.FromArgb(220, 220, 220);
+            dgv.BorderStyle = BorderStyle.Fixed3D;
         }
 
         private async void ManagerNotificationListForm_Load(object? sender, EventArgs e)
@@ -739,6 +803,16 @@ namespace YEJI_AW_Client
                     }
                 }
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                buttonFont?.Dispose();
+                gridHeaderFont?.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 

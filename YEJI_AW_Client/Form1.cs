@@ -1864,10 +1864,10 @@ namespace YEJI_AW_Client
             trayMenu = new ContextMenuStrip();
             trayMenu.Items.Add("자리비움 이력 보기", null, OnViewIdleHistory);
             trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
-            trayMenu.Items.Add("연장 근무 신청", null, OnOpenOvertimeRequest);
+            trayMenu.Items.Add("연장근무신청", null, OnOpenOvertimeRequest);
             trayMenu.Items.Add("연장근무신청 확인", null, OnOpenOvertimeStatus);
 
-            managerNotificationsMenuItem = new ToolStripMenuItem("연장 근무 승인 요청 확인", null, async (s, e) => await OpenManagerNotificationsAsync(null))
+            managerNotificationsMenuItem = new ToolStripMenuItem("연장근무승인 결재", null, async (s, e) => await OpenManagerNotificationsAsync(null))
             {
                 Visible = false
             };
@@ -1989,7 +1989,7 @@ namespace YEJI_AW_Client
             if (managerNotificationsMenuItem == null)
                 return;
 
-            string baseText = "연장 근무 승인 요청 확인";
+            string baseText = "연장근무승인 결재";
             managerNotificationsMenuItem.Text = newCount > 0
                 ? $"{baseText} ({newCount}건 대기)"
                 : baseText;
@@ -2150,7 +2150,7 @@ namespace YEJI_AW_Client
             if (newNotifications.Count == 0)
                 return;
 
-            notifyIcon.BalloonTipTitle = "연장 근무 승인 요청";
+            notifyIcon.BalloonTipTitle = "연장근무승인 결재";
             notifyIcon.BalloonTipText = $"새 연장 근무 신청 {newNotifications.Count}건이 도착했습니다. 클릭하여 확인하세요.";
             notifyIcon.ShowBalloonTip(4000);
         }
