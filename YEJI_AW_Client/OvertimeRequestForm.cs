@@ -155,7 +155,7 @@ namespace YEJI_AW_Client
                 Text = "신청",
                 Width = 120,
                 Height = 36,
-                BackColor = Color.FromArgb(33, 150, 243),
+                BackColor = Color.FromArgb(107, 114, 128),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Margin = new Padding(8, 0, 0, 0)

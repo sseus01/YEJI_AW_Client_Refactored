@@ -55,7 +55,7 @@ namespace YEJI_AW_Client
             StartPosition = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
-            BackColor = Color.FromArgb(240, 240, 240);
+            BackColor = Color.FromArgb(243, 244, 246);
 
             // 애플리케이션 아이콘 설정
             try
@@ -83,7 +83,7 @@ namespace YEJI_AW_Client
                 Width = 120,
                 Height = 30,
                 Text = "조회",
-                BackColor = Color.FromArgb(70, 130, 180),
+                BackColor = Color.FromArgb(107, 114, 128),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand
@@ -91,7 +91,7 @@ namespace YEJI_AW_Client
             buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
             searchButton.Font = buttonFont;
             searchButton.FlatAppearance.BorderSize = 0;
-            searchButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 150, 200);
+            searchButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(156, 163, 175);
             searchButton.Click += async (s, e) => await LoadIdleEventsAsync();
 
             listView = new ListView { Left = 12, Top = 80, Width = 848, Height = 448, View = View.Details, FullRowSelect = true, GridLines = true };
@@ -111,7 +111,7 @@ namespace YEJI_AW_Client
             headerFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
             listView.DrawColumnHeader += (s, e) =>
             {
-                using (var headerBrush = new SolidBrush(Color.FromArgb(70, 130, 180)))
+                using (var headerBrush = new SolidBrush(Color.FromArgb(107, 114, 128)))
                 {
                     e.Graphics.FillRectangle(headerBrush, e.Bounds);
                 }
@@ -131,10 +131,10 @@ namespace YEJI_AW_Client
             };
             listView.DrawSubItem += (s, e) =>
             {
-                var backColor = e.ItemIndex % 2 == 0 ? Color.White : Color.FromArgb(245, 245, 245);
+                var backColor = e.ItemIndex % 2 == 0 ? Color.White : Color.FromArgb(249, 250, 251);
                 if ((e.ItemState & ListViewItemStates.Selected) != 0)
                 {
-                    backColor = Color.FromArgb(173, 216, 230);
+                    backColor = Color.FromArgb(229, 231, 235);
                 }
                 using (var brush = new SolidBrush(backColor))
                 {

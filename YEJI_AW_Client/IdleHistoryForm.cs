@@ -61,7 +61,7 @@ namespace YEJI_AW_Client
         {
             // 헤더 스타일
             dataGridView1.EnableHeadersVisualStyles = false;
-            dataGridView1.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(70, 130, 180); // Steel Blue
+            dataGridView1.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(107, 114, 128);
             dataGridView1.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
             headerFont = new Font(dataGridView1.Font.FontFamily, 9F, FontStyle.Bold);
             dataGridView1.ColumnHeadersDefaultCellStyle.Font = headerFont;
@@ -69,15 +69,15 @@ namespace YEJI_AW_Client
             dataGridView1.ColumnHeadersHeight = 32;
 
             // 셀 스타일
-            dataGridView1.DefaultCellStyle.SelectionBackColor = Color.FromArgb(173, 216, 230); // Light Blue
-            dataGridView1.DefaultCellStyle.SelectionForeColor = Color.Black;
+            dataGridView1.DefaultCellStyle.SelectionBackColor = Color.FromArgb(229, 231, 235);
+            dataGridView1.DefaultCellStyle.SelectionForeColor = Color.FromArgb(17, 24, 39);
             dataGridView1.DefaultCellStyle.BackColor = Color.White;
-            dataGridView1.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(245, 245, 245);
+            dataGridView1.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(249, 250, 251);
             dataGridView1.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
             dataGridView1.RowTemplate.Height = 28;
 
             // 그리드 라인
-            dataGridView1.GridColor = Color.FromArgb(220, 220, 220);
+            dataGridView1.GridColor = Color.FromArgb(229, 231, 235);
             dataGridView1.BorderStyle = BorderStyle.Fixed3D;
 
             // 읽기 전용
@@ -94,7 +94,7 @@ namespace YEJI_AW_Client
                 Text = "조직 이력 보기",
                 Width = 120,
                 Height = 30,
-                BackColor = Color.FromArgb(70, 130, 180),
+                BackColor = Color.FromArgb(107, 114, 128),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand
@@ -102,7 +102,7 @@ namespace YEJI_AW_Client
             buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
             btnOrgHistory.Font = buttonFont;
             btnOrgHistory.FlatAppearance.BorderSize = 0;
-            btnOrgHistory.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 150, 200);
+            btnOrgHistory.FlatAppearance.MouseOverBackColor = Color.FromArgb(156, 163, 175);
 
             // 버튼을 폼의 우측 상단에 배치
             btnOrgHistory.Location = new Point(ClientSize.Width - btnOrgHistory.Width - 15, 12);

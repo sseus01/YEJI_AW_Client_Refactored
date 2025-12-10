@@ -32,7 +32,7 @@
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
-            BackColor = Color.FromArgb(240, 240, 240);
+            BackColor = Color.FromArgb(243, 244, 246);
             ClientSize = new Size(1000, 450);
             Controls.Add(dataGridView1);
             Icon = (Icon)resources.GetObject("$this.Icon");
