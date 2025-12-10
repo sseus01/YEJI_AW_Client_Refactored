@@ -17,6 +17,7 @@ namespace YEJI_AW_Client
         private readonly HttpClient httpClient;
         private readonly string managerEmpId;
         private string? managerDefaultOrgCode;
+        private List<OrgWithUsers> managerOrgs = new();
 
         private ComboBox orgCombo;
         private ComboBox userCombo;
@@ -183,10 +184,11 @@ namespace YEJI_AW_Client
                 if (response.IsSuccessStatusCode)
                 {
                     string json = await response.Content.ReadAsStringAsync();
-                    var orgs = JsonSerializer.Deserialize<List<OrgDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+                    var orgs = ParseManagerOrgs(json);
                     if (orgs.Count > 0)
                     {
-                        PopulateOrgCombo(orgs);
+                        managerOrgs = orgs;
+                        PopulateOrgComboFromManagerOrgs(managerOrgs);
                         return;
                     }
                 }
@@ -221,7 +223,8 @@ namespace YEJI_AW_Client
                     list.Add(new OrgDto { Code = "ALL", Name = "전체" });
                 }
 
-                PopulateOrgCombo(list);
+                managerOrgs = list.Select(o => new OrgWithUsers { Code = o.Code, Name = o.Name }).ToList();
+                PopulateOrgComboFromManagerOrgs(managerOrgs);
             }
             catch
             {
@@ -231,17 +234,143 @@ namespace YEJI_AW_Client
             }
         }
 
-        private void PopulateOrgCombo(List<OrgDto> orgs)
+        private List<OrgWithUsers> ParseManagerOrgs(string json)
         {
-            orgCombo.Items.Clear();
-            foreach (var o in orgs)
+            var list = new List<OrgWithUsers>();
+            try
             {
-                orgCombo.Items.Add(new ComboItem(o.Name, string.IsNullOrWhiteSpace(o.Code) ? o.Name : o.Code));
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                var source = root;
+                if (root.ValueKind != JsonValueKind.Array && root.TryGetProperty("orgs", out var orgArr))
+                {
+                    source = orgArr;
+                }
+
+                foreach (var orgEl in EnumerateArrayLike(source))
+                {
+                    var code = NormalizeOrg(GetProp(orgEl, "code", "orgCode", "orgPath", "org", "path", "name"));
+                    var name = GetProp(orgEl, "name", "orgName", "displayName");
+                    if (string.IsNullOrWhiteSpace(code))
+                    {
+                        code = name;
+                    }
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        name = code;
+                    }
+
+                    var org = new OrgWithUsers
+                    {
+                        Code = NormalizeOrg(code),
+                        Name = NormalizeOrg(name)
+                    };
+
+                    foreach (var userEl in EnumerateUsers(orgEl))
+                    {
+                        var id = GetProp(userEl, "employeeId", "empNo", "emp_no", "id", "userId", "empId");
+                        if (string.IsNullOrWhiteSpace(id)) continue;
+
+                        var displayName = GetProp(userEl, "displayName", "name", "employeeName", "empName", "emp_name", "userName");
+                        var orgPath = ExtractOrgPath(userEl);
+                        if (string.IsNullOrWhiteSpace(orgPath))
+                        {
+                            orgPath = org.Code;
+                        }
+
+                        org.Users.Add(new OrgUser
+                        {
+                            EmployeeId = id,
+                            EmployeeName = string.IsNullOrWhiteSpace(displayName) ? id : displayName,
+                            DisplayName = displayName,
+                            OrgPath = orgPath,
+                            Catcode = GetProp(userEl, "catcode"),
+                            Catcode2 = GetProp(userEl, "catcode2"),
+                            Catcode3 = GetProp(userEl, "catcode3")
+                        });
+                    }
+
+                    list.Add(org);
+                }
             }
+            catch
+            {
+            }
+
+            return list;
+        }
+
+        private static IEnumerable<JsonElement> EnumerateArrayLike(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Array)
+            {
+                return element.EnumerateArray();
+            }
+
+            return element.ValueKind == JsonValueKind.Object ? new[] { element } : Enumerable.Empty<JsonElement>();
+        }
+
+        private static IEnumerable<JsonElement> EnumerateUsers(JsonElement orgElement)
+        {
+            string[] userKeys = new[] { "users", "members", "employees" };
+            foreach (var key in userKeys)
+            {
+                if (orgElement.TryGetProperty(key, out var arr) && arr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in arr.EnumerateArray())
+                    {
+                        yield return item;
+                    }
+                }
+            }
+        }
+
+        private void PopulateOrgComboFromManagerOrgs(List<OrgWithUsers> orgs)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var items = new List<ComboItem>();
+
+            void AddOrg(string path, string? display = null)
+            {
+                var normalized = NormalizeOrg(path);
+                if (string.IsNullOrWhiteSpace(normalized) || seen.Contains(normalized)) return;
+                seen.Add(normalized);
+                items.Add(new ComboItem(string.IsNullOrWhiteSpace(display) ? normalized : display, normalized));
+            }
+
+            AddOrg("ALL", "전체");
+
+            foreach (var org in orgs)
+            {
+                var code = string.IsNullOrWhiteSpace(org.Code) ? org.Name : org.Code;
+                var normalized = NormalizeOrg(code);
+                if (string.IsNullOrWhiteSpace(normalized)) continue;
+
+                var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(s => s.Trim())
+                    .ToList();
+
+                string current = string.Empty;
+                foreach (var seg in segments)
+                {
+                    current = string.IsNullOrEmpty(current) ? seg : $"{current}/{seg}";
+                    AddOrg(current);
+                }
+
+                AddOrg(normalized, string.IsNullOrWhiteSpace(org.Name) ? normalized : org.Name);
+            }
+
+            orgCombo.Items.Clear();
+            foreach (var item in items)
+            {
+                orgCombo.Items.Add(item);
+            }
+
             if (orgCombo.Items.Count == 0)
             {
                 orgCombo.Items.Add(new ComboItem("전체", "ALL"));
             }
+
             SetDefaultOrgSelection();
         }
 
@@ -347,7 +476,7 @@ namespace YEJI_AW_Client
             DebugLog("manager-users 요청", url.ToString());
 #endif
 
-            Dictionary<string, string> users = new();
+            Dictionary<string, string> users = BuildUsersFromManagerOrgs(orgValue);
             string? managerUsersJson = null;
             try
             {
@@ -361,7 +490,11 @@ namespace YEJI_AW_Client
 #if DEBUG
                     DebugLog("manager-users 응답", managerUsersJson.Length > 4000 ? managerUsersJson.Substring(0, 4000) : managerUsersJson);
 #endif
-                    users = ParseUsers(managerUsersJson, orgValue);
+                    var parsed = ParseUsers(managerUsersJson, orgValue);
+                    foreach (var kv in parsed)
+                    {
+                        users[kv.Key] = kv.Value;
+                    }
                 }
             }
             catch (Exception ex)
@@ -463,25 +596,25 @@ namespace YEJI_AW_Client
                 return true;
             }
 
-            bool ContainsOrg(string? target)
+            var paths = new[] { "orgCode", "orgPath", "org", "orgName", "organization", "department", "departmentPath", "dept", "deptPath" }
+                .Select(p => GetProp(item, p))
+                .Where(v => !string.IsNullOrWhiteSpace(v));
+
+            foreach (var path in paths)
             {
-                if (string.IsNullOrWhiteSpace(target)) return false;
-                return target.IndexOf(orgValue, StringComparison.OrdinalIgnoreCase) >= 0;
+                if (IsOrgPrefix(path, orgValue))
+                {
+                    return true;
+                }
             }
 
-            if (ContainsOrg(GetProp(item, "orgCode", "orgPath", "org", "orgName", "organization", "department", "departmentPath", "dept", "deptPath")))
-            {
-                return true;
-            }
-
-            // catcode 조합으로 표현된 조직 경로도 함께 비교
             var catcodeParts = new[] { GetProp(item, "catcode"), GetProp(item, "catcode2"), GetProp(item, "catcode3") }
                 .Where(p => !string.IsNullOrWhiteSpace(p))
                 .ToList();
             if (catcodeParts.Count > 0)
             {
                 var combined = string.Join("/", catcodeParts);
-                if (ContainsOrg(combined))
+                if (IsOrgPrefix(combined, orgValue))
                 {
                     return true;
                 }
@@ -540,6 +673,44 @@ namespace YEJI_AW_Client
                 AddIfValid(root);
             }
             catch { }
+
+            return users;
+        }
+
+        private Dictionary<string, string> BuildUsersFromManagerOrgs(string orgValue)
+        {
+            var users = new Dictionary<string, string>();
+            if (managerOrgs.Count == 0)
+            {
+                return users;
+            }
+
+            foreach (var org in managerOrgs)
+            {
+                if (!IsOrgPrefix(org.Code, orgValue) && !IsOrgPrefix(org.Name, orgValue))
+                {
+                    continue;
+                }
+
+                foreach (var user in org.Users)
+                {
+                    if (string.IsNullOrWhiteSpace(user.EmployeeId))
+                    {
+                        continue;
+                    }
+
+                    var path = string.IsNullOrWhiteSpace(user.OrgPath) ? org.Code : user.OrgPath!;
+                    if (!IsOrgPrefix(path, orgValue))
+                    {
+                        continue;
+                    }
+
+                    var displayName = string.IsNullOrWhiteSpace(user.EmployeeName)
+                        ? (string.IsNullOrWhiteSpace(user.DisplayName) ? user.EmployeeId : user.DisplayName!)
+                        : user.EmployeeName;
+                    users[user.EmployeeId] = displayName;
+                }
+            }
 
             return users;
         }
@@ -709,19 +880,35 @@ namespace YEJI_AW_Client
 
         private static string NormalizeOrg(string? value)
         {
-            return (value ?? string.Empty).Trim();
+            return (value ?? string.Empty).Replace("\\", "/").Trim().Trim('/');
         }
 
-        private static bool IsOrgMatch(string? source, string target)
+        private static bool IsOrgPrefix(string? candidate, string orgValue)
         {
-            var normalized = NormalizeOrg(source);
-            if (string.Equals(normalized, target, StringComparison.OrdinalIgnoreCase))
+            var source = NormalizeOrg(candidate);
+            var target = NormalizeOrg(orgValue);
+
+            if (string.IsNullOrWhiteSpace(target) || string.Equals(target, "ALL", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
 
-            return normalized.IndexOf(target, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   target.IndexOf(normalized, StringComparison.OrdinalIgnoreCase) >= 0;
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                return false;
+            }
+
+            if (string.Equals(source, target, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return source.StartsWith(target + "/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsOrgMatch(string? source, string target)
+        {
+            return IsOrgPrefix(source, target) || IsOrgPrefix(target, source);
         }
 
         private void PopulateUserComboFromDict(Dictionary<string, string> users)
@@ -817,7 +1004,7 @@ namespace YEJI_AW_Client
                 ShowEmptyState(true, "자리비움 이력을 불러오지 못했습니다.");
             }
         }
-
+        
         private void ShowEmptyState(bool show, string message)
         {
             emptyLabel.Text = message;
@@ -915,6 +1102,24 @@ namespace YEJI_AW_Client
         {
             public string Code { get; set; } = string.Empty;
             public string Name { get; set; } = string.Empty;
+        }
+
+        private class OrgWithUsers
+        {
+            public string Code { get; set; } = string.Empty;
+            public string Name { get; set; } = string.Empty;
+            public List<OrgUser> Users { get; set; } = new();
+        }
+
+        private class OrgUser
+        {
+            public string EmployeeId { get; set; } = string.Empty;
+            public string EmployeeName { get; set; } = string.Empty;
+            public string? DisplayName { get; set; }
+            public string? OrgPath { get; set; }
+            public string Catcode { get; set; } = string.Empty;
+            public string Catcode2 { get; set; } = string.Empty;
+            public string Catcode3 { get; set; } = string.Empty;
         }
 
         private class ManagerInfoResponse
