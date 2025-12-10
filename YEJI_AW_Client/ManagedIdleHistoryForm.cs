@@ -345,18 +345,7 @@ namespace YEJI_AW_Client
                 var code = string.IsNullOrWhiteSpace(org.Code) ? org.Name : org.Code;
                 var normalized = NormalizeOrg(code);
                 if (string.IsNullOrWhiteSpace(normalized)) continue;
-
-                var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(s => s.Trim())
-                    .ToList();
-
-                string current = string.Empty;
-                foreach (var seg in segments)
-                {
-                    current = string.IsNullOrEmpty(current) ? seg : $"{current}/{seg}";
-                    AddOrg(current);
-                }
-
+       
                 AddOrg(normalized, string.IsNullOrWhiteSpace(org.Name) ? normalized : org.Name);
             }
 
@@ -477,6 +466,11 @@ namespace YEJI_AW_Client
 #endif
 
             Dictionary<string, string> users = BuildUsersFromManagerOrgs(orgValue);
+            var memberUsers = await FetchMembersByOrganizationAsync(orgValue);
+            foreach (var kv in memberUsers)
+            {
+                users[kv.Key] = kv.Value;
+            }
             string? managerUsersJson = null;
             try
             {
@@ -675,6 +669,92 @@ namespace YEJI_AW_Client
             catch { }
 
             return users;
+        }
+
+        private async Task<Dictionary<string, string>> FetchMembersByOrganizationAsync(string orgValue)
+        {
+            var members = new Dictionary<string, string>();
+
+            try
+            {
+                string url = $"{serverBaseUrl}/api/client/members";
+#if DEBUG
+                DebugLog("members 요청", url);
+#endif
+                using var response = await httpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return members;
+                }
+
+                string json = await response.Content.ReadAsStringAsync();
+#if DEBUG
+                DebugLog("members 응답", json.Length > 4000 ? json.Substring(0, 4000) : json);
+#endif
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                void AddIfMatches(JsonElement el)
+                {
+                    string id = GetProp(el, "id", "employeeId", "empNo", "emp_no", "userId", "empId");
+                    string name = GetProp(el, "name", "displayName", "employeeName", "empName", "emp_name", "userName");
+
+                    if (string.IsNullOrWhiteSpace(id) || !MatchesOrganization(el, orgValue))
+                    {
+                        return;
+                    }
+
+                    members[id] = string.IsNullOrWhiteSpace(name) ? id : name;
+                }
+
+                if (root.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in root.EnumerateArray())
+                    {
+                        AddIfMatches(item);
+                    }
+                    return members;
+                }
+
+                string[] arrayKeys = new[] { "data", "items", "content", "members", "users", "employees" };
+                foreach (var key in arrayKeys)
+                {
+                    if (root.TryGetProperty(key, out var arr) && arr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in arr.EnumerateArray())
+                        {
+                            AddIfMatches(item);
+                        }
+                        return members;
+                    }
+                }
+
+                foreach (var prop in root.EnumerateObject())
+                {
+                    var value = prop.Value;
+                    if (value.ValueKind == JsonValueKind.Object)
+                    {
+                        AddIfMatches(value);
+                    }
+                    else if (value.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in value.EnumerateArray())
+                        {
+                            AddIfMatches(item);
+                        }
+                    }
+                }
+
+                AddIfMatches(root);
+            }
+            catch (Exception ex)
+            {
+#if DEBUG
+                DebugLog("members 예외", ex.ToString());
+#endif
+            }
+
+            return members;
         }
 
         private Dictionary<string, string> BuildUsersFromManagerOrgs(string orgValue)
