@@ -2470,20 +2470,24 @@ namespace YEJI_AW_Client
 
         private async void OnViewIdleHistory(object? sender, EventArgs e)
         {
-            // 관리자라면 조직/이름 선택 및 날짜 범위 선택이 가능한 확장 폼 제공
-            if (isManagerUser)
-            {
-                var form = new ManagedIdleHistoryForm(ServerBaseUrl, HttpClient, employeeId);
-                ShowTrayMenuForm(form);
-                form.Dispose(); // ShowDialog() is synchronous, so this happens after the form closes
-                return;
-            }
-
             // 일반 사용자: 본인 이력, 기본 당일
             var history = await FetchIdleHistoryForDateRangeAsync(employeeId, GetCurrentDate(), GetCurrentDate());
-            var form2 = new IdleHistoryForm(history);
-            ShowTrayMenuForm(form2);
-            form2.Dispose(); // ShowDialog() is synchronous, so this happens after the form closes
+
+            // 관리자인 경우 조직 이력 보기 버튼을 추가하여 조직 전체 이력을 볼 수 있게 함
+            Action? onViewOrgHistory = null;
+            if (isManagerUser)
+            {
+                onViewOrgHistory = () =>
+                {
+                    var managedForm = new ManagedIdleHistoryForm(ServerBaseUrl, HttpClient, employeeId);
+                    ShowTrayMenuForm(managedForm);
+                    managedForm.Dispose();
+                };
+            }
+
+            var form = new IdleHistoryForm(history, isManagerUser, onViewOrgHistory);
+            ShowTrayMenuForm(form);
+            form.Dispose(); // ShowDialog() is synchronous, so this happens after the form closes
         }
 
         private async Task<List<IdleEventData>> FetchIdleHistoryForDateRangeAsync(string targetEmpId, DateTime fromDate, DateTime toDate)
