@@ -83,7 +83,8 @@ namespace YEJI_AW_Client
         private bool isPopupShowing = false;
         private HashSet<string> shownPopupTimes = new HashSet<string>();
 
-        private DateTime suspendStartTime;
+        private DateTime suspendStartTime = DateTime.MinValue;
+        private DateTime sessionLockStartTime = DateTime.MinValue;
         private bool wasInLunchBreak = false;
 
         private static readonly HttpClient HttpClient = new HttpClient();
@@ -282,12 +283,15 @@ namespace YEJI_AW_Client
 
             // 전원(절전/복귀) 이벤트 구독
             SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
+            // 세션 잠금/해제 이벤트 구독 (Windows+L 등)
+            SystemEvents.SessionSwitch += SystemEvents_SessionSwitch;
         }
 
         // 폼 완전 종료 시 전원 이벤트 구독 해제
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
+            SystemEvents.SessionSwitch -= SystemEvents_SessionSwitch;
             base.OnFormClosed(e);
         }
 
@@ -1367,19 +1371,75 @@ namespace YEJI_AW_Client
                 // 절전에서 다시 깨어날 때
                 DateTime resumeTime = GetCurrentDateTime();
 
-                var t = resumeTime.TimeOfDay;
-                bool isWorkingTime = IsWorkingTime(t);
-
-                if (isWorkingTime)
+                // suspendStartTime이 유효한 값인지 확인 (프로그램 시작 후 첫 resume 이벤트 방지)
+                if (suspendStartTime == DateTime.MinValue)
                 {
-                    // 근무시간 안에서 덮개를 닫고 있었다면 전체 구간을 자리비움으로 팝업 처리
+                    ResetIdleState(resumeTime);
+                    return;
+                }
+
+                var suspendTimeOfDay = suspendStartTime.TimeOfDay;
+                var resumeTimeOfDay = resumeTime.TimeOfDay;
+
+                bool suspendDuringWork = IsWorkingTime(suspendTimeOfDay);
+                bool resumeDuringWork = IsWorkingTime(resumeTimeOfDay);
+
+                if (suspendDuringWork || resumeDuringWork)
+                {
+                    // 절전/복귀 중 하나라도 근무시간이면 자리비움으로 처리
+                    // SplitIdleInterval이 근무시간 구간만 추출함
                     await HandleIdleIntervalAsync(suspendStartTime, resumeTime);
                 }
 
-                lastInputTime = resumeTime;
-                isIdle = false;
-                hasShownPopup = false;
+                ResetIdleState(resumeTime);
             }
+        }
+
+        // -----------------------------
+        // 세션 잠금/해제 처리 (Windows+L 등)
+        // -----------------------------
+        private async void SystemEvents_SessionSwitch(object? sender, SessionSwitchEventArgs e)
+        {
+            if (e.Reason == SessionSwitchReason.SessionLock)
+            {
+                // 화면 잠금 시작 (Windows+L 등)
+                sessionLockStartTime = GetCurrentDateTime();
+            }
+            else if (e.Reason == SessionSwitchReason.SessionUnlock)
+            {
+                // 화면 잠금 해제
+                DateTime unlockTime = GetCurrentDateTime();
+
+                // sessionLockStartTime이 유효한 값인지 확인 (프로그램 시작 후 첫 unlock 이벤트 방지)
+                if (sessionLockStartTime == DateTime.MinValue)
+                {
+                    ResetIdleState(unlockTime);
+                    return;
+                }
+
+                var lockTimeOfDay = sessionLockStartTime.TimeOfDay;
+                var unlockTimeOfDay = unlockTime.TimeOfDay;
+
+                bool lockDuringWork = IsWorkingTime(lockTimeOfDay);
+                bool unlockDuringWork = IsWorkingTime(unlockTimeOfDay);
+
+                if (lockDuringWork || unlockDuringWork)
+                {
+                    // 잠금/해제 중 하나라도 근무시간이면 자리비움으로 처리
+                    // SplitIdleInterval이 근무시간 구간만 추출함
+                    await HandleIdleIntervalAsync(sessionLockStartTime, unlockTime);
+                }
+
+                ResetIdleState(unlockTime);
+            }
+        }
+
+        // 자리비움 상태를 리셋하고 마지막 입력 시간을 업데이트
+        private void ResetIdleState(DateTime currentTime)
+        {
+            lastInputTime = currentTime;
+            isIdle = false;
+            hasShownPopup = false;
         }
 
         private DateTime GetSystemBootTime()
