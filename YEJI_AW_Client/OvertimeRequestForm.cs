@@ -37,7 +37,7 @@ namespace YEJI_AW_Client
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(600, 440);
             MinimumSize = new Size(600, 440);
-            BackColor = Color.White;
+            BackColor = Color.FromArgb(247, 247, 247); // 전체 창 기본 배경
             Load += (_, __) => CenterForm();
 
             // 애플리케이션 아이콘 설정
@@ -56,7 +56,7 @@ namespace YEJI_AW_Client
             {
                 Dock = DockStyle.Top,
                 Height = 72,
-                BackColor = Color.FromArgb(245, 247, 250)
+                BackColor = Color.FromArgb(7, 87, 167) // 헤더 전체 배경 (파랑)
             };
             var headerIcon = new PictureBox
             {
@@ -71,13 +71,14 @@ namespace YEJI_AW_Client
                 Text = "연장 근무 신청",
                 Font = new Font(FontFamily.GenericSansSerif, 14, FontStyle.Bold),
                 AutoSize = true,
-                Location = new Point(74, 16)
+                Location = new Point(74, 16),
+                ForeColor = Color.White // 헤더 텍스트 흰색
             };
             var headerSubtitle = new Label
             {
                 Text = "업무 종료 이후 필요 시간을 신청해주세요",
                 Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Regular),
-                ForeColor = Color.DimGray,
+                ForeColor = Color.White, // 헤더 텍스트 흰색
                 AutoSize = true,
                 Location = new Point(76, 42)
             };
@@ -155,12 +156,13 @@ namespace YEJI_AW_Client
                 Text = "신청",
                 Width = 120,
                 Height = 36,
-                BackColor = Color.FromArgb(107, 114, 128),
+                BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Margin = new Padding(8, 0, 0, 0)
             };
             btnSubmit.FlatAppearance.BorderSize = 0;
+            btnSubmit.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
             btnSubmit.Click += async (s, e) => await SubmitAsync();
 
             var btnCancel = new Button
@@ -168,8 +170,13 @@ namespace YEJI_AW_Client
                 Text = "닫기",
                 Width = 96,
                 Height = 36,
-                Margin = new Padding(8, 0, 0, 0)
+                Margin = new Padding(8, 0, 0, 0),
+                BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
             };
+            btnCancel.FlatAppearance.BorderSize = 0;
+            btnCancel.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
             btnCancel.Click += (s, e) => Close();
 
             buttonPanel.Controls.Add(btnSubmit);

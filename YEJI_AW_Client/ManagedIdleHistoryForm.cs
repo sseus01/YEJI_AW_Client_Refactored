@@ -24,8 +24,11 @@ namespace YEJI_AW_Client
         private DateTimePicker startPicker;
         private DateTimePicker endPicker;
         private Button searchButton;
+        private Button orgViewButton;
         private ListView listView;
         private Label emptyLabel;
+        private Panel headerPanel;
+        private Panel filterPanel;
         private Font? buttonFont;
         private Font? headerFont;
 
@@ -51,11 +54,11 @@ namespace YEJI_AW_Client
         private void InitializeUi()
         {
             Text = "관리: 조직 자리비움 이력";
-            ClientSize = new Size(900, 540);
+            ClientSize = new Size(980, 600);
             StartPosition = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
-            BackColor = Color.FromArgb(243, 244, 246);
+            BackColor = Color.FromArgb(247, 247, 247); // 전체 창 기본 배경
 
             // 애플리케이션 아이콘 설정
             try
@@ -68,6 +71,34 @@ namespace YEJI_AW_Client
             }
             catch { /* 아이콘 로드 실패 시 무시 */ }
 
+            headerPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 56,
+                BackColor = Color.FromArgb(7, 87, 167), // 헤더 전체 배경 (파랑)
+                Padding = new Padding(12, 8, 12, 8)
+            };
+            var headerTitleLabel = new Label
+            {
+                Text = "조직 자리비움 이력",
+                Font = new Font(Font.FontFamily, 14F, FontStyle.Bold),
+                Dock = DockStyle.Fill,
+                ForeColor = Color.White, // 헤더 텍스트 흰색
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            headerPanel.Controls.Add(headerTitleLabel);
+            Controls.Add(headerPanel);
+
+            filterPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 64,
+                Padding = new Padding(12, 8, 12, 8),
+                BackColor = Color.FromArgb(249, 250, 251) // 상단 정보 영역 배경
+            };
+            Controls.Add(filterPanel);
+
             orgCombo = new ComboBox { Left = 12, Top = 12, Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
             userCombo = new ComboBox { Left = 280, Top = 12, Width = 240, DropDownStyle = ComboBoxStyle.DropDownList };
 
@@ -76,28 +107,58 @@ namespace YEJI_AW_Client
             startPicker.Value = DateTime.Today;
             endPicker.Value = DateTime.Today;
 
+            buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
+
             searchButton = new Button
             {
-                Left = 12,
-                Top = 44,
                 Width = 120,
-                Height = 30,
+                Height = 28,
                 Text = "조회",
-                BackColor = Color.FromArgb(107, 114, 128),
+                BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Cursor = Cursors.Hand
+                Font = buttonFont
             };
-            buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
-            searchButton.Font = buttonFont;
             searchButton.FlatAppearance.BorderSize = 0;
-            searchButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(156, 163, 175);
+            searchButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
             searchButton.Click += async (s, e) => await LoadIdleEventsAsync();
 
-            listView = new ListView { Left = 12, Top = 80, Width = 848, Height = 448, View = View.Details, FullRowSelect = true, GridLines = true };
+            orgViewButton = new Button
+            {
+                Width = 120,
+                Height = 28,
+                Text = "이력보기",
+                BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Visible = false,
+                Font = buttonFont
+            };
+            orgViewButton.FlatAppearance.BorderSize = 0;
+            orgViewButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
+            orgViewButton.Click += async (s, e) => await LoadOrgIdleEventsAsync();
+
+            headerPanel.Controls.Add(headerTitleLabel);
+            Controls.Add(headerPanel);
+
+            filterPanel.Controls.Add(orgCombo);
+            filterPanel.Controls.Add(userCombo);
+            filterPanel.Controls.Add(startPicker);
+            filterPanel.Controls.Add(endPicker);
+            filterPanel.Controls.Add(searchButton);
+            filterPanel.Controls.Add(orgViewButton);
+
+            listView = new ListView
+            {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                BackColor = Color.White,
+                ForeColor = Color.Black,
+            };
             listView.Columns.Add("사번", 100);
             listView.Columns.Add("이름", 140);
-            // PC 컬럼 제거 요청 반영
             listView.Columns.Add("시작시간", 170);
             listView.Columns.Add("종료시간", 170);
             listView.Columns.Add("자리비움시간", 120);
@@ -111,7 +172,7 @@ namespace YEJI_AW_Client
             headerFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
             listView.DrawColumnHeader += (s, e) =>
             {
-                using (var headerBrush = new SolidBrush(Color.FromArgb(107, 114, 128)))
+                using (var headerBrush = new SolidBrush(Color.FromArgb(7, 87, 167))) // 헤더 파랑
                 {
                     e.Graphics.FillRectangle(headerBrush, e.Bounds);
                 }
@@ -131,10 +192,10 @@ namespace YEJI_AW_Client
             };
             listView.DrawSubItem += (s, e) =>
             {
-                var backColor = e.ItemIndex % 2 == 0 ? Color.White : Color.FromArgb(249, 250, 251);
+                var backColor = e.ItemIndex % 2 == 0 ? Color.White : Color.FromArgb(249, 250, 251); // 행 배경
                 if ((e.ItemState & ListViewItemStates.Selected) != 0)
                 {
-                    backColor = Color.FromArgb(229, 231, 235);
+                    backColor = Color.FromArgb(213, 220, 228); // 선택 배경 (왼쪽 패널 색상 활용)
                 }
                 using (var brush = new SolidBrush(backColor))
                 {
@@ -166,14 +227,12 @@ namespace YEJI_AW_Client
             Controls.Add(startPicker);
             Controls.Add(endPicker);
             Controls.Add(searchButton);
+            Controls.Add(orgViewButton);
             Controls.Add(listView);
             Controls.Add(emptyLabel);
             emptyLabel.BringToFront();
 
             orgCombo.SelectedIndexChanged += async (s, e) => await LoadUsersForSelectedOrgAsync();
-            // 자동 조회 제거: 조회 버튼으로만 이력 로딩
-            // userCombo.SelectedIndexChanged += async (s, e) => await LoadIdleEventsAsync();
-
             PositionNearTray();
         }
 
@@ -191,6 +250,12 @@ namespace YEJI_AW_Client
 #endif
                     var mgr = JsonSerializer.Deserialize<ManagerInfoResponse>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                     managerDisplayName = mgr?.Manager?.DisplayName;
+
+                    bool isManager = mgr?.Success == true && ((mgr.Manager != null) || (mgr.Permissions != null && mgr.Permissions.Count > 0));
+                    if (orgViewButton != null)
+                    {
+                        orgViewButton.Visible = isManager;
+                    }
 
                     // 서버에서 제공하는 기본 조직 코드를 우선 사용
                     if (!string.IsNullOrWhiteSpace(mgr?.Manager?.DefaultOrgCode))
@@ -1114,29 +1179,7 @@ namespace YEJI_AW_Client
                 string json = await httpClient.GetStringAsync(url.ToString());
                 var events = JsonSerializer.Deserialize<List<IdleEvt>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
 
-                // 클라이언트 측 필터: 서버가 범위를 적용하지 않는 경우 대비
-                var filtered = events.Where(e => InRangeKst(e.IdleStartTime, e.IdleEndTime, startDateKst, endDateKst)).ToList();
-
-                listView.Items.Clear();
-                foreach (var e in filtered)
-                {
-                    string startText = FormatKst(e.IdleStartTime);
-                    string endText = FormatKst(e.IdleEndTime);
-                    string duration = CalcDurationKst(e.IdleStartTime, e.IdleEndTime);
-
-                    var item = new ListViewItem(new[]
-                    {
-                        e.EmployeeId ?? string.Empty,
-                        e.EmployeeName ?? string.Empty,
-                        startText,
-                        endText,
-                        duration,
-                        e.ReasonDetail ?? string.Empty
-                    });
-                    listView.Items.Add(item);
-                }
-
-                ShowEmptyState(filtered.Count == 0, "자리비움 이력이 없습니다.");
+                RenderList(events);
             }
             catch
             {
@@ -1144,11 +1187,93 @@ namespace YEJI_AW_Client
                 ShowEmptyState(true, "자리비움 이력을 불러오지 못했습니다.");
             }
         }
+
+        private async Task LoadOrgIdleEventsAsync()
+        {
+            var selected = orgCombo.SelectedItem as ComboItem;
+            string orgValue = selected?.Value ?? "ALL";
+            
+            var startDateKst = startPicker.Value.Date;
+            var endDateKst = endPicker.Value.Date;
+
+            try
+            {
+                string url = $"{serverBaseUrl}/api/client/manager-logs?employeeId={Uri.EscapeDataString(managerEmpId)}&startDate={startDateKst:yyyy-MM-dd}&endDate={endDateKst:yyyy-MM-dd}&orgPath={Uri.EscapeDataString(orgValue)}";
+                string json = await httpClient.GetStringAsync(url);
+                var events = ParseManagerLogsToIdle(json, orgValue);
+                RenderList(events);
+            }
+            catch
+            {
+                ShowEmptyState(true, "조직 이력을 불러오지 못했습니다.");
+            }
+        }
+
+        private List<IdleEvt> ParseManagerLogsToIdle(string json, string orgValue)
+        {
+            var list = new List<IdleEvt>();
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                IEnumerable<JsonElement> items;
+                if (root.ValueKind == JsonValueKind.Array) items = root.EnumerateArray();
+                else if (root.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array) items = dataArr.EnumerateArray();
+                else items = Enumerable.Empty<JsonElement>();
+
+                foreach (var item in items)
+                {
+                    if (!MatchesOrganization(item, orgValue)) continue;
+                    
+                    var evt = new IdleEvt
+                    {
+                        EmployeeId = GetProp(item, "employeeId", "empNo", "emp_no", "id", "employee_id"),
+                        EmployeeName = GetProp(item, "employeeName", "empName", "emp_name", "name", "displayName"),
+                        IdleStartTime = GetProp(item, "idleStartTime", "idle_start_time", "startTime", "start_time"),
+                        IdleEndTime = GetProp(item, "idleEndTime", "idle_end_time", "endTime", "end_time"),
+                        ReasonDetail = GetProp(item, "reasonDetail", "reason_detail", "detail"),
+                    };
+                    list.Add(evt);
+                }
+            }
+            catch { }
+            return list;
+        }
+
+        private void RenderList(List<IdleEvt> events)
+        {
+            listView.Items.Clear();
+            var startDateKst = startPicker.Value.Date;
+            var endDateKst = endPicker.Value.Date;
+
+            var filtered = events.Where(e => InRangeKst(e.IdleStartTime, e.IdleEndTime, startDateKst, endDateKst)).ToList();
+
+            foreach (var e in filtered)
+            {
+                string startText = FormatKst(e.IdleStartTime);
+                string endText = FormatKst(e.IdleEndTime);
+                string duration = CalcDurationKst(e.IdleStartTime, e.IdleEndTime);
+
+                var item = new ListViewItem(new[]
+                {
+                    e.EmployeeId ?? string.Empty,
+                    e.EmployeeName ?? string.Empty,
+                    startText,
+                    endText,
+                    duration,
+                    e.ReasonDetail ?? string.Empty
+                });
+                listView.Items.Add(item);
+            }
+
+            ShowEmptyState(filtered.Count == 0, filtered.Count == 0 ? "자리비움 이력이 없습니다." : "");
+        }
         
         private void ShowEmptyState(bool show, string message)
         {
             emptyLabel.Text = message;
             emptyLabel.Visible = show;
+            listView.Visible = !show;
         }
 
         private void PositionNearTray()

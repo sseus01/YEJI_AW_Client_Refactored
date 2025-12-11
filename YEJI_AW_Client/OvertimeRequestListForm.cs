@@ -44,7 +44,7 @@ namespace YEJI_AW_Client
             Text = "연장근무신청 확인";
             ClientSize = new Size(820, 480);
             StartPosition = FormStartPosition.Manual;
-            BackColor = Color.FromArgb(243, 244, 246);
+            BackColor = Color.FromArgb(247, 247, 247); // 전체 창 기본 배경
 
             // 애플리케이션 아이콘 설정
             try
@@ -80,26 +80,26 @@ namespace YEJI_AW_Client
             btnSearch.Text = "조회";
             btnSearch.Location = new Point(382, 11);
             btnSearch.Size = new Size(75, 30);
-            btnSearch.BackColor = Color.FromArgb(107, 114, 128);
+            btnSearch.BackColor = Color.FromArgb(7, 87, 167); // 버튼 파랑
             btnSearch.ForeColor = Color.White;
             btnSearch.FlatStyle = FlatStyle.Flat;
             buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
             btnSearch.Font = buttonFont;
             btnSearch.Cursor = Cursors.Hand;
             btnSearch.FlatAppearance.BorderSize = 0;
-            btnSearch.FlatAppearance.MouseOverBackColor = Color.FromArgb(156, 163, 175);
+            btnSearch.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
             btnSearch.Click += BtnSearch_Click;
 
             btnDelete.Text = "취소"; // 삭제 → 취소
             btnDelete.Location = new Point(463, 11);
             btnDelete.Size = new Size(75, 30);
-            btnDelete.BackColor = Color.FromArgb(107, 114, 128);
+            btnDelete.BackColor = Color.FromArgb(7, 87, 167); // 버튼 파랑
             btnDelete.ForeColor = Color.White;
             btnDelete.FlatStyle = FlatStyle.Flat;
             btnDelete.Font = buttonFont;
             btnDelete.Cursor = Cursors.Hand;
             btnDelete.FlatAppearance.BorderSize = 0;
-            btnDelete.FlatAppearance.MouseOverBackColor = Color.FromArgb(156, 163, 175);
+            btnDelete.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
             btnDelete.Enabled = false;
             btnDelete.Click += BtnDelete_Click;
 
@@ -135,7 +135,7 @@ namespace YEJI_AW_Client
         {
             // 헤더 스타일
             dgv.EnableHeadersVisualStyles = false;
-            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(107, 114, 128);
+            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(7, 87, 167); // 헤더 파랑
             dgv.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
             gridHeaderFont = new Font(dgv.Font.FontFamily, 9F, FontStyle.Bold);
             dgv.ColumnHeadersDefaultCellStyle.Font = gridHeaderFont;
@@ -143,15 +143,15 @@ namespace YEJI_AW_Client
             dgv.ColumnHeadersHeight = 32;
 
             // 셀 스타일
-            dgv.DefaultCellStyle.SelectionBackColor = Color.FromArgb(229, 231, 235);
-            dgv.DefaultCellStyle.SelectionForeColor = Color.FromArgb(17, 24, 39);
+            dgv.DefaultCellStyle.SelectionBackColor = Color.FromArgb(213, 220, 228); // 선택 배경
+            dgv.DefaultCellStyle.SelectionForeColor = Color.Black;
             dgv.DefaultCellStyle.BackColor = Color.White;
-            dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(249, 250, 251);
+            dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(249, 250, 251); // 행 배경
             dgv.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
             dgv.RowTemplate.Height = 28;
 
             // 그리드 라인
-            dgv.GridColor = Color.FromArgb(229, 231, 235);
+            dgv.GridColor = Color.FromArgb(231, 231, 231); // 테이블 라인
             dgv.BorderStyle = BorderStyle.Fixed3D;
         }
 
