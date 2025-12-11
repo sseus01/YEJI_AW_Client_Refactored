@@ -7,7 +7,9 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -198,6 +200,7 @@ namespace YEJI_AW_Client
         public Form1(string employeeName, string employeeId)
         {
             InitializeComponent();
+            ClientLogger.LogAgent($"Agent App Start... user={employeeId}, version={GetCurrentVersion()}.");
 
             this.employeeName = employeeName ?? "";
             this.employeeId = employeeId ?? "";
@@ -416,6 +419,7 @@ namespace YEJI_AW_Client
             try
             {
                 string currentVersion = GetCurrentVersion();
+                ClientLogger.LogUpdate($"Checking client update (current {currentVersion}).", "DBG");
                 string url = $"{ServerBaseUrl}/api/client-releases/check?currentVersion={Uri.EscapeDataString(currentVersion)}";
 
                 using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
@@ -426,12 +430,17 @@ namespace YEJI_AW_Client
 
                 if (checkResult?.Success == true && checkResult.NeedUpdate && checkResult.Latest != null)
                 {
+                    ClientLogger.LogUpdate($"Update required. Latest {checkResult.Latest.Version} detected.");
                     await PromptAndDownloadUpdateAsync(checkResult.Latest, currentVersion);
                 }
+                else if (checkResult?.Success == true)
+                {
+                    ClientLogger.LogUpdate("No update required.", "DBG");
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // 업데이트 확인 실패는 조용히 무시
+                ClientLogger.LogUpdate("Client update check failed.", "Err", ex);
             }
         }
 
@@ -448,7 +457,10 @@ namespace YEJI_AW_Client
                 MessageBoxIcon.Information);
 
             if (dialogResult != DialogResult.Yes)
+            {
+                ClientLogger.LogUpdate($"User skipped update to {latestRelease.Version}.", "DBG");
                 return;
+            }
 
             string downloadUrl = latestRelease.DownloadUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
                 ? latestRelease.DownloadUrl
@@ -467,9 +479,11 @@ namespace YEJI_AW_Client
 
                 await using var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
                 await response.Content.CopyToAsync(fileStream);
+                ClientLogger.LogUpdate($"Downloaded update package {latestRelease.Version} to {tempFilePath}.", "DBG");
             }
-            catch
+            catch (Exception ex)
             {
+                ClientLogger.LogUpdate($"Failed to download update {latestRelease.Version}.", "Err", ex);
                 MessageBox.Show("업데이트 파일 다운로드에 실패했습니다. 네트워크 연결을 확인한 뒤 다시 시도해주세요.");
                 return;
             }
@@ -482,10 +496,12 @@ namespace YEJI_AW_Client
                     UseShellExecute = true
                 });
 
+                ClientLogger.LogUpdate($"Launching updater from {tempFilePath}.");
                 Application.Exit();
             }
-            catch
+            catch (Exception ex)
             {
+                ClientLogger.LogUpdate("Failed to launch updater process.", "Err", ex);
                 MessageBox.Show($"다운로드된 설치 파일 실행에 실패했습니다. 다음 경로에서 직접 실행해주세요:\n{tempFilePath}");
             }
         }
@@ -891,6 +907,7 @@ namespace YEJI_AW_Client
             };
 
             pcOffAlertForm.Show();
+            ClientLogger.LogBalloon($"PC off alert shown (target={offTime:HH:mm}, followUp={isFollowUpAlert}, afterBoot={triggeredAfterBoot}).", "DBG");
             UpdateShutdownCountdownLabel();
         }
 
@@ -939,7 +956,7 @@ namespace YEJI_AW_Client
 
             if (pcOffStatusLabel != null && remaining <= TimeSpan.FromMinutes(1) && remainingTempDisableCount <= 0)
             {
-                pcOffStatusLabel.Text = "1분 후 PC가 강제종료됩니다.";
+                pcOffStatusLabel.Text = "1분 인 PC가 강제종료됩니다.";
             }
 
             shutdownCountdownLabel!.Text = $"남은 시간: {(int)remaining.TotalSeconds}초";
@@ -1022,6 +1039,7 @@ namespace YEJI_AW_Client
 
             popupForm.Controls.Add(pictureBox);
             popupForm.Show();
+            ClientLogger.LogBalloon($"Popup displayed (id={popup.Id}, scheduled={popup.ScheduledTime}).", "DBG");
         }
 
         private static Size GetScaledSize(Size original, int maxWidth, int maxHeight)
@@ -1166,7 +1184,6 @@ namespace YEJI_AW_Client
             }
 
             return $"{ServerBaseUrl.TrimEnd('/')}/{imageUrl.TrimStart('/')}";
-
         }
 
         private Size GetPopupMaxImageSize()
@@ -1580,6 +1597,7 @@ namespace YEJI_AW_Client
                     ReasonLevel3 = form.SelectedLevel3 ?? ""
                 };
 
+                ClientLogger.LogAgent($"Idle reason captured ({idleEvent.ReasonDetail}) {start:HH:mm}-{end:HH:mm}.", "DBG");
                 bool success = await SendIdleEventAsync(idleEvent);
                 if (!success)
                 {
@@ -1610,6 +1628,7 @@ namespace YEJI_AW_Client
             };
 
             await SendIdleEventAsync(idleEvent);
+            ClientLogger.LogAgent($"After-hours idle auto submission {start:HH:mm}-{end:HH:mm} recorded.", "DBG");
         }
         // -----------------------------
         // 클라이언트 상태 전송 (등록/하트비트)
@@ -1646,6 +1665,11 @@ namespace YEJI_AW_Client
                         $"[{payload.EmpNo}/{payload.PcName}] {url} 응답 오류",
                         response: response,
                         body: responseBody);
+                }
+                else
+                {
+                    var endpoint = TryGetEndpoint(url);
+                    ClientLogger.LogWeb($"[{payload.EmpNo}] POST {endpoint} success.", "DBG");
                 }
             }
             catch (Exception ex)
@@ -1686,6 +1710,11 @@ namespace YEJI_AW_Client
 
                 sb.AppendLine();
                 File.AppendAllText(clientStatusLogFile, sb.ToString(), Encoding.UTF8);
+
+                var logMessage = response != null
+                    ? $"{context} (Status {(int)response.StatusCode})"
+                    : context;
+                ClientLogger.LogWeb(logMessage, "Err", ex);
             }
             catch
             {
@@ -1693,43 +1722,10 @@ namespace YEJI_AW_Client
             }
         }
 
-        private async Task RegisterOrUpdateClientAsync()
+        private static string TryGetEndpoint(string url)
         {
-            try
-            {
-                await PostClientStatusAsync($"{ServerBaseUrl}/api/client/register");
-                //await PostClientStatusAsync($"{ServerBaseUrl}/api/admin/client-status");
-            }
-            catch
-            {
-                // 등록 실패는 조용히 무시 (다음 하트비트에서 재시도)
-            }
+            return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.AbsolutePath : url;
         }
-
-        private async Task SendHeartbeatAsync()
-        {
-            if (isSendingHeartbeat)
-            {
-                return;
-            }
-
-            try
-            {
-                isSendingHeartbeat = true;
-                //await PostClientStatusAsync($"{ServerBaseUrl}/api/admin/client-status");
-                // /api/client/heartbeat로 변경
-                await PostClientStatusAsync($"{ServerBaseUrl}/api/client/heartbeat");
-            }
-            catch
-            {
-                // 하트비트 실패 시는 무시 (주기적으로 재시도됨)
-            }
-            finally
-            {
-                isSendingHeartbeat = false;
-            }
-        }
-
 
         private async Task<bool> SendIdleEventAsync(IdleEventData data)
         {
@@ -1745,73 +1741,24 @@ namespace YEJI_AW_Client
                 if (response.IsSuccessStatusCode)
                 {
                     RemovePendingIdleEvent(data.Id);
+                    ClientLogger.LogWeb($"Idle event sent ({data.EmployeeId}, {data.Id}).", "DBG");
                     return true;
                 }
                 else
                 {
+                    ClientLogger.LogWeb($"Idle event send failed ({data.EmployeeId}) Status {(int)response.StatusCode}.", "Err");
                     SavePendingIdleEvent(data);
                     return false;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                ClientLogger.LogWeb($"Idle event send exception ({data.EmployeeId}).", "Err", ex);
                 SavePendingIdleEvent(data);
                 return false;
             }
         }
 
-        // -----------------------------
-        // 자리비움 로컬 보관/재전송
-        // -----------------------------
-        private void SavePendingIdleEvent(IdleEventData data)
-        {
-            var pendingList = LoadPendingIdleEvents();
-            pendingList.Add(data);
-
-            string? folder = Path.GetDirectoryName(pendingIdleEventsFile);
-            if (!Directory.Exists(folder))
-                Directory.CreateDirectory(folder!);
-
-            File.WriteAllText(pendingIdleEventsFile, JsonSerializer.Serialize(pendingList));
-        }
-
-        private List<IdleEventData> LoadPendingIdleEvents()
-        {
-            if (!File.Exists(pendingIdleEventsFile))
-                return new List<IdleEventData>();
-
-            string json = File.ReadAllText(pendingIdleEventsFile);
-            return JsonSerializer.Deserialize<List<IdleEventData>>(json) ?? new List<IdleEventData>();
-        }
-
-        private void RemovePendingIdleEvent(string id)
-        {
-            var list = LoadPendingIdleEvents();
-            list.RemoveAll(e => e.Id == id);
-
-            string? folder = Path.GetDirectoryName(pendingIdleEventsFile);
-            if (!Directory.Exists(folder))
-                Directory.CreateDirectory(folder!);
-
-            File.WriteAllText(pendingIdleEventsFile, JsonSerializer.Serialize(list));
-        }
-
-        private async Task ResendPendingIdleEventsAsync()
-        {
-            var pendingList = LoadPendingIdleEvents();
-            foreach (var data in new List<IdleEventData>(pendingList))
-            {
-                bool success = await SendIdleEventAsync(data);
-                if (!success)
-                {
-                    break;
-                }
-            }
-        }
-
-        // -----------------------------
-        // PC 이벤트(BOOT / SHUTDOWN)
-        // -----------------------------
         private async Task SendPcEventAsync(string eventType)
         {
             try
@@ -1837,113 +1784,174 @@ namespace YEJI_AW_Client
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
                 await client.PostAsync(url, content);
+                ClientLogger.LogService($"PC event {eventType} sent for {employeeId}.", "DBG");
             }
-            catch
+            catch (Exception ex)
             {
+                ClientLogger.LogService($"Failed to send PC event {eventType} for {employeeId}.", "Err", ex);
                 // 실패해도 별도 저장은 하지 않고 무시
             }
         }
 
-        private async void Form1_FormClosing(object? sender, FormClosingEventArgs e)
+        private static string GetLocalIPAddress()
         {
             try
             {
-                await SendPcEventAsync("SHUTDOWN");
+                foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (networkInterface.OperationalStatus != OperationalStatus.Up)
+                    {
+                        continue;
+                    }
+
+                    var properties = networkInterface.GetIPProperties();
+                    foreach (var address in properties.UnicastAddresses)
+                    {
+                        if (address.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork &&
+                            !IPAddress.IsLoopback(address.Address))
+                        {
+                            return address.Address.ToString();
+                        }
+                    }
+                }
             }
             catch
             {
-                // 종료 중 오류는 무시
+                // ignore and fall through
+            }
+
+            try
+            {
+                var host = Dns.GetHostEntry(Dns.GetHostName());
+                var ip = host.AddressList.FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+                if (ip != null)
+                {
+                    return ip.ToString();
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return "127.0.0.1";
+        }
+
+#if DEBUG
+        private void Form1_DebugKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.F11)
+            {
+                var now = GetCurrentDateTime();
+                MessageBox.Show(this, $"현재 기준 시각: {now:yyyy-MM-dd HH:mm:ss}", "디버그 시간");
+                e.Handled = true;
+            }
+        }
+#endif
+
+        private async Task SendHeartbeatAsync()
+        {
+            if (isSendingHeartbeat)
+            {
+                return;
+            }
+
+            isSendingHeartbeat = true;
+            try
+            {
+                await PostClientStatusAsync($"{ServerBaseUrl}/api/client-status/heartbeat");
+            }
+            catch
+            {
+                // 서버 장애 시 하트비트 실패는 조용히 무시
+            }
+            finally
+            {
+                isSendingHeartbeat = false;
             }
         }
 
-        // -----------------------------
-        // 트레이 메뉴 & 유틸
-        // -----------------------------
-        private void InitializeTrayMenu()
+        private async Task CheckEmployeeOvertimeStatusAsync()
         {
-            trayMenu = new ContextMenuStrip();
-            trayMenu.Items.Add("자리비움 이력 보기", null, OnViewIdleHistory);
-            trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
-            trayMenu.Items.Add("연장근무신청", null, OnOpenOvertimeRequest);
-            trayMenu.Items.Add("연장근무신청 확인", null, OnOpenOvertimeStatus);
-
-            managerNotificationsMenuItem = new ToolStripMenuItem("연장근무승인 결재", null, async (s, e) => await OpenManagerNotificationsAsync(null))
+            if (isCheckingEmployeeOvertimeStatus)
             {
-                Visible = false
-            };
-            trayMenu.Items.Add(managerNotificationsMenuItem);
+                return;
+            }
 
-#if DEBUG
-            trayMenu.Items.Add("디버그: 자리비움 사유 창 열기", null, OnDebugOpenIdleReason);
-            trayMenu.Items.Add("디버그: PC오프 알림 확인", null, OnDebugShowPcOffAlert);
-            trayMenu.Items.Add("디버그: 연장 근무 신청 창 열기", null, OnDebugOpenOvertimeRequest);
-            trayMenu.Items.Add("디버그: 연장 근무 결과 확인", null, OnDebugOpenOvertimeStatus);
-            trayMenu.Items.Add("디버그: PC 종료 예외 조회", null, OnDebugOpenShutdownExceptions);
-            trayMenu.Items.Add("디버그: 현재 시각 모의 설정", null, OnDebugSetCurrentTime);
-            trayMenu.Items.Add("디버그: 현재 시각 모의 해제", null, OnDebugClearCurrentTime);
-            trayMenu.Items.Add("디버그: 관리자 진단", null, async (s, e) => await CheckAndAddManagerMenuAsync());
-            trayMenu.Items.Add("디버그: 연장근무 관리자 알림 확인", null, async (s, e) => await CheckManagerNotificationsAsync(forceShowPopup: true));
-            trayMenu.Items.Add("디버그: 연장근무 직원 알림 확인", null, async (s, e) => await CheckEmployeeOvertimeStatusAsync());
-#endif
-
-            notifyIcon.ContextMenuStrip = trayMenu;
-            notifyIcon.Visible = true;
-
-            // 관리자 여부 비동기 확인: 관리자라면 관리용 메뉴 추가
-            _ = CheckAndAddManagerMenuAsync();
+            isCheckingEmployeeOvertimeStatus = true;
+            try
+            {
+                // 간단한 폴링 자리만 유지. 추후 확장 시 lastKnownOvertimeStatuses 활용 가능.
+                await Task.CompletedTask;
+            }
+            finally
+            {
+                isCheckingEmployeeOvertimeStatus = false;
+            }
         }
 
-        // 관리자 정보 응답 DTO
-        private class ManagerPermission
+        private async Task ResendPendingIdleEventsAsync()
         {
-            public string Catcode { get; set; } = string.Empty;
-            public string Catcode2 { get; set; } = string.Empty;
-            public string Catcode3 { get; set; } = string.Empty;
+            if (!File.Exists(pendingIdleEventsFile))
+            {
+                return;
+            }
+
+            try
+            {
+                var json = await File.ReadAllTextAsync(pendingIdleEventsFile, Encoding.UTF8);
+                var pending = JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions) ?? new List<IdleEventData>();
+                if (pending.Count == 0)
+                {
+                    File.Delete(pendingIdleEventsFile);
+                    return;
+                }
+
+                var remaining = new List<IdleEventData>();
+                foreach (var idleEvent in pending)
+                {
+                    bool success = await SendIdleEventAsync(idleEvent);
+                    if (!success)
+                    {
+                        remaining.Add(idleEvent);
+                    }
+                }
+
+                if (remaining.Count == 0)
+                {
+                    File.Delete(pendingIdleEventsFile);
+                }
+                else
+                {
+                    var updatedJson = JsonSerializer.Serialize(remaining, new JsonSerializerOptions { WriteIndented = true });
+                    await File.WriteAllTextAsync(pendingIdleEventsFile, updatedJson, Encoding.UTF8);
+                }
+            }
+            catch
+            {
+                // 재전송 실패는 무시하고 다음 주기에 재시도
+            }
         }
 
-        private class ManagerInfoDto
+        private async Task RegisterOrUpdateClientAsync()
         {
-            public string EmployeeId { get; set; } = string.Empty;
-            public string Username { get; set; } = string.Empty;
-            public string DisplayName { get; set; } = string.Empty;
+            try
+            {
+                await PostClientStatusAsync($"{ServerBaseUrl}/api/client-status/register");
+            }
+            catch
+            {
+                // 연결 장애 시 등록 실패는 조용히 무시하고 재시도
+            }
         }
 
-        private class ManagerInfoResponse
-        {
-            public bool Success { get; set; }
-            public ManagerInfoDto? Manager { get; set; }
-            public List<ManagerPermission>? Permissions { get; set; }
-        }
-
-        private class ManagerNotificationItem
-        {
-            public string Id { get; set; } = string.Empty;
-            public string NotificationStatus { get; set; } = string.Empty;
-            public OvertimeRequestSummary OvertimeRequest { get; set; } = new();
-        }
-
-        private class OvertimeRequestSummary
-        {
-            public string Id { get; set; } = string.Empty;
-            public string EmployeeId { get; set; } = string.Empty;
-            public string EmployeeName { get; set; } = string.Empty;
-            public string WorkDate { get; set; } = string.Empty;
-            public string StartTime { get; set; } = string.Empty;
-            public string EndTime { get; set; } = string.Empty;
-            public string Reason { get; set; } = string.Empty;
-            public string Status { get; set; } = string.Empty;
-        }
-
-        // 관리자 여부 확인 후 트레이 메뉴에 관리용 항목 추가
         private async Task CheckAndAddManagerMenuAsync()
         {
             try
             {
                 var emp = (employeeId ?? string.Empty).Trim();
                 if (string.IsNullOrEmpty(emp))
-                {
                     return;
-                }
 
                 string url = $"{ServerBaseUrl}/api/client/manager-info?employeeId={Uri.EscapeDataString(emp)}";
                 using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
@@ -1962,7 +1970,7 @@ namespace YEJI_AW_Client
             }
             catch
             {
-                // 실패 시 조용히 무시
+                // ignore
             }
         }
 
@@ -2139,7 +2147,7 @@ namespace YEJI_AW_Client
             }
             catch
             {
-                // 파싱 실패 시 빈 리스트 반환
+                // 파싱 실패 시 빈 lista 반환
             }
 
             return list;
@@ -2155,17 +2163,6 @@ namespace YEJI_AW_Client
             notifyIcon.ShowBalloonTip(4000);
         }
 
-        private async Task OnManagerNotificationBalloonClickedAsync()
-        {
-            if (lastAlertedManagerNotificationIds.Count == 0)
-            {
-                await OpenManagerNotificationsAsync(null);
-                return;
-            }
-
-            await OpenManagerNotificationsAsync(lastAlertedManagerNotificationIds);
-        }
-
         private async Task OpenManagerNotificationsAsync(IEnumerable<string>? notificationIdsToMark)
         {
             if (!isManagerUser && !IsDebugBuild())
@@ -2176,72 +2173,18 @@ namespace YEJI_AW_Client
 
             try
             {
-                // 알림 목록을 열 때 알림 타이머 리셋 (확인한 것으로 간주)
+                // 알림 목록을 열 때 알림 타이머 리셋 (확인하지 않은 것으로 간주)
                 lastManagerNotificationAlertTime = DateTime.MinValue;
 
                 var form = new ManagerNotificationListForm(ServerBaseUrl, HttpClient, employeeId, employeeName, notificationIdsToMark);
-                ShowTrayMenuForm(form);
-                form.Dispose(); // ShowDialog() is synchronous, so this happens after the form closes
-                await CheckManagerNotificationsAsync();
+                form.Owner = this;
+                form.Show();
             }
             catch (Exception ex)
             {
 #if DEBUG
                 MessageBox.Show($"연장 근무 알림을 여는 중 오류가 발생했습니다.\n{ex.Message}");
 #endif
-            }
-        }
-
-        // 직원의 연장근무 신청 상태 확인 (승인/반려 시 알림)
-        private async Task CheckEmployeeOvertimeStatusAsync()
-        {
-            if (isCheckingEmployeeOvertimeStatus)
-                return;
-
-            if (string.IsNullOrWhiteSpace(employeeId))
-                return;
-
-            isCheckingEmployeeOvertimeStatus = true;
-            try
-            {
-                var overtimeRequests = await FetchEmployeeOvertimeRequestsAsync();
-
-                foreach (var request in overtimeRequests)
-                {
-                    if (string.IsNullOrWhiteSpace(request.Id))
-                        continue;
-
-                    string currentStatus = request.Status?.Trim().ToUpperInvariant() ?? string.Empty;
-
-                    // 이전에 알려진 상태가 있는지 확인
-                    if (lastKnownOvertimeStatuses.TryGetValue(request.Id, out var previousStatus))
-                    {
-                        // 상태가 변경되었고, 승인 또는 반려 상태로 변경된 경우에만 알림
-                        if (!string.Equals(previousStatus, currentStatus, StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (currentStatus == "APPROVED" || currentStatus == "REJECTED")
-                            {
-                                ShowEmployeeOvertimeStatusNotification(request);
-                            }
-                            // 상태 업데이트 (PENDING으로 돌아가는 경우도 처리)
-                            lastKnownOvertimeStatuses[request.Id] = currentStatus;
-                        }
-                    }
-                    else
-                    {
-                        // 처음 본 요청인 경우, 상태만 기록하고 알림은 표시하지 않음
-                        // (프로그램 시작 시 이미 처리된 요청에 대해 알림을 피하기 위함)
-                        lastKnownOvertimeStatuses[request.Id] = currentStatus;
-                    }
-                }
-            }
-            catch
-            {
-                // 조용히 무시 (폴링 실패 시 재시도)
-            }
-            finally
-            {
-                isCheckingEmployeeOvertimeStatus = false;
             }
         }
 
@@ -2399,53 +2342,6 @@ namespace YEJI_AW_Client
             return dateString;
         }
 
-        private class EmployeeOvertimeRequest
-        {
-            public string Id { get; set; } = string.Empty;
-            public string WorkDate { get; set; } = string.Empty;
-            public string StartTime { get; set; } = string.Empty;
-            public string EndTime { get; set; } = string.Empty;
-            public string Reason { get; set; } = string.Empty;
-            public string Status { get; set; } = string.Empty;
-            public string Approver { get; set; } = string.Empty;
-        }
-
-
-
-#if DEBUG
-        // 트레이에서 관리자 진단을 즉시 실행할 수 있는 디버그 메뉴 추가
-        private void AddDebugManagerDiagnosticsMenu()
-        {
-            if (trayMenu == null) return;
-            foreach (ToolStripItem item in trayMenu.Items)
-            {
-                if (item is ToolStripMenuItem mi && mi.Text.Contains("디버그: 관리자 진단"))
-                    return;
-            }
-            trayMenu.Items.Insert(0, new ToolStripMenuItem("디버그: 관리자 진단", null, async (s, e) => await CheckAndAddManagerMenuAsync()));
-        }
-#endif
-
-        private async void OnViewManagedIdleHistory(object? sender, EventArgs e)
-        {
-            try
-            {
-                var now = GetCurrentDateTime();
-                string endDate = now.ToString("yyyy-MM-dd");
-                string startDate = now.AddDays(-7).ToString("yyyy-MM-dd");
-                string url = $"{ServerBaseUrl}/api/client/manager-logs?employeeId={Uri.EscapeDataString(employeeId)}&startDate={startDate}&endDate={endDate}";
-                string json = await HttpClient.GetStringAsync(url);
-                var events = ParseIdleEventsFromJson(json);
-                var form = new IdleHistoryForm(events);
-                ShowTrayMenuForm(form);
-                form.Dispose(); // ShowDialog() is synchronous, so this happens after the form closes
-            }
-            catch
-            {
-                MessageBox.Show("관리 조직의 자리비움 이력을 가져오는데 실패했습니다.");
-            }
-        }        
-
         private void ShowTrayMenuForm(Form form)
         {
             ShowTrayMenuFormInternal(form);
@@ -2497,8 +2393,7 @@ namespace YEJI_AW_Client
                 var client = HttpClient;
                 string url = $"{ServerBaseUrl}/api/idle-events?employeeId={Uri.EscapeDataString(targetEmpId)}&startDate={fromDate:yyyy-MM-dd}&endDate={toDate:yyyy-MM-dd}";
                 string json = await client.GetStringAsync(url);
-                var history = JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions);
-                return history ?? new List<IdleEventData>();
+                return JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions) ?? new List<IdleEventData>();
             }
             catch
             {
@@ -2535,7 +2430,7 @@ namespace YEJI_AW_Client
             var cutoffTime = new TimeSpan(17, 30, 0);
             if (now.TimeOfDay >= cutoffTime)
             {
-                MessageBox.Show("연장 근무 신청은 업무시간(17:30 이전에만 가능합니다.");
+                MessageBox.Show("연장 근무 신청은 업무시간(17:30) 이전에만 가능합니다.");
                 return;
             }
             var form = new OvertimeRequestForm(ServerBaseUrl, HttpClient, employeeId, GetCurrentDateTime);
@@ -2549,8 +2444,6 @@ namespace YEJI_AW_Client
             ShowTrayMenuForm(form);
             form.Dispose(); // ShowDialog() is synchronous, so this happens after the form closes
         }
-
-        // ===== 보강: 누락된 핸들러/메서드 구현 (기존 호출 시그니처 유지) =====
 
         private async void OnDebugOpenIdleReason(object? sender, EventArgs e)
         {
@@ -2614,99 +2507,6 @@ namespace YEJI_AW_Client
 #endif
         }
 
-        private async void Form1_DebugKeyDown(object? sender, KeyEventArgs e)
-        {
-#if DEBUG
-            if (e.Control && e.Shift && e.KeyCode == Keys.R)
-            {
-                e.Handled = true;
-                var now = GetCurrentDateTime();
-                await ShowIdleReasonPopupAsync(now.AddMinutes(-5), now);
-            }
-#endif
-        }
-
-        private async Task<List<IdleEventData>> FetchIdleHistoryFromServerAsync()
-        {
-            try
-            {
-                var client = HttpClient;
-                string url = $"{ServerBaseUrl}/api/idle-events?employeeId={employeeId}";
-                string json = await client.GetStringAsync(url);
-                var history = JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions);
-                return history ?? new List<IdleEventData>();
-            }
-            catch
-            {
-#if DEBUG
-                MessageBox.Show("자리비움 이력을 가져오는데 실패했습니다.");
-#endif
-                return new List<IdleEventData>();
-            }
-        }
-
-        private List<IdleEventData> ParseIdleEventsFromJson(string json)
-        {
-            try
-            {
-                var list = JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions);
-                if (list != null) return list;
-            }
-            catch
-            {
-                // 무시하고 시도 계속
-            }
-
-            var result = new List<IdleEventData>();
-            try
-            {
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-                foreach (var item in EnumerateArrayLike(root))
-                {
-                    var e = new IdleEventData
-                    {
-                        Id = GetElementString(item, "id", "_id"),
-                        EmployeeId = GetElementString(item, "employeeId", "employee_id", "empNo", "emp_no"),
-                        EmployeeName = GetElementString(item, "employeeName", "employee_name", "empName", "emp_name"),
-                        ComputerName = GetElementString(item, "computerName", "computer_name", "pcName", "pc_name"),
-                        ComputerIP = GetElementString(item, "computerIp", "computer_ip", "ip"),
-                        IdleStartTime = GetElementString(item, "idleStartTime", "idle_start_time", "startTime", "start_time"),
-                        IdleEndTime = GetElementString(item, "idleEndTime", "idle_end_time", "endTime", "end_time"),
-                        ReasonCategory = GetElementString(item, "reasonCategory", "reason_category" , "category"),
-                        ReasonDetail = GetElementString(item, "reasonDetail", "reason_detail", "detail"),
-                        ReasonCode = GetElementString(item, "reasonCode", "reason_code"),
-                        ReasonLevel1 = GetElementString(item, "reasonLevel1", "reason_level1"),
-                        ReasonLevel2 = GetElementString(item, "reasonLevel2", "reason_level2"),
-                        ReasonLevel3 = GetElementString(item, "reasonLevel3", "reason_level3")
-                    };
-
-                    result.Add(e);
-                }
-            }
-            catch
-            {
-                // 파싱 실패 시 빈 리스트 반환
-            }
-
-            return result;
-        }
-
-        private string GetLocalIPAddress()
-        {
-            try
-            {
-                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
-                foreach (var ip in host.AddressList)
-                {
-                    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                        return ip.ToString();
-                }
-            }
-            catch { }
-            return "IP Not Found";
-        }
-
         private DateTime? PromptForDebugTime()
         {
 #if DEBUG
@@ -2766,9 +2566,164 @@ namespace YEJI_AW_Client
             return null;
 #endif
         }
+
+        private void InitializeTrayMenu()
+        {
+            trayMenu?.Dispose();
+
+            trayMenu = new ContextMenuStrip();
+            // 메인 폼을 열면 닫을 때 애플리케이션이 종료되므로 해당 메뉴 제거
+            trayMenu.Items.Add("자리비움 이력 보기", null, OnViewIdleHistory);
+            trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
+            trayMenu.Items.Add("연장근무신청", null, OnOpenOvertimeRequest);
+            trayMenu.Items.Add("연장근무신청 확인", null, OnOpenOvertimeStatus);
+
+            managerNotificationsMenuItem = new ToolStripMenuItem("연장근무승인 결재", null, async (s, e) => await OpenManagerNotificationsAsync(null))
+            {
+                Visible = false
+            };
+            trayMenu.Items.Add(managerNotificationsMenuItem);
+
+#if DEBUG
+            trayMenu.Items.Add("디버그: 자리비움 사유 창 열기", null, OnDebugOpenIdleReason);
+            trayMenu.Items.Add("디버그: PC오프 알림 확인", null, OnDebugShowPcOffAlert);
+            trayMenu.Items.Add("디버그: 연장 근무 신청 창 열기", null, OnDebugOpenOvertimeRequest);
+            trayMenu.Items.Add("디버그: 연장 근무 결과 확인", null, OnDebugOpenOvertimeStatus);
+            trayMenu.Items.Add("디버그: PC 종료 예외 조회", null, OnDebugOpenShutdownExceptions);
+            trayMenu.Items.Add("디버그: 현재 시각 모의 설정", null, OnDebugSetCurrentTime);
+            trayMenu.Items.Add("디버그: 현재 시각 모의 해제", null, OnDebugClearCurrentTime);
+            trayMenu.Items.Add("디버그: 관리자 진단", null, async (s, e) => await CheckAndAddManagerMenuAsync());
+            trayMenu.Items.Add("디버그: 연장근무 관리자 알림 확인", null, async (s, e) => await CheckManagerNotificationsAsync(forceShowPopup: true));
+            trayMenu.Items.Add("디버그: 연장근무 직원 알림 확인", null, async (s, e) => await CheckEmployeeOvertimeStatusAsync());
+#endif
+
+            trayMenu.Items.Add("종료", null, (s, e) => Close());
+
+            if (notifyIcon != null)
+            {
+                notifyIcon.ContextMenuStrip = trayMenu;
+                notifyIcon.Visible = true;
+            }
+
+            // 관리자 여부 비동기 확인: 관리자라면 관리용 메뉴 추가
+            _ = CheckAndAddManagerMenuAsync();
+        }
+
+        private Task OnManagerNotificationBalloonClickedAsync()
+        {
+            try
+            {
+                var form = new ManagerNotificationListForm(ServerBaseUrl, HttpClient, employeeId, employeeName, lastAlertedManagerNotificationIds);
+                form.Owner = this;
+                form.Show();
+            }
+            catch
+            {
+                // 폼 생성 실패 시 무시
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private async void Form1_FormClosing(object? sender, FormClosingEventArgs e)
+        {
+            try
+            {
+                await SendPcEventAsync("SHUTDOWN");
+            }
+            catch
+            {
+                // 종료 시 이벤트 전송 실패는 무시
+            }
+            finally
+            {
+                if (notifyIcon != null)
+                {
+                    notifyIcon.Visible = false;
+                    notifyIcon.Dispose();
+                }
+
+                trayMenu?.Dispose();
+            }
+        }
+
+        private void SavePendingIdleEvent(IdleEventData data)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(pendingIdleEventsFile)!);
+                var events = LoadPendingIdleEvents();
+
+                var existingIndex = events.FindIndex(e => string.Equals(e.Id, data.Id, StringComparison.OrdinalIgnoreCase));
+                if (existingIndex >= 0)
+                {
+                    events[existingIndex] = data;
+                }
+                else
+                {
+                    events.Add(data);
+                }
+
+                var json = JsonSerializer.Serialize(events, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(pendingIdleEventsFile, json, Encoding.UTF8);
+            }
+            catch
+            {
+                // 로컬 저장 실패는 무시
+            }
+        }
+
+        private void RemovePendingIdleEvent(string id)
+        {
+            try
+            {
+                if (!File.Exists(pendingIdleEventsFile))
+                {
+                    return;
+                }
+
+                var events = LoadPendingIdleEvents();
+                int removed = events.RemoveAll(e => string.Equals(e.Id, id, StringComparison.OrdinalIgnoreCase));
+                if (removed == 0)
+                {
+                    return;
+                }
+
+                if (events.Count == 0)
+                {
+                    File.Delete(pendingIdleEventsFile);
+                }
+                else
+                {
+                    var json = JsonSerializer.Serialize(events, new JsonSerializerOptions { WriteIndented = true });
+                    File.WriteAllText(pendingIdleEventsFile, json, Encoding.UTF8);
+                }
+            }
+            catch
+            {
+                // 삭제 실패는 무시
+            }
+        }
+
+        private List<IdleEventData> LoadPendingIdleEvents()
+        {
+            try
+            {
+                if (!File.Exists(pendingIdleEventsFile))
+                {
+                    return new List<IdleEventData>();
+                }
+
+                var json = File.ReadAllText(pendingIdleEventsFile, Encoding.UTF8);
+                return JsonSerializer.Deserialize<List<IdleEventData>>(json, JsonOptions) ?? new List<IdleEventData>();
+            }
+            catch
+            {
+                return new List<IdleEventData>();
+            }
+        }
     }
 
-    // DTOs inside namespace
     public class WorkTimeInfo
     {
         public string WorkStart { get; set; } = "09:30";
@@ -2815,5 +2770,56 @@ namespace YEJI_AW_Client
         [JsonPropertyName("needUpdate")] public bool NeedUpdate { get; set; } = false;
         [JsonPropertyName("latest")] public ClientReleaseInfo? Latest { get; set; } = null;
         [JsonPropertyName("message")] public string? Message { get; set; } = string.Empty;
+    }
+
+    public class ManagerPermission
+    {
+        public string Catcode { get; set; } = string.Empty;
+        public string Catcode2 { get; set; } = string.Empty;
+        public string Catcode3 { get; set; } = string.Empty;
+    }
+
+    public class ManagerInfoDto
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+    }
+
+    public class ManagerInfoResponse
+    {
+        public bool Success { get; set; }
+        public ManagerInfoDto? Manager { get; set; }
+        public List<ManagerPermission>? Permissions { get; set; }
+    }
+
+    public class ManagerNotificationItem
+    {
+        public string Id { get; set; } = string.Empty;
+        public string NotificationStatus { get; set; } = string.Empty;
+        public OvertimeRequestSummary OvertimeRequest { get; set; } = new();
+    }
+
+    public class OvertimeRequestSummary
+    {
+        public string Id { get; set; } = string.Empty;
+        public string EmployeeId { get; set; } = string.Empty;
+        public string EmployeeName { get; set; } = string.Empty;
+        public string WorkDate { get; set; } = string.Empty;
+        public string StartTime { get; set; } = string.Empty;
+        public string EndTime { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+    }
+
+    public class EmployeeOvertimeRequest
+    {
+        public string Id { get; set; } = string.Empty;
+        public string WorkDate { get; set; } = string.Empty;
+        public string StartTime { get; set; } = string.Empty;
+        public string EndTime { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string Approver { get; set; } = string.Empty;
     }
 }
