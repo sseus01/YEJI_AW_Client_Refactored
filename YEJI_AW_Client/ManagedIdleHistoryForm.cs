@@ -76,7 +76,8 @@ namespace YEJI_AW_Client
                 Dock = DockStyle.Top,
                 Height = 56,
                 BackColor = Color.FromArgb(7, 87, 167), // 헤더 전체 배경 (파랑)
-                Padding = new Padding(12, 8, 12, 8)
+                Padding = new Padding(12, 8, 12, 8),
+                Visible = false // 헤더 패널 숨김
             };
             var headerTitleLabel = new Label
             {
@@ -102,8 +103,8 @@ namespace YEJI_AW_Client
             orgCombo = new ComboBox { Left = 12, Top = 12, Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
             userCombo = new ComboBox { Left = 280, Top = 12, Width = 240, DropDownStyle = ComboBoxStyle.DropDownList };
 
-            startPicker = new DateTimePicker { Left = 530, Top = 12, Width = 160, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd" };
-            endPicker = new DateTimePicker { Left = 700, Top = 12, Width = 160, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd" };
+            startPicker = new DateTimePicker { Left = 530, Top = 12, Width = 110, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd" };
+            endPicker = new DateTimePicker { Left = 650, Top = 12, Width = 110, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd" };
             startPicker.Value = DateTime.Today;
             endPicker.Value = DateTime.Today;
 
@@ -111,7 +112,9 @@ namespace YEJI_AW_Client
 
             searchButton = new Button
             {
-                Width = 120,
+                Left = 770,
+                Top = 12,
+                Width = 80,
                 Height = 28,
                 Text = "조회",
                 BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
@@ -125,7 +128,9 @@ namespace YEJI_AW_Client
 
             orgViewButton = new Button
             {
-                Width = 120,
+                Left = 860,
+                Top = 12,
+                Width = 80,
                 Height = 28,
                 Text = "이력보기",
                 BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
@@ -211,25 +216,23 @@ namespace YEJI_AW_Client
                 Text = "자리비움 이력이 없습니다.",
                 AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.None,
-                Left = listView.Left,
-                Top = listView.Top,
-                Width = listView.Width,
-                Height = listView.Height,
+                Dock = DockStyle.Fill,
                 Visible = false,
                 ForeColor = Color.Gray,
                 BackColor = Color.White,
                 Font = new Font(Font, FontStyle.Regular)
             };
 
-            Controls.Add(orgCombo);
-            Controls.Add(userCombo);
-            Controls.Add(startPicker);
-            Controls.Add(endPicker);
-            Controls.Add(searchButton);
-            Controls.Add(orgViewButton);
             Controls.Add(listView);
             Controls.Add(emptyLabel);
+            
+            // Z-order adjustment for correct docking:
+            // Controls at the bottom of Z-order are docked first.
+            // We want filterPanel to dock Top first, reserving space.
+            // Then listView docks Fill in the remaining space.
+            headerPanel.SendToBack();
+            filterPanel.SendToBack();
+            listView.BringToFront();
             emptyLabel.BringToFront();
 
             orgCombo.SelectedIndexChanged += async (s, e) => await LoadUsersForSelectedOrgAsync();
