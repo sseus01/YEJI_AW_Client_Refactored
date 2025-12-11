@@ -18,6 +18,7 @@ namespace YEJI_AW_Client
         private readonly string managerEmpId;
         private string? managerDefaultOrgCode;
         private List<OrgWithUsers> managerOrgs = new();
+        private bool preferAllOrgOnFirstLoad = true;
 
         private ComboBox orgCombo;
         private ComboBox userCombo;
@@ -132,7 +133,7 @@ namespace YEJI_AW_Client
                 Top = 12,
                 Width = 80,
                 Height = 28,
-                Text = "이력보기",
+                Text = "전체보기",
                 BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -519,6 +520,21 @@ namespace YEJI_AW_Client
 
         private void SetDefaultOrgSelection()
         {
+            if (preferAllOrgOnFirstLoad)
+            {
+                preferAllOrgOnFirstLoad = false;
+                for (int i = 0; i < orgCombo.Items.Count; i++)
+                {
+                    if (orgCombo.Items[i] is ComboItem allItem && string.Equals(allItem.Value, "ALL", StringComparison.OrdinalIgnoreCase))
+                    {
+                        orgCombo.SelectedIndex = i;
+                        return;
+                    }
+                }
+                orgCombo.SelectedIndex = orgCombo.Items.Count > 0 ? 0 : -1;
+                return;
+            }
+
 #if DEBUG
             DebugLog("SetDefaultOrgSelection 시작", $"managerDefaultOrgCode={managerDefaultOrgCode}, 콤보박스 항목 수={orgCombo.Items.Count}");
 #endif
@@ -536,7 +552,6 @@ namespace YEJI_AW_Client
                 }
 #endif
 
-                // 먼저 정확히 일치하는 항목 찾기
                 var exactMatch = orgCombo.Items.Cast<object>()
                     .Select((item, idx) => (item, idx))
                     .FirstOrDefault(tuple => tuple.item is ComboItem ci &&
@@ -552,7 +567,6 @@ namespace YEJI_AW_Client
                     return;
                 }
 
-                // 정확히 일치하는 항목이 없으면 부분 일치 시도
                 var partialMatch = orgCombo.Items.Cast<object>()
                     .Select((item, idx) => (item, idx))
                     .FirstOrDefault(tuple => tuple.item is ComboItem ci &&
@@ -684,19 +698,11 @@ namespace YEJI_AW_Client
             PopulateUserComboFromDict(users);
 
             // 본인 사번이 목록에 있으면 기본 선택
-            if (userCombo.Items.Cast<object>().FirstOrDefault(it => it is ComboItem ci && ci.Value == managerEmpId) is ComboItem myItem)
-            {
-                userCombo.SelectedItem = myItem;
-            }
-            else if (userCombo.Items.Count == 0)
-            {
-                userCombo.Items.Add(new ComboItem("담당자 없음", string.Empty));
-                userCombo.SelectedIndex = 0;
-            }
-            else
-            {
-                userCombo.SelectedIndex = 0;
-            }
+            if (userCombo.Items.Count == 0)
+             {
+                 userCombo.Items.Add(new ComboItem("담당자 없음", string.Empty));
+                 userCombo.SelectedIndex = 0;
+             }
         }
 
         private static string GetProp(JsonElement element, params string[] names)
@@ -1122,32 +1128,13 @@ namespace YEJI_AW_Client
         private void PopulateUserComboFromDict(Dictionary<string, string> users)
         {
             userCombo.Items.Clear();
+            userCombo.Items.Add(new ComboItem("담당자 선택", string.Empty));
             foreach (var kv in users)
             {
                 var name = string.IsNullOrWhiteSpace(kv.Value) ? kv.Key : kv.Value.Trim();
                 userCombo.Items.Add(new ComboItem($"{name} ({kv.Key})", kv.Key));
             }
-            EnsureManagerSelection();
-        }
-
-        private void EnsureManagerSelection()
-        {
-            ComboItem? managerItem = null;
-            foreach (var item in userCombo.Items)
-            {
-                if (item is ComboItem ci && ci.Value == managerEmpId)
-                {
-                    managerItem = ci;
-                    break;
-                }
-            }
-
-            if (managerItem != null)
-            {
-                userCombo.SelectedItem = managerItem;
-            }
-
-            else if (userCombo.Items.Count > 0)
+            if (userCombo.Items.Count > 0)
             {
                 userCombo.SelectedIndex = 0;
             }
