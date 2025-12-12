@@ -22,5 +22,8 @@ namespace YEJI_AW_Client
 
         [JsonPropertyName("ip")]
         public string Ip { get; set; } = string.Empty;
+
+        [JsonPropertyName("timestamp")]
+        public string Timestamp { get; set; } = string.Empty;
     }
 }

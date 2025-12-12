@@ -74,7 +74,14 @@ namespace YEJI_AW_Client
         {
             try
             {
-                return Application.ProductVersion;
+                string version = Application.ProductVersion;
+                // 버전 정보에 +buildmetadata가 포함된 경우 제거 (예: 1.0.0+abcdef...)
+                int plusIndex = version.IndexOf('+');
+                if (plusIndex > 0)
+                {
+                    return version.Substring(0, plusIndex);
+                }
+                return version;
             }
             catch
             {
@@ -1644,7 +1651,8 @@ namespace YEJI_AW_Client
                 PcName = computerName,
                 ClientVersion = GetCurrentVersion(),
                 Ip = computerIP,
-                Installed = 1
+                Installed = 1,
+                Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
             };
         }
 
@@ -1859,11 +1867,12 @@ namespace YEJI_AW_Client
             isSendingHeartbeat = true;
             try
             {
-                await PostClientStatusAsync($"{ServerBaseUrl}/api/client-status/heartbeat");
+                // /api/client/heartbeat로 변경
+                await PostClientStatusAsync($"{ServerBaseUrl}/api/client/heartbeat");
             }
             catch
             {
-                // 서버 장애 시 하트비트 실패는 조용히 무시
+                // 하트비트 실패 시는 무시 (주기적으로 재시도됨)
             }
             finally
             {
