@@ -96,13 +96,16 @@ namespace YEJI_AW_Client
         private DateTime sessionLockStartTime = DateTime.MinValue;
         private bool wasInLunchBreak = false;
 
-        private static readonly HttpClient HttpClient = new HttpClient();
+        private static readonly HttpClient HttpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(30)
+        };
         private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         };
         private readonly TimeSpan heartbeatInterval = TimeSpan.FromMinutes(2);
-        private bool isSendingHeartbeat = false;
+        private readonly SemaphoreSlim heartbeatSemaphore = new SemaphoreSlim(1, 1);
         private readonly TimeSpan popupCacheDuration = TimeSpan.FromMinutes(5);
         private DateTime lastPopupFetchUtc = DateTime.MinValue;
         private List<PopupSchedule> cachedPopupSchedules = new();
@@ -948,7 +951,7 @@ namespace YEJI_AW_Client
 
         private void UpdateShutdownCountdownLabel()
         {
-            if (!shutdownCountdownLabel?.IsHandleCreated ?? true)
+            if (shutdownCountdownLabel == null || !shutdownCountdownLabel.IsHandleCreated)
             {
                 return;
             }
@@ -967,7 +970,7 @@ namespace YEJI_AW_Client
 
             if (pcOffStatusLabel != null && remaining <= TimeSpan.FromMinutes(1) && remainingTempDisableCount <= 0)
             {
-                pcOffStatusLabel.Text = "1분 인 PC가 강제종료됩니다.";
+                pcOffStatusLabel.Text = "1분 후 PC가 강제종료됩니다.";
             }
 
             shutdownCountdownLabel!.Text = $"남은 시간: {(int)remaining.TotalSeconds}초";
@@ -1863,12 +1866,12 @@ namespace YEJI_AW_Client
 
         private async Task SendHeartbeatAsync()
         {
-            if (isSendingHeartbeat)
+            // Use semaphore to prevent race conditions
+            if (!await heartbeatSemaphore.WaitAsync(0))
             {
                 return;
             }
-
-            isSendingHeartbeat = true;
+                       
             try
             {
                 // /api/client/heartbeat로 변경
@@ -1880,7 +1883,7 @@ namespace YEJI_AW_Client
             }
             finally
             {
-                isSendingHeartbeat = false;
+                heartbeatSemaphore.Release();
             }
         }
 
@@ -2680,9 +2683,10 @@ namespace YEJI_AW_Client
                 var json = JsonSerializer.Serialize(events, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(pendingIdleEventsFile, json, Encoding.UTF8);
             }
-            catch
+            catch (Exception ex)
             {
-                // 로컬 저장 실패는 무시
+                // 로컬 저장 실패 시 로그 기록
+                ClientLogger.LogAgent($"Failed to save pending idle event: {ex.Message}", "Err", ex);
             }
         }
 

@@ -22,7 +22,10 @@ namespace YEJI_AW_Client
         private readonly string serverBaseUrl;
         private List<AwayReason> awayReasons = new();
 
-        private static readonly HttpClient HttpClient = new HttpClient();
+        private static readonly HttpClient HttpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(30)
+        };
         private static readonly object ReasonCacheLock = new();
         private static List<AwayReason> cachedAwayReasons = new();
         private static DateTime lastReasonFetchUtc = DateTime.MinValue;
