@@ -106,6 +106,7 @@ namespace YEJI_AW_Client
         };
         private readonly TimeSpan heartbeatInterval = TimeSpan.FromMinutes(2);
         private readonly SemaphoreSlim heartbeatSemaphore = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim idleIntervalSemaphore = new SemaphoreSlim(1, 1);
         private readonly TimeSpan popupCacheDuration = TimeSpan.FromMinutes(5);
         private DateTime lastPopupFetchUtc = DateTime.MinValue;
         private List<PopupSchedule> cachedPopupSchedules = new();
@@ -113,6 +114,7 @@ namespace YEJI_AW_Client
         private const int PopupImageMinWidth = 720;
         private const int PopupImageMinHeight = 560;
         private HashSet<string> processedIdleIntervals = new();
+        private List<(DateTime Start, DateTime End)> processedIdleIntervalRanges = new();
         private DateTime idleKeyDate;
         private bool hasShownPcOffAlert = false;
         private DateTime? pcOffAlertTargetTime;
@@ -135,6 +137,7 @@ namespace YEJI_AW_Client
         private HashSet<string> lastAlertedManagerNotificationIds = new();
         private ToolStripMenuItem? managerNotificationsMenuItem;
         private DateTime lastManagerNotificationAlertTime = DateTime.MinValue;
+        private ManagerNotificationListForm? managerNotificationListForm;
 
         private bool isManagerUser;
 
@@ -1083,6 +1086,7 @@ namespace YEJI_AW_Client
             if (idleKeyDate != currentDate)
             {
                 processedIdleIntervals.Clear();
+                processedIdleIntervalRanges.Clear();
                 idleKeyDate = currentDate;
             }
         }
@@ -1155,7 +1159,21 @@ namespace YEJI_AW_Client
         {
             return $"{start:yyyyMMddHHmmssfff}-{end:yyyyMMddHHmmssfff}";
         }
-               
+
+        private bool HasOverlappingInterval(DateTime start, DateTime end)
+        {
+            // 이미 처리된 구간과 겹치는지 확인 (업데이트 후 재시작 시 유사한 구간이 중복으로 표시되는 것을 방지)
+            foreach (var range in processedIdleIntervalRanges)
+            {
+                // 두 구간이 겹치는 경우: (start1 < end2) && (end1 > start2)
+                if (start < range.End && end > range.Start)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private async Task<Image?> LoadScaledImageAsync(string url, int maxWidth, int maxHeight)
         {
             try
@@ -1488,19 +1506,36 @@ namespace YEJI_AW_Client
 
         private async Task HandleIdleIntervalAsync(DateTime start, DateTime end)
         {
-            ClearStaleIdleKeys();
-            var segments = SplitIdleInterval(start, end);
-            foreach (var segment in segments)
+            // 동시 실행 방지: 여러 이벤트(idle 타이머, 절전 복귀, 세션 잠금 해제)가 동시에 발생할 수 있으므로
+            // 세마포어로 순차 처리하여 중복 팝업을 방지
+            await idleIntervalSemaphore.WaitAsync();
+            try
             {
-                string intervalKey = GetIdleIntervalKey(segment.Start, segment.End);
-                if (processedIdleIntervals.Contains(intervalKey))
+                ClearStaleIdleKeys();
+                var segments = SplitIdleInterval(start, end);
+                foreach (var segment in segments)
                 {
-                    continue;
-                }
+                    // 겹치는 구간이 이미 처리되었는지 확인 (업데이트 재시작 시 유사한 구간 중복 방지)
+                    if (HasOverlappingInterval(segment.Start, segment.End))
+                    {
+                        continue;
+                    }
 
-                processedIdleIntervals.Add(intervalKey); 
-                await ShowIdleReasonPopupAsync(segment.Start, segment.End);
+                    string intervalKey = GetIdleIntervalKey(segment.Start, segment.End);
+                    if (processedIdleIntervals.Contains(intervalKey))
+                    {
+                        continue;
+                    }
+
+                    processedIdleIntervals.Add(intervalKey);
+                    processedIdleIntervalRanges.Add((segment.Start, segment.End));
+                    await ShowIdleReasonPopupAsync(segment.Start, segment.End);
+                }
             }
+            finally
+            {
+                idleIntervalSemaphore.Release();
+            }           
         }
 
         private List<(DateTime Start, DateTime End)> SplitIdleInterval(DateTime start, DateTime end)
@@ -2189,12 +2224,21 @@ namespace YEJI_AW_Client
 
             try
             {
+                // 이미 열려있는 창이 있으면 앞으로 가져오기
+                if (managerNotificationListForm != null && !managerNotificationListForm.IsDisposed)
+                {
+                    managerNotificationListForm.BringToFront();
+                    managerNotificationListForm.Activate();
+                    return;
+                }
+
                 // 알림 목록을 열 때 알림 타이머 리셋 (확인하지 않은 것으로 간주)
                 lastManagerNotificationAlertTime = DateTime.MinValue;
 
-                var form = new ManagerNotificationListForm(ServerBaseUrl, HttpClient, employeeId, employeeName, notificationIdsToMark);
-                form.Owner = this;
-                form.Show();
+                managerNotificationListForm = new ManagerNotificationListForm(ServerBaseUrl, HttpClient, employeeId, employeeName, notificationIdsToMark);
+                managerNotificationListForm.Owner = this;
+                managerNotificationListForm.FormClosed += (s, e) => managerNotificationListForm = null;
+                managerNotificationListForm.Show();
             }
             catch (Exception ex)
             {
@@ -2629,9 +2673,18 @@ namespace YEJI_AW_Client
         {
             try
             {
-                var form = new ManagerNotificationListForm(ServerBaseUrl, HttpClient, employeeId, employeeName, lastAlertedManagerNotificationIds);
-                form.Owner = this;
-                form.Show();
+                // 이미 열려있는 창이 있으면 앞으로 가져오기
+                if (managerNotificationListForm != null && !managerNotificationListForm.IsDisposed)
+                {
+                    managerNotificationListForm.BringToFront();
+                    managerNotificationListForm.Activate();
+                    return Task.CompletedTask;
+                }
+
+                managerNotificationListForm = new ManagerNotificationListForm(ServerBaseUrl, HttpClient, employeeId, employeeName, lastAlertedManagerNotificationIds);
+                managerNotificationListForm.Owner = this;
+                managerNotificationListForm.FormClosed += (s, e) => managerNotificationListForm = null;
+                managerNotificationListForm.Show();
             }
             catch
             {

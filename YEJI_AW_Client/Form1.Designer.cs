@@ -33,9 +33,11 @@
 
                 // Dispose semaphores
                 heartbeatSemaphore?.Dispose();
+                idleIntervalSemaphore?.Dispose();
 
                 // Dispose forms
                 pcOffAlertForm?.Dispose();
+                managerNotificationListForm?.Dispose();
 
                 // Dispose tray menu
                 trayMenu?.Dispose();
