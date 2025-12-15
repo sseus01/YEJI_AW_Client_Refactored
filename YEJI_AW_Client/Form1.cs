@@ -533,13 +533,22 @@ namespace YEJI_AW_Client
 
             try
             {
-                Process.Start(new ProcessStartInfo
+                bool isSetupExe = string.Equals(Path.GetFileName(tempFilePath), "Setup.exe", StringComparison.OrdinalIgnoreCase);
+                string arguments = isSetupExe
+                    ? "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS=no"
+                    : string.Empty;
+
+                var startInfo = new ProcessStartInfo
                 {
                     FileName = tempFilePath,
+                    Arguments = arguments,
                     UseShellExecute = true
-                });
+                };
 
-                ClientLogger.LogUpdate($"Launching updater from {tempFilePath}.");
+                Process.Start(startInfo);
+
+                string argLog = isSetupExe ? $" with args '{arguments}'" : string.Empty;
+                ClientLogger.LogUpdate($"Launching updater from {tempFilePath}{argLog}.");
                 Application.Exit();
             }
             catch (Exception ex)
