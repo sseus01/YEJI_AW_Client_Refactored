@@ -68,6 +68,10 @@ namespace YEJI_AW_Client
         private readonly string clientStatusLogFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "client_status.log");
 
+        // 마지막 실행된 클라이언트 버전 기록용
+        private readonly string clientVersionFile =
+            Path.Combine(@"C:\ProgramData\YEJI_AW", "client_version.txt");
+
         private const string ServerBaseUrl = "http://175.106.99.157:3000";
 
         private static string GetCurrentVersion()
@@ -283,6 +287,7 @@ namespace YEJI_AW_Client
             {
                 this.Hide();
                 this.ShowInTaskbar = false;
+                ShowUpdateCompletionNotificationIfNeeded();
                 await ResendPendingIdleEventsAsync();
                 await FetchWorkTimeFromServerAsync();
                 await CheckClientUpdateAsync();
@@ -448,7 +453,7 @@ namespace YEJI_AW_Client
                 if (checkResult?.Success == true && checkResult.NeedUpdate && checkResult.Latest != null)
                 {
                     ClientLogger.LogUpdate($"Update required. Latest {checkResult.Latest.Version} detected.");
-                    await PromptAndDownloadUpdateAsync(checkResult.Latest, currentVersion);
+                    await DownloadAndInstallUpdateAsync(checkResult.Latest);
                 }
                 else if (checkResult?.Success == true)
                 {
@@ -461,23 +466,44 @@ namespace YEJI_AW_Client
             }
         }
 
-        private async Task PromptAndDownloadUpdateAsync(ClientReleaseInfo latestRelease, string currentVersion)
+        private void ShowUpdateCompletionNotificationIfNeeded()
         {
-            string releaseNotes = string.IsNullOrWhiteSpace(latestRelease.ReleaseNotes)
-                ? string.Empty
-                : $"\n\n변경 사항:\n{latestRelease.ReleaseNotes}";
-
-            DialogResult dialogResult = MessageBox.Show(
-                $"현재 버전: {currentVersion}\n최신 버전: {latestRelease.Version}\n자동 업데이트를 진행하시겠습니까?{releaseNotes}",
-                "새 버전 감지",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Information);
-
-            if (dialogResult != DialogResult.Yes)
+            try
             {
-                ClientLogger.LogUpdate($"User skipped update to {latestRelease.Version}.", "DBG");
-                return;
+                string currentVersion = GetCurrentVersion();
+                string folder = Path.GetDirectoryName(clientVersionFile) ?? string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(folder) && !Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                string? previousVersion = null;
+                if (File.Exists(clientVersionFile))
+                {
+                    previousVersion = File.ReadAllText(clientVersionFile, Encoding.UTF8).Trim();
+                }
+
+                File.WriteAllText(clientVersionFile, currentVersion, Encoding.UTF8);
+
+                if (!string.IsNullOrWhiteSpace(previousVersion) && previousVersion != currentVersion)
+                {
+                    notifyIcon.BalloonTipTitle = "업데이트 완료";
+                    notifyIcon.BalloonTipText = $"클라이언트가 최신 버전({currentVersion})으로 업데이트되었습니다.";
+                    notifyIcon.ShowBalloonTip(5000);
+                }
             }
+            catch (Exception ex)
+            {
+                ClientLogger.LogUpdate("Failed to notify update completion.", "Err", ex);
+            }
+        }
+
+        private async Task DownloadAndInstallUpdateAsync(ClientReleaseInfo latestRelease)
+        {
+            ClientLogger.LogUpdate($"Starting automatic update to {latestRelease.Version}.");
+
+            StopRelatedProcessesForUpdate();
 
             string downloadUrl = latestRelease.DownloadUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
                 ? latestRelease.DownloadUrl
@@ -520,6 +546,51 @@ namespace YEJI_AW_Client
             {
                 ClientLogger.LogUpdate("Failed to launch updater process.", "Err", ex);
                 MessageBox.Show($"다운로드된 설치 파일 실행에 실패했습니다. 다음 경로에서 직접 실행해주세요:\n{tempFilePath}");
+            }
+        }
+
+        private void StopRelatedProcessesForUpdate()
+        {
+            try
+            {
+                int currentProcessId = Process.GetCurrentProcess().Id;
+
+                TerminateProcessByName("YEJI_AW_Watcher", skipProcessId: null);
+                TerminateProcessByName("YEJI_AW_Client", skipProcessId: currentProcessId);
+
+                ClientLogger.LogUpdate("Terminated running client/watchers before updater launch.", "DBG");
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogUpdate("Failed to terminate running processes before update.", "Err", ex);
+            }
+        }
+
+        private void TerminateProcessByName(string processName, int? skipProcessId)
+        {
+            try
+            {
+                var processes = Process.GetProcessesByName(processName);
+                foreach (var process in processes)
+                {
+                    if (skipProcessId.HasValue && process.Id == skipProcessId.Value)
+                        continue;
+
+                    try
+                    {
+                        process.Kill();
+                        process.WaitForExit(5000);
+                        ClientLogger.LogUpdate($"Terminated process {process.ProcessName} (PID {process.Id}).", "DBG");
+                    }
+                    catch (Exception killEx)
+                    {
+                        ClientLogger.LogUpdate($"Failed to terminate process {process.ProcessName} (PID {process.Id}).", "Err", killEx);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogUpdate($"Process enumeration failed for {processName}.", "Err", ex);
             }
         }
 
