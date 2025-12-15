@@ -2657,8 +2657,6 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("디버그: 연장근무 직원 알림 확인", null, async (s, e) => await CheckEmployeeOvertimeStatusAsync());
 #endif
 
-            trayMenu.Items.Add("종료", null, (s, e) => Close());
-
             if (notifyIcon != null)
             {
                 notifyIcon.ContextMenuStrip = trayMenu;
