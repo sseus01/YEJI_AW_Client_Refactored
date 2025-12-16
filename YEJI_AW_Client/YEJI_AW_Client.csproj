@@ -49,6 +49,7 @@
   </ItemGroup>
 	
  <ItemGroup>
+    <PackageReference Include="Autoupdater.NET.Official" Version="1.9.2" />
     <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
 

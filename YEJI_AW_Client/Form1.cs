@@ -36,6 +36,7 @@ namespace YEJI_AW_Client
         private Timer memoryTrimTimer;  // 주기적으로 워킹셋 정리
         private Timer heartbeatTimer;   // 주기적 상태 전송
         private Timer updateCheckTimer; // 주기적 업데이트 확인
+        private bool isUpdatingClient;  // 자동 업데이트 진행 여부 플래그
 
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
@@ -436,7 +437,7 @@ namespace YEJI_AW_Client
         // -----------------------------
         // 클라이언트 자동 업데이트 확인
         // -----------------------------
-        private async Task CheckClientUpdateAsync()
+        private async Task CheckClientUpdateAsync(bool forceInstall = false, bool notifyWhenNoUpdate = false)
         {
             try
             {
@@ -450,14 +451,39 @@ namespace YEJI_AW_Client
                 await using var stream = await response.Content.ReadAsStreamAsync();
                 var checkResult = await JsonSerializer.DeserializeAsync<ClientReleaseCheckResponse>(stream, JsonOptions);
 
-                if (checkResult?.Success == true && checkResult.NeedUpdate && checkResult.Latest != null)
+                bool checkSuccess = checkResult?.Success == true;
+                bool hasLatestRelease = checkResult?.Latest != null;
+                bool shouldUpdate = checkSuccess && hasLatestRelease && (checkResult!.NeedUpdate || forceInstall);
+
+                if (shouldUpdate)
                 {
-                    ClientLogger.LogUpdate($"Update required. Latest {checkResult.Latest.Version} detected.");
+                    if (isUpdatingClient)
+                    {
+                        ClientLogger.LogUpdate("Update already in progress. Skipping duplicate check.", "DBG");
+                        return;
+                    }
+
+                    string latestVersion = checkResult!.Latest!.Version;
+                    string notificationTitle = forceInstall ? "디버그 업데이트 테스트" : "자동 업데이트 진행 중";
+                    string notificationMessage = forceInstall
+                        ? $"디버그 모드에서 새 버전({latestVersion}) 설치를 강제로 시작합니다."
+                        : $"새 버전({latestVersion})이 감지되어 자동으로 설치를 진행합니다.";
+
+                    ClientLogger.LogUpdate($"Update required. Latest {latestVersion} detected. ForceInstall={forceInstall}.");
+                    ShowTrayNotification(notificationTitle, notificationMessage);
                     await DownloadAndInstallUpdateAsync(checkResult.Latest);
                 }
-                else if (checkResult?.Success == true)
+                else if (checkSuccess)
                 {
                     ClientLogger.LogUpdate("No update required.", "DBG");
+
+                    if (notifyWhenNoUpdate)
+                    {
+                        string message = hasLatestRelease
+                            ? $"업데이트 대상이 없어 설치를 건너뜁니다. (서버 최신: {checkResult!.Latest!.Version})"
+                            : "서버에 최신 릴리스 정보가 없어 업데이트를 건너뜁니다.";
+                        ShowTrayNotification("디버그 업데이트 테스트", message, ToolTipIcon.Info);
+                    }
                 }
             }
             catch (Exception ex)
@@ -488,9 +514,9 @@ namespace YEJI_AW_Client
 
                 if (!string.IsNullOrWhiteSpace(previousVersion) && previousVersion != currentVersion)
                 {
-                    notifyIcon.BalloonTipTitle = "업데이트 완료";
-                    notifyIcon.BalloonTipText = $"클라이언트가 최신 버전({currentVersion})으로 업데이트되었습니다.";
-                    notifyIcon.ShowBalloonTip(5000);
+                    ShowTrayNotification(
+                       "업데이트 완료",
+                       $"클라이언트가 최신 버전({currentVersion})으로 업데이트되었습니다.");
                 }
             }
             catch (Exception ex)
@@ -499,8 +525,22 @@ namespace YEJI_AW_Client
             }
         }
 
+        private void ShowTrayNotification(string title, string message, ToolTipIcon icon = ToolTipIcon.Info, int timeoutMs = 5000)
+        {
+            if (notifyIcon == null)
+            {
+                return;
+            }
+
+            notifyIcon.BalloonTipTitle = title;
+            notifyIcon.BalloonTipText = message;
+            notifyIcon.BalloonTipIcon = icon;
+            notifyIcon.ShowBalloonTip(timeoutMs);
+        }
+
         private async Task DownloadAndInstallUpdateAsync(ClientReleaseInfo latestRelease)
         {
+            isUpdatingClient = true;
             ClientLogger.LogUpdate($"Starting automatic update to {latestRelease.Version}.");
 
             StopRelatedProcessesForUpdate();
@@ -527,7 +567,8 @@ namespace YEJI_AW_Client
             catch (Exception ex)
             {
                 ClientLogger.LogUpdate($"Failed to download update {latestRelease.Version}.", "Err", ex);
-                MessageBox.Show("업데이트 파일 다운로드에 실패했습니다. 네트워크 연결을 확인한 뒤 다시 시도해주세요.");
+                ShowTrayNotification("업데이트 실패", "업데이트 파일 다운로드에 실패했습니다. 네트워크 연결을 확인한 뒤 다시 시도해주세요.", ToolTipIcon.Error);
+                isUpdatingClient = false;
                 return;
             }
 
@@ -554,7 +595,12 @@ namespace YEJI_AW_Client
             catch (Exception ex)
             {
                 ClientLogger.LogUpdate("Failed to launch updater process.", "Err", ex);
-                MessageBox.Show($"다운로드된 설치 파일 실행에 실패했습니다. 다음 경로에서 직접 실행해주세요:\n{tempFilePath}");
+                ShowTrayNotification(
+                  "업데이트 실패",
+                  $"다운로드된 설치 파일 실행에 실패했습니다. 다음 경로에서 직접 실행해주세요:\n{tempFilePath}",
+                  ToolTipIcon.Error,
+                  timeoutMs: 8000);
+                isUpdatingClient = false;
             }
         }
 
@@ -2647,6 +2693,13 @@ namespace YEJI_AW_Client
 #endif
         }
 
+        private async void OnDebugRunUpdateTest(object? sender, EventArgs e)
+        {
+#if DEBUG
+            await CheckClientUpdateAsync(forceInstall: true, notifyWhenNoUpdate: true);
+#endif
+        }
+
         private DateTime? PromptForDebugTime()
         {
 #if DEBUG
@@ -2732,6 +2785,7 @@ namespace YEJI_AW_Client
             trayMenu.Items.Add("디버그: PC 종료 예외 조회", null, OnDebugOpenShutdownExceptions);
             trayMenu.Items.Add("디버그: 현재 시각 모의 설정", null, OnDebugSetCurrentTime);
             trayMenu.Items.Add("디버그: 현재 시각 모의 해제", null, OnDebugClearCurrentTime);
+            trayMenu.Items.Add("디버그: 업데이트 테스트 실행", null, OnDebugRunUpdateTest);
             trayMenu.Items.Add("디버그: 관리자 진단", null, async (s, e) => await CheckAndAddManagerMenuAsync());
             trayMenu.Items.Add("디버그: 연장근무 관리자 알림 확인", null, async (s, e) => await CheckManagerNotificationsAsync(forceShowPopup: true));
             trayMenu.Items.Add("디버그: 연장근무 직원 알림 확인", null, async (s, e) => await CheckEmployeeOvertimeStatusAsync());
