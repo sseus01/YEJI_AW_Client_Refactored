@@ -17,6 +17,32 @@
     <Description>사내근태솔루션</Description>
     <Copyright>YEJISOLUTION</Copyright>
   </PropertyGroup>
+	
+  <!-- 용량 최적화 설정 (Release 빌드) -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- 디버그 심볼 제거 (요청사항: 디버그 정보 삭제) -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    
+    <!-- Self-Contained 배포 + 트리밍 (설치 후 용량 감소: 435MB → 60-100MB) -->
+    <!-- .NET 런타임 포함, 사용하지 않는 코드 제거 -->
+    <SelfContained>true</SelfContained>
+    
+    <!-- 사용하지 않는 코드 제거 (트리밍) -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <!-- partial 모드: Windows Forms와 같이 리플렉션을 사용하는 앱에 안전. full 모드는 더 많이 제거하지만 런타임 오류 위험 -->
+    <TrimMode>partial</TrimMode>
+    
+    <!-- 단일 파일로 배포 및 압축 -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    
+    <!-- 네이티브 라이브러리 최적화 (애플리케이션이 네이티브 종속성을 요구하지 않는 경우) -->
+    <IncludeNativeLibrariesForSelfContained>false</IncludeNativeLibrariesForSelfContained>
+    
+    <!-- 읽기 전용 어셈블리 비활성화 (용량 절감) -->
+    <PublishReadyToRun>false</PublishReadyToRun>
+  </PropertyGroup>	
 
   <ItemGroup>
     <Content Include="TrayIcon_Y_orange.ico" />
