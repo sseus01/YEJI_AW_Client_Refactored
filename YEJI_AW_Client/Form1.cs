@@ -574,8 +574,8 @@ namespace YEJI_AW_Client
 
             try
             {
-                bool isSetupExe = string.Equals(Path.GetFileName(tempFilePath), "Setup.exe", StringComparison.OrdinalIgnoreCase);
-                string arguments = isSetupExe
+                bool isExecutable = string.Equals(Path.GetExtension(tempFilePath), ".exe", StringComparison.OrdinalIgnoreCase);
+                string arguments = isExecutable
                     ? "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS=no"
                     : string.Empty;
 
@@ -588,7 +588,7 @@ namespace YEJI_AW_Client
 
                 Process.Start(startInfo);
 
-                string argLog = isSetupExe ? $" with args '{arguments}'" : string.Empty;
+                string argLog = isExecutable ? $" with args '{arguments}'" : string.Empty;
                 ClientLogger.LogUpdate($"Launching updater from {tempFilePath}{argLog}.");
                 Application.Exit();
             }
