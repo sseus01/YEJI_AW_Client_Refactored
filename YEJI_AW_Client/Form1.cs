@@ -73,6 +73,10 @@ namespace YEJI_AW_Client
         private readonly string clientVersionFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "client_version.txt");
 
+        // 업데이트 설치 후 재실행 시 완료 안내를 표시하기 위한 플래그 파일
+        private readonly string pendingUpdateMarkerFile =
+            Path.Combine(@"C:\ProgramData\YEJI_AW", "pending_update.txt");
+
         private const string ServerBaseUrl = "http://175.106.99.157:3000";
 
         private static string GetCurrentVersion()
@@ -505,18 +509,35 @@ namespace YEJI_AW_Client
                 }
 
                 string? previousVersion = null;
+                string? pendingUpdateVersion = null;
+                bool hasPendingUpdateMarker = false;
+
                 if (File.Exists(clientVersionFile))
                 {
                     previousVersion = File.ReadAllText(clientVersionFile, Encoding.UTF8).Trim();
                 }
 
+                if (File.Exists(pendingUpdateMarkerFile))
+                {
+                    pendingUpdateVersion = File.ReadAllText(pendingUpdateMarkerFile, Encoding.UTF8).Trim();
+                    hasPendingUpdateMarker = true;
+                }
+
                 File.WriteAllText(clientVersionFile, currentVersion, Encoding.UTF8);
 
-                if (!string.IsNullOrWhiteSpace(previousVersion) && previousVersion != currentVersion)
+                bool updatedFromPrevious = !string.IsNullOrWhiteSpace(previousVersion) && previousVersion != currentVersion;
+                bool updatedFromPending = !string.IsNullOrWhiteSpace(pendingUpdateVersion) && pendingUpdateVersion == currentVersion;
+
+                if (updatedFromPrevious || updatedFromPending)
                 {
                     ShowTrayNotification(
                        "업데이트 완료",
                        $"클라이언트가 최신 버전({currentVersion})으로 업데이트되었습니다.");
+                }
+
+                if (hasPendingUpdateMarker)
+                {
+                    File.Delete(pendingUpdateMarkerFile);
                 }
             }
             catch (Exception ex)
@@ -574,6 +595,8 @@ namespace YEJI_AW_Client
 
             try
             {
+                CreatePendingUpdateMarker(latestRelease.Version);
+
                 bool isExecutable = string.Equals(Path.GetExtension(tempFilePath), ".exe", StringComparison.OrdinalIgnoreCase);
                 string arguments = isExecutable
                     ? "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS=no"
@@ -600,6 +623,10 @@ namespace YEJI_AW_Client
                   $"다운로드된 설치 파일 실행에 실패했습니다. 다음 경로에서 직접 실행해주세요:\n{tempFilePath}",
                   ToolTipIcon.Error,
                   timeoutMs: 8000);
+                if (File.Exists(pendingUpdateMarkerFile))
+                {
+                    File.Delete(pendingUpdateMarkerFile);
+                }
                 isUpdatingClient = false;
             }
         }
@@ -646,6 +673,26 @@ namespace YEJI_AW_Client
             catch (Exception ex)
             {
                 ClientLogger.LogUpdate($"Process enumeration failed for {processName}.", "Err", ex);
+            }
+        }
+
+        private void CreatePendingUpdateMarker(string targetVersion)
+        {
+            try
+            {
+                string folder = Path.GetDirectoryName(pendingUpdateMarkerFile) ?? string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(folder) && !Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                File.WriteAllText(pendingUpdateMarkerFile, targetVersion, Encoding.UTF8);
+                ClientLogger.LogUpdate($"Pending update marker created for version {targetVersion}.", "DBG");
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogUpdate("Failed to create pending update marker.", "Err", ex);
             }
         }
 
