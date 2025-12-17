@@ -140,6 +140,11 @@ namespace YEJI_AW_Client
         private Label? shutdownCountdownLabel;
         private Label? pcOffStatusLabel;
         private bool isTemporaryDisableActive;
+        private Form? tempDisableTrayForm;
+        private Label? tempDisableRemainingLabel;
+        private Label? tempDisableUsageLabel;
+        private Timer? tempDisableTrayTimer;
+        private DateTime? tempDisableEndTime;
 
         private Timer? managerNotificationTimer;
         private bool isCheckingManagerNotifications;
@@ -787,6 +792,7 @@ namespace YEJI_AW_Client
 
                 if (now >= pcOffAlertTargetTime.Value)
                 {
+                    CloseTempDisableTray();
                     hasShownPcOffAlert = true;
                     await ShowPcOffAlertAsync(now, pcOffAlertTargetTime.Value, triggeredAfterBoot, isTemporaryDisableActive);
                     isTemporaryDisableActive = false;
@@ -1079,6 +1085,7 @@ namespace YEJI_AW_Client
                 isTemporaryDisableActive = true;
                 pcOffAlertTargetTime = GetCurrentDateTime().AddMinutes(pcOffSettings.TempUsageMinutes);
                 hasShownPcOffAlert = false;
+                StartTempDisableTrayCountdown();
 
                 MessageBox.Show(
                     $"{pcOffSettings.TempUsageMinutes}분 후 PC 종료 안내가 다시 표시됩니다. 진행중인 업무를 마무리 해주시기 바랍니다.",
@@ -1290,6 +1297,168 @@ namespace YEJI_AW_Client
                 pcOffCountInitializedForDay = false;
                 remainingTempDisableCount = 0;
                 isTemporaryDisableActive = false;
+                CloseTempDisableTray();
+            }
+        }
+
+        private void StartTempDisableTrayCountdown()
+        {
+            tempDisableEndTime = pcOffAlertTargetTime;
+            if (tempDisableEndTime == null)
+            {
+                return;
+            }
+
+            tempDisableTrayTimer ??= new Timer
+            {
+                Interval = 1000
+            };
+            tempDisableTrayTimer.Tick -= TempDisableTrayTimer_Tick;
+            tempDisableTrayTimer.Tick += TempDisableTrayTimer_Tick;
+
+            if (tempDisableTrayForm == null || tempDisableTrayForm.IsDisposed)
+            {
+                tempDisableTrayForm = BuildTempDisableTrayForm();
+            }
+
+            UpdateTempDisableTrayTexts();
+            PositionTempDisableTrayForm();
+            tempDisableTrayForm.Show();
+            tempDisableTrayForm.TopMost = true;
+            tempDisableTrayForm.BringToFront();
+            tempDisableTrayTimer.Start();
+        }
+
+        private Form BuildTempDisableTrayForm()
+        {
+            var form = new Form
+            {
+                FormBorderStyle = FormBorderStyle.FixedSingle,
+                StartPosition = FormStartPosition.Manual,
+                ShowInTaskbar = false,
+                TopMost = true,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ClientSize = new Size(260, 110)
+            };
+
+            var container = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                Padding = new Padding(10)
+            };
+
+            container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            container.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            tempDisableUsageLabel = new Label
+            {
+                AutoSize = true,
+                Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Bold),
+                Text = "일시해제 남은시간"
+            };
+
+            tempDisableRemainingLabel = new Label
+            {
+                AutoSize = true,
+                Font = new Font(FontFamily.GenericSansSerif, 18, FontStyle.Bold),
+                Text = "--:--"
+            };
+
+            var endButton = new Button
+            {
+                Text = "일시해제 종료",
+                Height = 32,
+                Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
+                AutoSize = true
+            };
+            endButton.Click += (s, e) => EndTemporaryDisableEarly();
+
+            container.Controls.Add(tempDisableUsageLabel, 0, 0);
+            container.Controls.Add(tempDisableRemainingLabel, 0, 1);
+            container.Controls.Add(endButton, 0, 2);
+
+            form.Controls.Add(container);
+            return form;
+        }
+
+        private void PositionTempDisableTrayForm()
+        {
+            if (tempDisableTrayForm == null)
+            {
+                return;
+            }
+
+            const int margin = 10;
+            var workingArea = Screen.PrimaryScreen?.WorkingArea ?? Screen.GetWorkingArea(this);
+            int x = workingArea.Right - tempDisableTrayForm.Width - margin;
+            int y = workingArea.Bottom - tempDisableTrayForm.Height - margin;
+            tempDisableTrayForm.Location = new Point(Math.Max(workingArea.Left + margin, x), Math.Max(workingArea.Top + margin, y));
+        }
+
+        private void TempDisableTrayTimer_Tick(object? sender, EventArgs e)
+        {
+            if (tempDisableEndTime == null)
+            {
+                CloseTempDisableTray();
+                return;
+            }
+
+            UpdateTempDisableTrayTexts();
+
+            var remaining = tempDisableEndTime.Value - GetCurrentDateTime();
+            if (remaining <= TimeSpan.Zero)
+            {
+                isTemporaryDisableActive = false;
+                CloseTempDisableTray();
+                pcOffAlertTargetTime = GetCurrentDateTime();
+                _ = TryShowPcOffAlertAsync(triggeredAfterBoot: false);
+            }
+        }
+
+        private void UpdateTempDisableTrayTexts()
+        {
+            if (tempDisableUsageLabel == null || tempDisableRemainingLabel == null || tempDisableEndTime == null)
+            {
+                return;
+            }
+
+            int usedCount = Math.Max(0, pcOffSettings.TempDisableCount - remainingTempDisableCount);
+            int totalCount = Math.Max(pcOffSettings.TempDisableCount, usedCount);
+            tempDisableUsageLabel.Text = $"일시해제 남은시간 (사용횟수 : {usedCount}/{totalCount})";
+
+            var remaining = tempDisableEndTime.Value - GetCurrentDateTime();
+            if (remaining < TimeSpan.Zero)
+            {
+                remaining = TimeSpan.Zero;
+            }
+
+            tempDisableRemainingLabel.Text = $"{remaining.Minutes:D2}분 {remaining.Seconds:D2}초";
+        }
+
+        private void EndTemporaryDisableEarly()
+        {
+            isTemporaryDisableActive = false;
+            CloseTempDisableTray();
+            pcOffAlertTargetTime = GetCurrentDateTime();
+            _ = TryShowPcOffAlertAsync(triggeredAfterBoot: false);
+        }
+
+        private void CloseTempDisableTray()
+        {
+            if (tempDisableTrayTimer != null)
+            {
+                tempDisableTrayTimer.Stop();
+            }
+
+            tempDisableEndTime = null;
+
+            if (tempDisableTrayForm != null)
+            {
+                tempDisableTrayForm.Hide();
             }
         }
 

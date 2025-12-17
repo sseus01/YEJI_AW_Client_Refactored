@@ -30,6 +30,7 @@
                 updateCheckTimer?.Dispose();
                 employeeOvertimeStatusTimer?.Dispose();
                 managerNotificationTimer?.Dispose();
+                tempDisableTrayTimer?.Dispose();
 
                 // Dispose semaphores
                 heartbeatSemaphore?.Dispose();
@@ -38,6 +39,7 @@
                 // Dispose forms
                 pcOffAlertForm?.Dispose();
                 managerNotificationListForm?.Dispose();
+                tempDisableTrayForm?.Dispose();
 
                 // Dispose tray menu
                 trayMenu?.Dispose();

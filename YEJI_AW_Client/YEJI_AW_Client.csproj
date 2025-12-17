@@ -33,13 +33,20 @@
     
     <!-- 단일 파일로 배포 및 압축 -->
     <PublishSingleFile>true</PublishSingleFile>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    
-    <!-- 네이티브 라이브러리 최적화 (애플리케이션이 네이티브 종속성을 요구하지 않는 경우) -->
-    <IncludeNativeLibrariesForSelfContained>false</IncludeNativeLibrariesForSelfContained>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>    
     
     <!-- 읽기 전용 어셈블리 비활성화 (용량 절감) -->
     <PublishReadyToRun>false</PublishReadyToRun>
+
+	<!-- 추가 최적화 설정 -->
+	<!-- 문화권 데이터 포함 (앱에서 날짜/시간 형식 등에 필요) -->
+	<InvariantGlobalization>false</InvariantGlobalization>
+
+	<!-- 이벤트 소스 지원 비활성화 (용량 절감) -->
+	<EventSourceSupport>false</EventSourceSupport>
+
+	<!-- 안전하지 않은 UTF-7 인코딩 비활성화 (보안 및 용량 최적화) -->
+	<EnableUnsafeUTF7Encoding>false</EnableUnsafeUTF7Encoding>
   </PropertyGroup>	
 
   <ItemGroup>
