@@ -1206,11 +1206,14 @@ namespace YEJI_AW_Client
             {
                 StartPosition = FormStartPosition.CenterScreen,
                 ClientSize = new Size(popupImage.Width, popupImage.Height),
-                FormBorderStyle = FormBorderStyle.FixedDialog,
+                FormBorderStyle = FormBorderStyle.None,
+                ControlBox = false,
+                Text = string.Empty,
                 MaximizeBox = false,
                 MinimizeBox = false,
                 TopMost = true,
-                ShowInTaskbar = false
+                ShowInTaskbar = false,
+                ShowIcon = false
             };
 
             var pictureBox = new PictureBox
