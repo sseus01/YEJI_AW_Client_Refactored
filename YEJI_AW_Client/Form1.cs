@@ -598,6 +598,14 @@ namespace YEJI_AW_Client
                 CreatePendingUpdateMarker(latestRelease.Version);
 
                 bool isExecutable = string.Equals(Path.GetExtension(tempFilePath), ".exe", StringComparison.OrdinalIgnoreCase);
+
+                // Inno Setup 자동 설치 플래그: 설치 UI를 표시하지 않고 백그라운드에서 자동 설치
+                // /VERYSILENT: 모든 설치 UI 숨김 (진행률 대화상자 포함)
+                // /SUPPRESSMSGBOXES: 모든 메시지 박스 억제
+                // /NORESTART: 설치 후 시스템 재시작 안 함
+                // /SP-: "준비 중..." 페이지 생략
+                // /CLOSEAPPLICATIONS: 자동으로 실행 중인 앱 종료
+                // /RESTARTAPPLICATIONS=no: 설치 후 앱 자동 재시작 안 함
                 string arguments = isExecutable
                     ? "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS=no"
                     : string.Empty;
@@ -606,7 +614,10 @@ namespace YEJI_AW_Client
                 {
                     FileName = tempFilePath,
                     Arguments = arguments,
-                    UseShellExecute = true
+                    UseShellExecute = true,
+                    // WindowStyle.Hidden: 릴리즈 버전에서도 디버그 모드와 동일하게 백그라운드 설치되도록 설정
+                    // 설치 프로세스 창이 화면에 표시되지 않아 사용자가 수동으로 설치 버튼을 클릭할 필요 없음
+                    WindowStyle = ProcessWindowStyle.Hidden
                 };
 
                 Process.Start(startInfo);
