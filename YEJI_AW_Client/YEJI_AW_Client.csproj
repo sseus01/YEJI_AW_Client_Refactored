@@ -22,16 +22,12 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <!-- 디버그 심볼 제거 (요청사항: 디버그 정보 삭제) -->
     <DebugType>none</DebugType>
-    <DebugSymbols>false</DebugSymbols>
-    
-    <!-- Self-Contained 배포 + 트리밍 (설치 후 용량 감소: 435MB → 60-100MB) -->
-    <!-- .NET 런타임 포함, 사용하지 않는 코드 제거 -->
+    <DebugSymbols>false</DebugSymbols>    
+  
+  <!-- Self-Contained 단일 파일 배포 (.NET 런타임 포함)
+         주의: Windows Forms는 트리밍이 공식 지원되지 않아 NETSDK1175가 발생하므로 트리밍을 비활성화 -->
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <PublishTrimmed>true</PublishTrimmed>    
-   
-    <!-- partial 모드: Windows Forms와 같이 리플렉션을 사용하는 앱에 안전. full 모드는 더 많이 제거하지만 런타임 오류 위험 -->
-    <TrimMode>partial</TrimMode>
     
     <!-- 단일 파일로 배포 및 압축 -->
     <PublishSingleFile>true</PublishSingleFile>
