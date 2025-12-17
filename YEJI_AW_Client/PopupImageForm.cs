@@ -12,7 +12,9 @@ namespace YEJI_AW_Client
 
             this.StartPosition = FormStartPosition.CenterScreen;
             this.ClientSize = new Size(1051, 792);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.ShowIcon = false;
+            this.Text = string.Empty;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
 
