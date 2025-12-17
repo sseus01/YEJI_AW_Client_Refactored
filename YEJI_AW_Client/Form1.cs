@@ -1336,6 +1336,7 @@ namespace YEJI_AW_Client
                 FormBorderStyle = FormBorderStyle.FixedSingle,
                 StartPosition = FormStartPosition.Manual,
                 ShowInTaskbar = false,
+                ControlBox = false,
                 TopMost = true,
                 MaximizeBox = false,
                 MinimizeBox = false,

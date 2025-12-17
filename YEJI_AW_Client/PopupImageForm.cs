@@ -15,6 +15,8 @@ namespace YEJI_AW_Client
             this.FormBorderStyle = FormBorderStyle.None;
             this.ShowIcon = false;
             this.Text = string.Empty;
+            this.ControlBox = false;
+            this.ShowInTaskbar = false;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
 
