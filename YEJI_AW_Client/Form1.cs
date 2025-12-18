@@ -691,9 +691,9 @@ namespace YEJI_AW_Client
                 // /NORESTART: 설치 후 시스템 재시작 안 함
                 // /SP-: "준비 중..." 페이지 생략
                 // /CLOSEAPPLICATIONS: 자동으로 실행 중인 앱 종료
-                // /RESTARTAPPLICATIONS=no: 설치 후 앱 자동 재시작 안 함
+                // /RESTARTAPPLICATIONS: 설치 후 앱 자동 재시작 (기본값)
                 string arguments = isExecutable
-                    ? "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS=no"
+                    ? "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS"
                     : string.Empty;
 
                 var startInfo = new ProcessStartInfo
