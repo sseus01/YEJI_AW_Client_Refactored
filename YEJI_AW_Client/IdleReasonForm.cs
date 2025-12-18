@@ -35,10 +35,7 @@ namespace YEJI_AW_Client
             PropertyNameCaseInsensitive = true
         };
 
-        private static readonly string LocalReasonDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "YEJISOLUTION",
-            "AWClient");
+        private static readonly string LocalReasonDirectory = @"C:\ProgramData\YEJI_AW";
 
         private static readonly string LocalReasonFilePath = Path.Combine(LocalReasonDirectory, "away_reasons.json");
 

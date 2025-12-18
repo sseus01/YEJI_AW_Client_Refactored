@@ -1629,23 +1629,30 @@ namespace YEJI_AW_Client
                 DateTime now = GetCurrentDateTime();
                 var nowTime = now.TimeOfDay;
 
+                // GetLastInputTime()을 한 번만 호출하여 시스템 호출 최소화
+                DateTime currentInputTime = GetLastInputTime();
+                bool inputDetected = (currentInputTime - lastInputTime).TotalSeconds > 1;
+
                 bool isLunchBreak = IsLunchBreak(nowTime);
                 if (wasInLunchBreak && !isLunchBreak)
                 {
-                    lastInputTime = now;
-                    isIdle = false;
-                    hasShownPopup = false;
-                    idleStartedDuringWork = false;
+                    // 점심시간이 끝났을 때, 사용자가 실제로 자리에 있는 경우에만 idle 상태를 리셋
+                    // 자리에 없는 경우(idle 상태)는 유지하여, 점심시간을 포함한 자리비움 구간이 제대로 감지되도록 함
+                    if (inputDetected)
+                    {
+                        lastInputTime = currentInputTime;
+                        isIdle = false;
+                        hasShownPopup = false;
+                        idleStartedDuringWork = false;
+                    }
+                    // idle 상태인 경우는 리셋하지 않고 유지하여 점심 이후 복귀 시 팝업이 뜨도록 함
                 }
                 wasInLunchBreak = isLunchBreak;
 
                 bool isWorkingTime = IsWorkingTime(nowTime);                
 
                 bool isAfterWork = nowTime > workEndTime;
-
-                DateTime currentInputTime = GetLastInputTime();
-                bool inputDetected = (currentInputTime - lastInputTime).TotalSeconds > 1;
-
+                
                 // 1) 근무시간: 기존 팝업 방식
                 if (!isAfterWork && isWorkingTime)
                 {
@@ -1680,7 +1687,12 @@ namespace YEJI_AW_Client
                 // 2) 근무시간도 아니고 퇴근 후도 아닌 구간(점심 등): 무시
                 if (!isAfterWork && !isWorkingTime)
                 {
-                    lastInputTime = currentInputTime;
+                    // 점심시간 중에 입력이 감지된 경우에만 lastInputTime 업데이트
+                    // 입력이 없는 경우(idle 상태)는 이전 lastInputTime 유지
+                    if (inputDetected)
+                    {
+                        lastInputTime = currentInputTime;
+                    }
                     return;
                 }
 
