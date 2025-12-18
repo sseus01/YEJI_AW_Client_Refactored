@@ -2398,7 +2398,7 @@ namespace YEJI_AW_Client
         {
             try
             {
-                await PostClientStatusAsync($"{ServerBaseUrl}/api/client-status/register");
+                await PostClientStatusAsync($"{ServerBaseUrl}/api/client/register");
             }
             catch
             {
