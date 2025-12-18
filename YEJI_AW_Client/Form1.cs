@@ -154,6 +154,8 @@ namespace YEJI_AW_Client
         private Timer? tempDisableTrayTimer;
         private DateTime? tempDisableEndTime;
 
+        private bool isSystemShuttingDown; // Windows 종료 감지 플래그
+
         private Timer? managerNotificationTimer;
         private bool isCheckingManagerNotifications;
         private HashSet<string> lastAlertedManagerNotificationIds = new();
@@ -335,13 +337,19 @@ namespace YEJI_AW_Client
 
             // 종료 시 SHUTDOWN 이벤트 전송
             this.FormClosing += Form1_FormClosing;
-            // 프로그램 시작 시 PC_ON 및 LOGIN 이벤트 전송 (예외는 각 메서드 내부에서 처리됨)
+
+            // 프로그램 시작 시 이벤트 전송:
+            // - PC_ON: Windows 시스템 부팅 시각 (GetSystemBootTime 사용)
+            // - LOGIN: 클라이언트 프로그램 시작 시각 (현재 시각)
+            // (예외는 각 메서드 내부에서 처리됨)
             _ = Task.WhenAll(SendPcEventAsync("PC_ON"), SendPcEventAsync("LOGIN")).ConfigureAwait(false);
 
             // 전원(절전/복귀) 이벤트 구독
             SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
             // 세션 잠금/해제 이벤트 구독 (Windows+L 등)
             SystemEvents.SessionSwitch += SystemEvents_SessionSwitch;
+            // Windows 시스템 종료 이벤트 구독
+            SystemEvents.SessionEnding += SystemEvents_SessionEnding;
         }
 
         // 폼 완전 종료 시 전원 이벤트 구독 해제
@@ -349,6 +357,7 @@ namespace YEJI_AW_Client
         {
             SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
             SystemEvents.SessionSwitch -= SystemEvents_SessionSwitch;
+            SystemEvents.SessionEnding -= SystemEvents_SessionEnding;
             base.OnFormClosed(e);
         }
 
@@ -1944,6 +1953,25 @@ namespace YEJI_AW_Client
             hasShownPopup = false;
         }
 
+        // -----------------------------
+        // Windows 시스템 종료/로그오프 처리
+        // -----------------------------
+        private void SystemEvents_SessionEnding(object? sender, SessionEndingEventArgs e)
+        {
+            try
+            {
+                isSystemShuttingDown = true;
+                ClientLogger.LogService($"Windows session ending detected: {e.Reason}", "DBG");
+
+                // 동기적으로 PC_OFF 이벤트 전송 (비동기로 하면 프로세스 종료되어 전송 실패 가능)
+                SendPcEventSync("PC_OFF");
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogService($"Error in SessionEnding handler: {ex.Message}", "Err");
+            }
+        }
+
         private DateTime GetSystemBootTime()
         {
             try
@@ -2334,6 +2362,54 @@ namespace YEJI_AW_Client
             {
                 ClientLogger.LogWeb($"Failed to send PC event {eventType} for {employeeId}.", "Err", ex);
                 // 실패해도 별도 저장은 하지 않고 무시
+            }
+        }
+
+        // 동기 버전: Windows 종료 시 사용 (비동기로 하면 프로세스가 종료되어 전송 실패 가능)
+        private void SendPcEventSync(string eventType)
+        {
+            try
+            {
+                var client = HttpClient;
+                string url = $"{ServerBaseUrl}/api/pc-events";
+
+                DateTime eventTime = eventType == "PC_ON"
+                   ? GetSystemBootTime()
+                   : GetCurrentDateTime();
+
+                var data = new PcEventData
+                {
+                    EmployeeId = employeeId,
+                    EmployeeName = employeeName,
+                    ComputerName = computerName,
+                    ComputerIP = computerIP,
+                    EventType = eventType,
+                    EventTime = eventTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)
+                };
+
+                string json = JsonSerializer.Serialize(data);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                ClientLogger.LogWeb($"Sending PC event {eventType} (sync) for {employeeId} at {eventTime:HH:mm:ss}.", "DBG");
+
+                // 동기 호출: Windows 종료 중에는 비동기 메서드를 기다릴 수 없으므로 동기적으로 실행
+                // ConfigureAwait(false)를 사용하여 컨텍스트 캡처를 피하고 데드락 방지
+                var response = client.PostAsync(url, content).ConfigureAwait(false).GetAwaiter().GetResult();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    ClientLogger.LogWeb($"PC event {eventType} sent successfully for {employeeId}.", "DBG");
+                }
+                else
+                {
+                    ClientLogger.LogWeb($"PC event {eventType} send failed with status {(int)response.StatusCode} for {employeeId}.", "Err");
+                }
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogWeb($"Failed to send PC event {eventType} for {employeeId}.", "Err", ex);
+                // Windows 종료 중에는 네트워크 연결이 이미 끊어지거나 시간 제약이 있을 수 있으므로
+                // 실패 시 별도 저장이나 재시도 없이 무시 (시스템이 곧 종료됨)
             }
         }
 
@@ -3198,8 +3274,18 @@ namespace YEJI_AW_Client
         {
             try
             {
-                ClientLogger.LogService("Application closing, sending LOGOUT and PC_OFF events.", "DBG");
-                await Task.WhenAll(SendPcEventAsync("LOGOUT"), SendPcEventAsync("PC_OFF")).ConfigureAwait(false);
+                // Windows 시스템 종료 중이면 PC_OFF는 이미 전송했으므로 LOGOUT만 전송
+                if (isSystemShuttingDown)
+                {
+                    ClientLogger.LogService("Application closing due to system shutdown, sending LOGOUT only.", "DBG");
+                    await SendPcEventAsync("LOGOUT").ConfigureAwait(false);
+                }
+                else
+                {
+                    // 일반적인 프로그램 종료 (사용자가 수동으로 종료)
+                    ClientLogger.LogService("Application closing (manual), sending LOGOUT and PC_OFF events.", "DBG");
+                    await Task.WhenAll(SendPcEventAsync("LOGOUT"), SendPcEventAsync("PC_OFF")).ConfigureAwait(false);
+                }
             }
             catch
             {
