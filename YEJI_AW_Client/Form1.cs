@@ -37,6 +37,14 @@ namespace YEJI_AW_Client
         private Timer heartbeatTimer;   // 주기적 상태 전송
         private Timer updateCheckTimer; // 주기적 업데이트 확인
         private bool isUpdatingClient;  // 자동 업데이트 진행 여부 플래그
+        private Random updateRandom;    // 업데이트 지연 랜덤 생성기
+
+        // 업데이트 부하 분산 설정
+        private const int UpdateCheckIntervalMinutes = 5;      // 업데이트 확인 주기 (분)
+        private const int MaxUpdateCheckDelaySeconds = 300;    // 확인 전 최대 랜덤 지연 (초, 0~5분)
+        private const int MaxUpdateDownloadJitterSeconds = 600; // 다운로드 전 최대 랜덤 지연 (초, 0~10분)
+        private const int MaxUpdateDownloadRetries = 3;        // 다운로드 최대 재시도 횟수
+        private const int UpdateRetryBaseDelaySeconds = 30;    // 재시도 기본 지연 (초, exponential backoff)
 
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
@@ -285,9 +293,23 @@ namespace YEJI_AW_Client
             heartbeatTimer.Interval = (int)heartbeatInterval.TotalMilliseconds;
             heartbeatTimer.Tick += async (s, e) => await SendHeartbeatAsync();
 
+            // 업데이트 체크 주기를 5분으로 단축하여 빠른 업데이트 감지 가능
+            // 단, 각 클라이언트마다 랜덤 지연을 추가하여 서버 부하 분산
+            // 
+            // 부하 분산 전략:
+            // 1. 5분마다 업데이트 확인 (이전: 1시간)
+            // 2. 확인 전 0~5분 랜덤 대기 (서버 요청 분산)
+            // 3. 다운로드 전 0~10분 추가 지연 (다운로드 부하 분산)
+            // 
+            // 결과: 100명이 동시 업데이트 시도해도 ~20분에 걸쳐 분산됨
             updateCheckTimer = new Timer();
-            updateCheckTimer.Interval = (int)TimeSpan.FromHours(1).TotalMilliseconds; // 1시간 간격
+            updateCheckTimer.Interval = (int)TimeSpan.FromMinutes(UpdateCheckIntervalMinutes).TotalMilliseconds;
             updateCheckTimer.Tick += async (s, e) => await CheckClientUpdateAsync();
+
+            // 랜덤 시드를 컴퓨터 이름과 사용자 ID 조합으로 설정하여 재시작 시 일관성 유지
+            // 각 클라이언트마다 고유한 시드로 공평한 부하 분산
+            int seed = (computerName + employeeId).GetHashCode();
+            updateRandom = new Random(seed);
 
             employeeOvertimeStatusTimer = new Timer();
             employeeOvertimeStatusTimer.Interval = (int)employeeOvertimeCheckInterval.TotalMilliseconds;
@@ -451,6 +473,16 @@ namespace YEJI_AW_Client
             try
             {
                 string currentVersion = GetCurrentVersion();
+
+                // 강제 설치가 아닌 경우 랜덤 지연 추가
+                // 서버 부하를 분산시키기 위해 각 클라이언트가 다른 시점에 체크하도록 함
+                // 단, 첫 번째 체크 시에는 업데이트 우선순위를 먼저 확인
+                if (!forceInstall)
+                {
+                    int checkDelaySeconds = updateRandom.Next(0, MaxUpdateCheckDelaySeconds + 1);
+                    ClientLogger.LogUpdate($"Applying random delay of {checkDelaySeconds}s before update check (max {MaxUpdateCheckDelaySeconds}s).", "DBG");
+                    await Task.Delay(TimeSpan.FromSeconds(checkDelaySeconds));
+                }
                 ClientLogger.LogUpdate($"Checking client update (current {currentVersion}).", "DBG");
                 string url = $"{ServerBaseUrl}/api/client-releases/check?currentVersion={Uri.EscapeDataString(currentVersion)}";
 
@@ -473,14 +505,23 @@ namespace YEJI_AW_Client
                     }
 
                     string latestVersion = checkResult!.Latest!.Version;
-                    string notificationTitle = forceInstall ? "디버그 업데이트 테스트" : "자동 업데이트 진행 중";
+                    string priority = string.IsNullOrWhiteSpace(checkResult.Latest.Priority)
+                       ? "normal"
+                       : checkResult.Latest.Priority.Trim();
+                    bool isUrgent = string.Equals(priority, "urgent", StringComparison.OrdinalIgnoreCase) ||
+                                   string.Equals(priority, "high", StringComparison.OrdinalIgnoreCase);
+
+                    string notificationTitle = forceInstall ? "디버그 업데이트 테스트" :
+                                             isUrgent ? "긴급 보안 업데이트" : "자동 업데이트 진행 중";
                     string notificationMessage = forceInstall
                         ? $"디버그 모드에서 새 버전({latestVersion}) 설치를 강제로 시작합니다."
+                        : isUrgent
+                        ? $"긴급 업데이트({latestVersion})를 즉시 설치합니다."
                         : $"새 버전({latestVersion})이 감지되어 자동으로 설치를 진행합니다.";
 
-                    ClientLogger.LogUpdate($"Update required. Latest {latestVersion} detected. ForceInstall={forceInstall}.");
+                    ClientLogger.LogUpdate($"Update required. Latest {latestVersion} (priority: {priority}) detected. ForceInstall={forceInstall}.");
                     ShowTrayNotification(notificationTitle, notificationMessage);
-                    await DownloadAndInstallUpdateAsync(checkResult.Latest);
+                    await DownloadAndInstallUpdateAsync(checkResult.Latest, bypassDelay: isUrgent || forceInstall);
                 }
                 else if (checkSuccess)
                 {
@@ -564,10 +605,24 @@ namespace YEJI_AW_Client
             notifyIcon.ShowBalloonTip(timeoutMs);
         }
 
-        private async Task DownloadAndInstallUpdateAsync(ClientReleaseInfo latestRelease)
+        private async Task DownloadAndInstallUpdateAsync(ClientReleaseInfo latestRelease, bool bypassDelay = false)
         {
             isUpdatingClient = true;
-            ClientLogger.LogUpdate($"Starting automatic update to {latestRelease.Version}.");
+            ClientLogger.LogUpdate($"Starting automatic update to {latestRelease.Version} (bypassDelay={bypassDelay}).");
+
+            // 다운로드 시작 전 추가 랜덤 지연
+            // 업데이트 체크 시점이 비슷하더라도 다운로드 시점을 분산시켜 서버 부하 방지
+            // 긴급/보안 업데이트는 지연 없이 즉시 다운로드
+            if (!bypassDelay)
+            {
+                int downloadDelaySeconds = updateRandom.Next(0, MaxUpdateDownloadJitterSeconds + 1);
+                ClientLogger.LogUpdate($"Applying random jitter of {downloadDelaySeconds}s before download (max {MaxUpdateDownloadJitterSeconds}s).", "DBG");
+                await Task.Delay(TimeSpan.FromSeconds(downloadDelaySeconds));
+            }
+            else
+            {
+                ClientLogger.LogUpdate("Bypassing download delay for urgent/forced update.", "DBG");
+            }
 
             StopRelatedProcessesForUpdate();
 
@@ -581,21 +636,38 @@ namespace YEJI_AW_Client
 
             string tempFilePath = Path.Combine(Path.GetTempPath(), targetFileName);
 
-            try
+            // 재시도 로직: 실패 시 exponential backoff
+            for (int attempt = 1; attempt <= MaxUpdateDownloadRetries; attempt++)
             {
-                using var response = await HttpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
+                try
+                {
+                    ClientLogger.LogUpdate($"Download attempt {attempt}/{MaxUpdateDownloadRetries} for {latestRelease.Version}.", "DBG");
+                    using var response = await HttpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+                    response.EnsureSuccessStatusCode();
 
-                await using var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
-                await response.Content.CopyToAsync(fileStream);
-                ClientLogger.LogUpdate($"Downloaded update package {latestRelease.Version} to {tempFilePath}.", "DBG");
-            }
-            catch (Exception ex)
-            {
-                ClientLogger.LogUpdate($"Failed to download update {latestRelease.Version}.", "Err", ex);
-                ShowTrayNotification("업데이트 실패", "업데이트 파일 다운로드에 실패했습니다. 네트워크 연결을 확인한 뒤 다시 시도해주세요.", ToolTipIcon.Error);
-                isUpdatingClient = false;
-                return;
+                    await using var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                    await response.Content.CopyToAsync(fileStream);
+                    ClientLogger.LogUpdate($"Downloaded update package {latestRelease.Version} to {tempFilePath}.", "DBG");
+                    break; // 성공 시 루프 탈출
+                }
+                catch (Exception ex)
+                {
+                    ClientLogger.LogUpdate($"Download attempt {attempt}/{MaxUpdateDownloadRetries} failed for {latestRelease.Version}.", "Err", ex);
+
+                    if (attempt == MaxUpdateDownloadRetries)
+                    {
+                        // 마지막 시도 실패 시 에러 처리
+                        ShowTrayNotification("업데이트 실패", "업데이트 파일 다운로드에 실패했습니다. 네트워크 연결을 확인한 뒤 다시 시도해주세요.", ToolTipIcon.Error);
+                        isUpdatingClient = false;
+                        return;
+                    }
+
+                    // 재시도 전 대기 (exponential backoff: 30s, 60s, 120s, ...)
+                    // 비트 시프트 사용으로 정수 오버플로우 방지, 최대 5분으로 제한
+                    int waitSeconds = Math.Min(UpdateRetryBaseDelaySeconds << (attempt - 1), 300);
+                    ClientLogger.LogUpdate($"Retrying download after {waitSeconds}s delay (exponential backoff).", "DBG");
+                    await Task.Delay(TimeSpan.FromSeconds(waitSeconds));
+                }
             }
 
             try
@@ -3261,6 +3333,7 @@ namespace YEJI_AW_Client
         [JsonPropertyName("downloadUrl")] public string DownloadUrl { get; set; } = string.Empty;
         [JsonPropertyName("releaseNotes")] public string ReleaseNotes { get; set; } = string.Empty;
         [JsonPropertyName("uploadedAt")] public string UploadedAt { get; set; } = string.Empty;
+        [JsonPropertyName("priority")] public string Priority { get; set; } = "normal"; // "urgent", "high", "normal" (default)
     }
 
     public class ClientReleaseCheckResponse
