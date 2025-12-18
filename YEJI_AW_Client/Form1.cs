@@ -313,8 +313,8 @@ namespace YEJI_AW_Client
 
             // 종료 시 SHUTDOWN 이벤트 전송
             this.FormClosing += Form1_FormClosing;
-            // 프로그램 시작 시 BOOT 이벤트 전송
-            _ = SendPcEventAsync("BOOT");
+            // 프로그램 시작 시 PC_ON 및 LOGIN 이벤트 전송 (예외는 각 메서드 내부에서 처리됨)
+            _ = Task.WhenAll(SendPcEventAsync("PC_ON"), SendPcEventAsync("LOGIN")).ConfigureAwait(false);
 
             // 전원(절전/복귀) 이벤트 구독
             SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
@@ -1655,6 +1655,7 @@ namespace YEJI_AW_Client
                         {
                             hasShownPopup = true;
                             DateTime idleEndTime = currentInputTime;
+                            ClientLogger.LogAgent($"Idle detected during work hours {idleStartTime:HH:mm:ss}-{idleEndTime:HH:mm:ss}.", "DBG");
                             await HandleIdleIntervalAsync(idleStartTime, idleEndTime);                          
                             isIdle = false;
                             idleStartedDuringWork = false;
@@ -1669,6 +1670,7 @@ namespace YEJI_AW_Client
                             hasShownPopup = false;
                             idleStartTime = AdjustIdleStartForWorkDay(lastInputTime);
                             idleStartedDuringWork = true;
+                            ClientLogger.LogAgent($"User became idle at {idleStartTime:HH:mm:ss} (threshold: {idleThreshold.TotalMinutes} min).", "DBG");
                         }
                     }
 
@@ -1771,11 +1773,15 @@ namespace YEJI_AW_Client
             {
                 // 절전 들어갈 때 (노트북 덮개 닫음 등)
                 suspendStartTime = GetCurrentDateTime();
+                ClientLogger.LogService($"Power mode changed to SUSPEND at {suspendStartTime:HH:mm:ss}.", "DBG");
+                await SendPcEventAsync("SUSPEND");
             }
             else if (e.Mode == PowerModes.Resume)
             {
                 // 절전에서 다시 깨어날 때
                 DateTime resumeTime = GetCurrentDateTime();
+                ClientLogger.LogService($"Power mode changed to RESUME at {resumeTime:HH:mm:ss}.", "DBG");
+                await SendPcEventAsync("RESUME");
 
                 // suspendStartTime이 유효한 값인지 확인 (프로그램 시작 후 첫 resume 이벤트 방지)
                 if (suspendStartTime == DateTime.MinValue)
@@ -1794,6 +1800,7 @@ namespace YEJI_AW_Client
                 {
                     // 절전/복귀 중 하나라도 근무시간이면 자리비움으로 처리
                     // SplitIdleInterval이 근무시간 구간만 추출함
+                    ClientLogger.LogAgent($"Idle interval detected during suspend/resume {suspendStartTime:HH:mm}-{resumeTime:HH:mm}.", "DBG");
                     await HandleIdleIntervalAsync(suspendStartTime, resumeTime);
                 }
 
@@ -1810,11 +1817,15 @@ namespace YEJI_AW_Client
             {
                 // 화면 잠금 시작 (Windows+L 등)
                 sessionLockStartTime = GetCurrentDateTime();
+                ClientLogger.LogService($"Session locked at {sessionLockStartTime:HH:mm:ss}.", "DBG");
+                await SendPcEventAsync("SESSION_LOCK");
             }
             else if (e.Reason == SessionSwitchReason.SessionUnlock)
             {
                 // 화면 잠금 해제
                 DateTime unlockTime = GetCurrentDateTime();
+                ClientLogger.LogService($"Session unlocked at {unlockTime:HH:mm:ss}.", "DBG");
+                await SendPcEventAsync("SESSION_UNLOCK");
 
                 // sessionLockStartTime이 유효한 값인지 확인 (프로그램 시작 후 첫 unlock 이벤트 방지)
                 if (sessionLockStartTime == DateTime.MinValue)
@@ -1833,6 +1844,7 @@ namespace YEJI_AW_Client
                 {
                     // 잠금/해제 중 하나라도 근무시간이면 자리비움으로 처리
                     // SplitIdleInterval이 근무시간 구간만 추출함
+                    ClientLogger.LogAgent($"Idle interval detected during session lock/unlock {sessionLockStartTime:HH:mm}-{unlockTime:HH:mm}.", "DBG");
                     await HandleIdleIntervalAsync(sessionLockStartTime, unlockTime);
                 }
 
@@ -1865,33 +1877,46 @@ namespace YEJI_AW_Client
         {
             // 동시 실행 방지: 여러 이벤트(idle 타이머, 절전 복귀, 세션 잠금 해제)가 동시에 발생할 수 있으므로
             // 세마포어로 순차 처리하여 중복 팝업을 방지
+            ClientLogger.LogAgent($"HandleIdleIntervalAsync called for {start:HH:mm:ss}-{end:HH:mm:ss}.", "DBG");
+
             await idleIntervalSemaphore.WaitAsync();
+
             try
             {
                 ClearStaleIdleKeys();
                 var segments = SplitIdleInterval(start, end);
+                ClientLogger.LogAgent($"Split idle interval into {segments.Count} segment(s).", "DBG");
+
                 foreach (var segment in segments)
                 {
                     // 겹치는 구간이 이미 처리되었는지 확인 (업데이트 재시작 시 유사한 구간 중복 방지)
                     if (HasOverlappingInterval(segment.Start, segment.End))
                     {
+                        ClientLogger.LogAgent($"Skipping overlapping interval {segment.Start:HH:mm:ss}-{segment.End:HH:mm:ss}.", "DBG");
                         continue;
                     }
 
                     string intervalKey = GetIdleIntervalKey(segment.Start, segment.End);
                     if (processedIdleIntervals.Contains(intervalKey))
                     {
+                        ClientLogger.LogAgent($"Skipping already processed interval {intervalKey}.", "DBG");
                         continue;
                     }
 
                     processedIdleIntervals.Add(intervalKey);
                     processedIdleIntervalRanges.Add((segment.Start, segment.End));
+                    ClientLogger.LogAgent($"Processing idle interval {segment.Start:HH:mm:ss}-{segment.End:HH:mm:ss}.", "DBG");
                     await ShowIdleReasonPopupAsync(segment.Start, segment.End);
                 }
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Error in HandleIdleIntervalAsync: {ex.Message}", "Err", ex);
             }
             finally
             {
                 idleIntervalSemaphore.Release();
+                ClientLogger.LogAgent($"HandleIdleIntervalAsync completed.", "DBG");
             }           
         }
 
@@ -1956,60 +1981,75 @@ namespace YEJI_AW_Client
 
         private async Task ShowIdleReasonPopupAsync(DateTime start, DateTime end)
         {
-            using IdleReasonForm form = new IdleReasonForm(start, end, ServerBaseUrl);
-            var result = form.ShowDialog();
-
-            if (result == DialogResult.OK)
+            try
             {
-                string baseDetail = form.SelectedLevel3 ?? "";
-                string detailText = form.DetailReason ?? string.Empty;
+                ClientLogger.LogAgent($"Showing idle reason popup for {start:HH:mm:ss}-{end:HH:mm:ss}.", "DBG");
+                using IdleReasonForm form = new IdleReasonForm(start, end, ServerBaseUrl);
+                var result = form.ShowDialog();
 
-                string reasonDetail = string.Empty;
-                if (!string.IsNullOrWhiteSpace(detailText))
+                if (result == DialogResult.OK)
                 {
-                    reasonDetail = detailText.Trim();
-                }
-                else if (!string.IsNullOrWhiteSpace(baseDetail))
-                {
-                    reasonDetail = baseDetail;
-                }
-                else if (!string.IsNullOrWhiteSpace(form.SelectedLevel2))
-                {
-                    reasonDetail = form.SelectedLevel2;
-                }
-                else if (!string.IsNullOrWhiteSpace(form.SelectedLevel1))
-                {
-                    reasonDetail = form.SelectedLevel1;
+                    ClientLogger.LogAgent($"User confirmed idle reason form.", "DBG");
+                    string baseDetail = form.SelectedLevel3 ?? "";
+                    string detailText = form.DetailReason ?? string.Empty;
+
+                    string reasonDetail = string.Empty;
+                    if (!string.IsNullOrWhiteSpace(detailText))
+                    {
+                        reasonDetail = detailText.Trim();
+                    }
+                    else if (!string.IsNullOrWhiteSpace(baseDetail))
+                    {
+                        reasonDetail = baseDetail;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(form.SelectedLevel2))
+                    {
+                        reasonDetail = form.SelectedLevel2;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(form.SelectedLevel1))
+                    {
+                        reasonDetail = form.SelectedLevel1;
+                    }
+                    else
+                    {
+                        reasonDetail = "세부 사유 미입력";
+                    }
+
+                    var idleEvent = new IdleEventData
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        EmployeeId = employeeId,
+                        EmployeeName = employeeName,
+                        ComputerName = computerName,
+                        ComputerIP = computerIP,
+                        IdleStartTime = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                        IdleEndTime = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                        ReasonCategory = form.SelectedLevel1 ?? "",
+                        ReasonDetail = reasonDetail,
+                        ReasonCode = form.SelectedReasonCode ?? "",
+                        ReasonLevel1 = form.SelectedLevel1 ?? "",
+                        ReasonLevel2 = form.SelectedLevel2 ?? "",
+                        ReasonLevel3 = form.SelectedLevel3 ?? ""
+                    };
+
+                    ClientLogger.LogAgent($"Idle reason captured ({idleEvent.ReasonDetail}) {start:HH:mm}-{end:HH:mm}.", "DBG");
+                    bool success = await SendIdleEventAsync(idleEvent);
+                    if (!success)
+                    {
+                        SavePendingIdleEvent(idleEvent);
+                        ClientLogger.LogAgent($"Idle event saved locally due to server failure. Showing notification to user.", "Err");
+                        MessageBox.Show("서버 전송에 실패했습니다. 데이터를 로컬에 저장했습니다.");
+                    }
                 }
                 else
                 {
-                    reasonDetail = "세부 사유 미입력";
+                    ClientLogger.LogAgent($"User cancelled idle reason form.", "DBG");
                 }
-
-                var idleEvent = new IdleEventData
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    EmployeeId = employeeId,
-                    EmployeeName = employeeName,
-                    ComputerName = computerName,
-                    ComputerIP = computerIP,
-                    IdleStartTime = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                    IdleEndTime = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                    ReasonCategory = form.SelectedLevel1 ?? "",
-                    ReasonDetail = reasonDetail,
-                    ReasonCode = form.SelectedReasonCode ?? "",
-                    ReasonLevel1 = form.SelectedLevel1 ?? "",
-                    ReasonLevel2 = form.SelectedLevel2 ?? "",
-                    ReasonLevel3 = form.SelectedLevel3 ?? ""
-                };
-
-                ClientLogger.LogAgent($"Idle reason captured ({idleEvent.ReasonDetail}) {start:HH:mm}-{end:HH:mm}.", "DBG");
-                bool success = await SendIdleEventAsync(idleEvent);
-                if (!success)
-                {
-                    SavePendingIdleEvent(idleEvent);
-                    MessageBox.Show("서버 전송에 실패했습니다. 데이터를 로컬에 저장했습니다.");
-                }
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Error showing idle reason popup: {ex.Message}", "Err", ex);
+                // Don't re-throw to prevent application crash
             }
         }
 
@@ -2060,9 +2100,12 @@ namespace YEJI_AW_Client
             var payload = BuildClientStatusPayload();
             string json = JsonSerializer.Serialize(payload);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var endpoint = TryGetEndpoint(url);
 
             try
             {
+                ClientLogger.LogWeb($"Posting client status to {endpoint} for {payload.EmpNo}/{payload.PcName}.", "DBG");
+
                 var response = await HttpClient.PostAsync(url, content);
 
                 if (!response.IsSuccessStatusCode)
@@ -2075,7 +2118,6 @@ namespace YEJI_AW_Client
                 }
                 else
                 {
-                    var endpoint = TryGetEndpoint(url);
                     ClientLogger.LogWeb($"[{payload.EmpNo}] POST {endpoint} success.", "DBG");
                 }
             }
@@ -2142,25 +2184,27 @@ namespace YEJI_AW_Client
                 string url = $"{ServerBaseUrl}/api/idle-events";
                 string json = JsonSerializer.Serialize(data);
 
+                ClientLogger.LogWeb($"Sending idle event for {data.EmployeeId} ({data.IdleStartTime} ~ {data.IdleEndTime}, reason: {data.ReasonDetail}).", "DBG");
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
                 var response = await client.PostAsync(url, content);
 
                 if (response.IsSuccessStatusCode)
                 {
                     RemovePendingIdleEvent(data.Id);
-                    ClientLogger.LogWeb($"Idle event sent ({data.EmployeeId}, {data.Id}).", "DBG");
+                    ClientLogger.LogWeb($"Idle event sent successfully ({data.EmployeeId}, {data.Id}).", "DBG");
                     return true;
                 }
                 else
                 {
-                    ClientLogger.LogWeb($"Idle event send failed ({data.EmployeeId}) Status {(int)response.StatusCode}.", "Err");
+                    string responseBody = await response.Content.ReadAsStringAsync();
+                    ClientLogger.LogWeb($"Idle event send failed ({data.EmployeeId}) Status {(int)response.StatusCode}, Body: {responseBody}.", "Err");
                     SavePendingIdleEvent(data);
                     return false;
                 }
             }
             catch (Exception ex)
             {
-                ClientLogger.LogWeb($"Idle event send exception ({data.EmployeeId}).", "Err", ex);
+                ClientLogger.LogWeb($"Idle event send exception ({data.EmployeeId}, {data.Id}).", "Err", ex);
                 SavePendingIdleEvent(data);
                 return false;
             }
@@ -2173,7 +2217,7 @@ namespace YEJI_AW_Client
                 var client = HttpClient;
                 string url = $"{ServerBaseUrl}/api/pc-events";
 
-                DateTime eventTime = eventType == "BOOT"
+                DateTime eventTime = eventType == "PC_ON"
                    ? GetSystemBootTime()
                    : GetCurrentDateTime();
 
@@ -2190,12 +2234,21 @@ namespace YEJI_AW_Client
                 string json = JsonSerializer.Serialize(data);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                await client.PostAsync(url, content);
-                ClientLogger.LogService($"PC event {eventType} sent for {employeeId}.", "DBG");
+                ClientLogger.LogWeb($"Sending PC event {eventType} for {employeeId} at {eventTime:HH:mm:ss}.", "DBG");
+                var response = await client.PostAsync(url, content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    ClientLogger.LogWeb($"PC event {eventType} sent successfully for {employeeId}.", "DBG");
+                }
+                else
+                {
+                    ClientLogger.LogWeb($"PC event {eventType} send failed with status {(int)response.StatusCode} for {employeeId}.", "Err");
+                }
             }
             catch (Exception ex)
             {
-                ClientLogger.LogService($"Failed to send PC event {eventType} for {employeeId}.", "Err", ex);
+                ClientLogger.LogWeb($"Failed to send PC event {eventType} for {employeeId}.", "Err", ex);
                 // 실패해도 별도 저장은 하지 않고 무시
             }
         }
@@ -3061,7 +3114,8 @@ namespace YEJI_AW_Client
         {
             try
             {
-                await SendPcEventAsync("SHUTDOWN");
+                ClientLogger.LogService("Application closing, sending LOGOUT and PC_OFF events.", "DBG");
+                await Task.WhenAll(SendPcEventAsync("LOGOUT"), SendPcEventAsync("PC_OFF")).ConfigureAwait(false);
             }
             catch
             {
