@@ -178,6 +178,12 @@ namespace YEJI_AW_Client
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
 
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int nIndex);
+
+        private const int SM_CXSCREEN = 0;  // 실제 화면 너비 (DPI 스케일링 무시)
+        private const int SM_CYSCREEN = 1;  // 실제 화면 높이 (DPI 스케일링 무시)
+
         private struct LASTINPUTINFO
         {
             public uint cbSize;
@@ -819,15 +825,15 @@ namespace YEJI_AW_Client
                 var currentDate = GetCurrentDate();
                 DateTime scheduledDateTime = currentDate.Add(scheduledTimeSpan);
 
-                // 2분 이상 지나버린 팝업은 무시
+                // 1분 이상 지나버린 팝업은 무시
                 if (now - scheduledDateTime > TimeSpan.FromMinutes(1))
                     continue;
 
                 string popupKey = scheduledDateTime.ToString("yyyyMMddHHmmss");
                 var diff = now - scheduledDateTime;
 
-                // 예약시간 기준 -1분 ~ +1분 사이 & 아직 안 띄운 경우만
-                if (diff >= TimeSpan.FromMinutes(-1) &&
+                // 정각 이후 1분 이내에만 표시 (정각 ~ +1분)
+                if (diff >= TimeSpan.Zero &&
                     diff <= TimeSpan.FromMinutes(1) &&
                     !shownPopupTimes.Contains(popupKey))
                 {
@@ -1658,11 +1664,15 @@ namespace YEJI_AW_Client
 
         private Size GetPopupMaxImageSize()
         {
-            var screenBounds = Screen.PrimaryScreen?.Bounds;
+            // DPI 스케일링을 무시하고 실제 물리적 화면 크기를 가져옴
+            // 이를 통해 100% 배율 기준으로 팝업 이미지 크기를 고정
+            int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+            int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+
             const int padding = 24; // 화면 가득 차지하지 않도록 최소 여백 확보
 
-            int maxWidth = Math.Max(PopupImageMinWidth, (screenBounds?.Width ?? PopupImageMinWidth) - padding);
-            int maxHeight = Math.Max(PopupImageMinHeight, (screenBounds?.Height ?? PopupImageMinHeight) - padding);
+            int maxWidth = Math.Max(PopupImageMinWidth, screenWidth - padding);
+            int maxHeight = Math.Max(PopupImageMinHeight, screenHeight - padding); ;
 
             return new Size(maxWidth, maxHeight);
         }
