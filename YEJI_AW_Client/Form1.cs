@@ -2041,6 +2041,22 @@ namespace YEJI_AW_Client
                 return segments;
             }
 
+            // 날짜가 넘어가는 자리비움 체크: 퇴근 후 복귀하지 않은 경우 자리비움으로 기록하지 않음
+            // 예: 2025-12-15 16:29에 외근 후 복귀하지 않고, 2025-12-16 09:17에 컴퓨터를 켰다면
+            // 이는 퇴근한 것이므로 자리비움 사유를 묻지 않음
+            if (start.Date != end.Date)
+            {
+                DateTime workDayEnd = start.Date.Add(workEndTime);
+
+                // 시작일 업무종료 시각 이후에도 복귀하지 않았다면 (즉, 퇴근한 것으로 간주)
+                // 자리비움으로 기록하지 않음
+                if (end > workDayEnd)
+                {
+                    ClientLogger.LogAgent($"Skipping multi-day idle interval {start:yyyy-MM-dd HH:mm:ss}-{end:yyyy-MM-dd HH:mm:ss} (did not return before work end on {start:yyyy-MM-dd}).", "DBG");
+                    return segments;
+                }
+            }
+
             DateTime referenceDate = start.Date;
             DateTime workDayStart = referenceDate.Add(workStartTime);
             DateTime lunchStart = referenceDate.Add(lunchStartTime);
