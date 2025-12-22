@@ -45,6 +45,7 @@ namespace YEJI_AW_Client
         private const int MaxUpdateDownloadJitterSeconds = 600; // 다운로드 전 최대 랜덤 지연 (초, 0~10분)
         private const int MaxUpdateDownloadRetries = 3;        // 다운로드 최대 재시도 횟수
         private const int UpdateRetryBaseDelaySeconds = 30;    // 재시도 기본 지연 (초, exponential backoff)
+        private const int InstallerTimeoutMs = 5 * 60 * 1000;  // 설치 프로세스 최대 대기 시간 (5분)
 
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
@@ -155,6 +156,10 @@ namespace YEJI_AW_Client
         private DateTime? tempDisableEndTime;
 
         private bool isSystemShuttingDown; // Windows 종료 감지 플래그
+
+        // 파일명 유효성 검사용 (성능 최적화)
+        private static readonly HashSet<char> InvalidFileNameChars = new HashSet<char>(Path.GetInvalidFileNameChars());
+        private static readonly HashSet<char> PathSeparators = new HashSet<char>(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar });
 
         private Timer? managerNotificationTimer;
         private bool isCheckingManagerNotifications;
@@ -698,8 +703,25 @@ namespace YEJI_AW_Client
                 // /SP-: "준비 중..." 페이지 생략
                 // /CLOSEAPPLICATIONS: 자동으로 실행 중인 앱 종료
                 // /RESTARTAPPLICATIONS: 설치 후 앱 자동 재시작 (기본값)
+                // /NOCANCEL: 설치 취소 버튼 비활성화 (오류 발생 시에도 프로세스가 정상 종료되도록)
+                // /LOG: 설치 로그 기록 (디버깅용)
+
+                // 버전 문자열에서 파일명에 사용할 수 없는 문자 제거 (보안)
+                string sanitizedVersion = SanitizeFileName(latestRelease.Version);
+
+                // 경로 순회 공격 방지: 디렉터리 구분자가 포함되지 않도록 추가 검증
+                if (sanitizedVersion.Any(c => PathSeparators.Contains(c)))
+                {
+                    sanitizedVersion = "unknown";
+                }
+
+                string logPath = Path.Combine(Path.GetTempPath(), $"YEJI_AW_Client_Setup_{sanitizedVersion}.log");
+
+                // Inno Setup은 경로에 따옴표가 포함된 경우 \" 이스케이프 처리가 필요
+                // 버전 문자열은 이미 sanitize되고 임시 폴더 경로는 시스템 제어이므로 안전
+                // 추가 보안: 경로를 따옴표로 감싸 공백 등의 특수문자 처리
                 string arguments = isExecutable
-                    ? "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS"
+                    ? $"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /NOCANCEL /LOG=\"{logPath}\""
                     : string.Empty;
 
                 var startInfo = new ProcessStartInfo
@@ -712,20 +734,99 @@ namespace YEJI_AW_Client
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
 
-                Process.Start(startInfo);
+                var installerProcess = Process.Start(startInfo);
+
+                if (installerProcess == null)
+                {
+                    throw new InvalidOperationException("Failed to start installer process.");
+                }
 
                 string argLog = isExecutable ? $" with args '{arguments}'" : string.Empty;
                 ClientLogger.LogUpdate($"Launching updater from {tempFilePath}{argLog}.");
-                Application.Exit();
+
+                // 설치 프로세스가 완료될 때까지 비동기 대기 (최대 5분)
+                // WaitForExitAsync를 사용하여 UI 스레드를 차단하지 않음
+                // 설치가 성공적으로 완료되었는지 확인한 후에만 현재 앱을 종료
+                using var cts = new CancellationTokenSource(InstallerTimeoutMs);
+                bool installerFinished = false;
+                
+                try
+                {
+                    await installerProcess.WaitForExitAsync(cts.Token);
+                    installerFinished = true;
+                }
+                catch (OperationCanceledException)
+                {
+                    // 타임아웃 발생 (installerFinished는 이미 false)
+                }
+
+                if (!installerFinished)
+                {
+                    ClientLogger.LogUpdate($"Installer process timed out after {InstallerTimeoutMs / 1000} seconds.", "Err");
+                    ShowTrayNotification(
+                        "업데이트 시간 초과",
+                        "설치가 5분 이상 소요되고 있습니다. 백그라운드에서 계속 진행됩니다.",
+                        ToolTipIcon.Warning,
+                        timeoutMs: 8000);
+                    
+                    // 타임아웃 시에도 pending marker 제거하여 재시도 가능하도록 함
+                    if (File.Exists(pendingUpdateMarkerFile))
+                    {
+                        File.Delete(pendingUpdateMarkerFile);
+                    }
+                    
+                    isUpdatingClient = false;
+                    return;
+                }
+
+                int exitCode = installerProcess.ExitCode;
+                ClientLogger.LogUpdate($"Installer process finished with exit code {exitCode}.");
+
+                // Inno Setup 종료 코드:
+                // 0 = 성공
+                // 1 = 설치가 취소됨
+                // 2 = 치명적 오류 발생
+                // 3 = CRC 오류
+                // 4 = 무효한 매개변수
+                // 5 = 액세스 거부 또는 파일 교체 실패
+                if (exitCode == 0)
+                {
+                    ClientLogger.LogUpdate("Installer completed successfully. Exiting application.");
+                    Application.Exit();
+                }
+                else
+                {
+                    string errorMessage = GetInstallerErrorMessage(exitCode);
+
+                    ClientLogger.LogUpdate($"Installer failed with exit code {exitCode}: {errorMessage}", "Err");
+                    
+                    // 보안: 구체적인 파일 위치 정보 노출 방지
+                    string detailedMessage = $"{errorMessage}\n\n수동 설치가 필요한 경우 시스템 관리자에게 문의하세요.";
+                    
+                    ShowTrayNotification(
+                        "업데이트 설치 실패",
+                        detailedMessage,
+                        ToolTipIcon.Error,
+                        timeoutMs: 10000);
+
+                    // 설치 실패 시 pending marker 제거하여 다음에 재시도 가능하도록 함
+                    if (File.Exists(pendingUpdateMarkerFile))
+                    {
+                        File.Delete(pendingUpdateMarkerFile);
+                    }
+                    
+                    isUpdatingClient = false;
+                }
             }
             catch (Exception ex)
             {
-                ClientLogger.LogUpdate("Failed to launch updater process.", "Err", ex);
+                ClientLogger.LogUpdate("Failed to launch or monitor updater process.", "Err", ex);
+
                 ShowTrayNotification(
-                  "업데이트 실패",
-                  $"다운로드된 설치 파일 실행에 실패했습니다. 다음 경로에서 직접 실행해주세요:\n{tempFilePath}",
+                  "업데이트 실행 실패",
+                  "설치 파일 실행 중 오류가 발생했습니다.\n\n시스템 관리자에게 문의하세요.",
                   ToolTipIcon.Error,
-                  timeoutMs: 8000);
+                  timeoutMs: 10000);
                 if (File.Exists(pendingUpdateMarkerFile))
                 {
                     File.Delete(pendingUpdateMarkerFile);
@@ -749,6 +850,70 @@ namespace YEJI_AW_Client
             {
                 ClientLogger.LogUpdate("Failed to terminate running processes before update.", "Err", ex);
             }
+        }
+
+        private static string SanitizeFileName(string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return "unknown";
+            }
+
+            // 매우 긴 파일명의 경우 스택 오버플로우 방지 (Windows MAX_PATH 기준)
+            const int MaxFileNameLength = 260;
+            if (fileName.Length > MaxFileNameLength)
+            {
+                fileName = fileName.Substring(0, MaxFileNameLength);
+            }
+
+            // 파일명에 사용할 수 없는 문자 및 경로 구분자를 제거
+            // 정적 HashSet 사용으로 반복 생성 방지 및 O(1) 조회 성능 확보
+            // Span 기반 처리로 성능 최적화
+            Span<char> buffer = stackalloc char[fileName.Length];
+            int writeIndex = 0;
+            bool hasPathSeparator = false;
+
+            foreach (char c in fileName)
+            {
+                // 경로 구분자 검사를 동시에 수행하여 두 번째 반복 제거
+                if (PathSeparators.Contains(c))
+                {
+                    hasPathSeparator = true;
+                    continue;
+                }
+
+                if (!InvalidFileNameChars.Contains(c))
+                {
+                    buffer[writeIndex++] = c;
+                }
+            }
+
+            // 경로 순회 공격 감지
+            if (hasPathSeparator)
+            {
+                return "unknown";
+            }
+
+            string sanitized = new string(buffer.Slice(0, writeIndex));
+
+            // 결과가 비어있거나 점만 있는 경우 기본값 반환 (숨김 파일 방지)
+            return string.IsNullOrWhiteSpace(sanitized) || sanitized == "." || sanitized == ".."
+                ? "unknown"
+                : sanitized;
+        }
+
+        private static string GetInstallerErrorMessage(int exitCode)
+        {
+            // Inno Setup 설치 프로그램의 종료 코드를 사용자 친화적인 메시지로 변환
+            return exitCode switch
+            {
+                1 => "설치가 취소되었습니다.",
+                2 => "치명적 오류가 발생했습니다.",
+                3 => "설치 파일이 손상되었습니다.",
+                4 => "잘못된 설치 매개변수입니다.",
+                5 => "파일 교체 중 액세스가 거부되었습니다. 관리자 권한으로 재시도하거나 실행 중인 프로그램을 종료해주세요.",
+                _ => $"알 수 없는 오류가 발생했습니다 (코드: {exitCode})."
+            };
         }
 
         private void TerminateProcessByName(string processName, int? skipProcessId)
@@ -1970,11 +2135,21 @@ namespace YEJI_AW_Client
         {
             try
             {
-                isSystemShuttingDown = true;
                 ClientLogger.LogService($"Windows session ending detected: {e.Reason}", "DBG");
 
-                // 동기적으로 PC_OFF 이벤트 전송 (비동기로 하면 프로세스 종료되어 전송 실패 가능)
-                SendPcEventSync("PC_OFF");
+                // PC_OFF는 실제 시스템 종료(Shutdown) 시에만 전송
+                // 로그오프(Logoff)는 제외
+                if (e.Reason == SessionEndReasons.SystemShutdown)
+                {
+                    isSystemShuttingDown = true;
+                    // 동기적으로 PC_OFF 이벤트 전송 (비동기로 하면 프로세스 종료되어 전송 실패 가능)
+                    SendPcEventSync("PC_OFF");
+                    ClientLogger.LogService("PC_OFF event sent for system shutdown.", "DBG");
+                }
+                else
+                {
+                    ClientLogger.LogService($"Session ending reason is {e.Reason}, not sending PC_OFF.", "DBG");
+                }
             }
             catch (Exception ex)
             {
@@ -3308,9 +3483,10 @@ namespace YEJI_AW_Client
                 }
                 else
                 {
-                    // 일반적인 프로그램 종료 (사용자가 수동으로 종료)
-                    ClientLogger.LogService("Application closing (manual), sending LOGOUT and PC_OFF events.", "DBG");
-                    await Task.WhenAll(SendPcEventAsync("LOGOUT"), SendPcEventAsync("PC_OFF")).ConfigureAwait(false);
+                    // 일반적인 프로그램 종료 (사용자가 수동으로 종료하거나 로그아웃)
+                    // PC_OFF는 전송하지 않고 LOGOUT만 전송
+                    ClientLogger.LogService("Application closing (manual/logout), sending LOGOUT only.", "DBG");
+                    await SendPcEventAsync("LOGOUT").ConfigureAwait(false);
                 }
             }
             catch
