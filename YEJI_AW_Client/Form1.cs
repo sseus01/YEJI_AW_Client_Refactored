@@ -703,12 +703,13 @@ namespace YEJI_AW_Client
                 // /SUPPRESSMSGBOXES: 모든 메시지 박스 억제
                 // /NORESTART: 설치 후 시스템 재시작 안 함
                 // /SP-: "준비 중..." 페이지 생략
-                // /CLOSEAPPLICATIONS: 자동으로 실행 중인 앱 종료
-                // /RESTARTAPPLICATIONS: 설치 후 앱 재시작
-                // 
-                // 주의: /NOCANCEL 플래그는 제거됨
-                // 이유: /SUPPRESSMSGBOXES와 함께 사용 시 오류가 발생해도 메시지를 표시할 수 없어
-                // 설치가 조기 종료되는 문제가 발생함. /NOCANCEL 없이도 /VERYSILENT로 충분히 자동 설치 가능.
+                //
+                // 주의: /CLOSEAPPLICATIONS 및 /RESTARTAPPLICATIONS 플래그 제거됨
+                // 이유: 앱이 직접 인스톨러를 실행하고 대기하는 경우, 인스톨러가 앱을 종료하려고 하면 교착 상태 발생
+                // 대신: 인스톨러 실행 후 즉시 앱 종료, ISS 파일의 CurStepChanged에서 새 버전 자동 시작
+                //
+                // 주의: /NOCANCEL 플래그도 제거됨
+                // 이유: /SUPPRESSMSGBOXES와 함께 사용 시 오류가 발생해도 메시지를 표시할 수 없어 조기 종료됨
 
                 // 버전 문자열에서 파일명에 사용할 수 없는 문자 제거 (보안)
                 string sanitizedVersion = SanitizeFileName(latestRelease.Version);
@@ -725,7 +726,7 @@ namespace YEJI_AW_Client
                 // 버전 문자열은 이미 sanitize되고 임시 폴더 경로는 시스템 제어이므로 안전
                 // 추가 보안: 경로를 따옴표로 감싸 공백 등의 특수문자 처리
                 string arguments = isExecutable
-                    ? $"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /LOG=\"{logPath}\""
+                    ? $"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG=\"{logPath}\""
                     : string.Empty;
 
                 var startInfo = new ProcessStartInfo
@@ -733,9 +734,9 @@ namespace YEJI_AW_Client
                     FileName = tempFilePath,
                     Arguments = arguments,
                     UseShellExecute = true,
-                    // WindowStyle.Hidden: 릴리즈 버전에서도 디버그 모드와 동일하게 백그라운드 설치되도록 설정
-                    // 설치 프로세스 창이 화면에 표시되지 않아 사용자가 수동으로 설치 버튼을 클릭할 필요 없음
-                    WindowStyle = ProcessWindowStyle.Hidden
+                    // 설치 프로세스를 백그라운드에서 실행
+                    // Hidden 대신 Minimized 사용하여 프로세스가 정상 실행되도록 함
+                    WindowStyle = ProcessWindowStyle.Minimized
                 };
 
                 var installerProcess = Process.Start(startInfo);
@@ -746,92 +747,17 @@ namespace YEJI_AW_Client
                 }
 
                 string argLog = isExecutable ? $" with args '{arguments}'" : string.Empty;
-                ClientLogger.LogUpdate($"Launching updater from {tempFilePath}{argLog}.");
+                ClientLogger.LogUpdate($"Launching installer from {tempFilePath}{argLog}. Exiting current application immediately to avoid deadlock.");
 
-                // 설치 프로세스가 완료될 때까지 비동기 대기 (최대 5분)
-                // WaitForExitAsync를 사용하여 UI 스레드를 차단하지 않음
-                // 설치가 성공적으로 완료되었는지 확인한 후에만 현재 앱을 종료
-                using var cts = new CancellationTokenSource(InstallerTimeoutMs);
-                bool installerFinished = false;
-                
-                try
-                {
-                    await installerProcess.WaitForExitAsync(cts.Token);
-                    installerFinished = true;
-                }
-                catch (OperationCanceledException)
-                {
-                    // 타임아웃 발생 (installerFinished는 이미 false)
-                }
-
-                if (!installerFinished)
-                {
-                    ClientLogger.LogUpdate($"Installer process timed out after {InstallerTimeoutMs / 1000} seconds.", "Err");
-                    ShowTrayNotification(
-                        "업데이트 시간 초과",
-                        "설치가 5분 이상 소요되고 있습니다. 백그라운드에서 계속 진행됩니다.",
-                        ToolTipIcon.Warning,
-                        timeoutMs: 8000);
-                    
-                    // 타임아웃 시에도 pending marker 제거하여 재시도 가능하도록 함
-                    if (File.Exists(pendingUpdateMarkerFile))
-                    {
-                        File.Delete(pendingUpdateMarkerFile);
-                    }
-                    
-                    isUpdatingClient = false;
-                    return;
-                }
-
-                int exitCode = installerProcess.ExitCode;
-                ClientLogger.LogUpdate($"Installer process finished with exit code {exitCode}.");
-
-                // Inno Setup 종료 코드:
-                // 0 = 성공
-                // 1 = 설치가 취소됨
-                // 2 = 치명적 오류 발생
-                // 3 = CRC 오류
-                // 4 = 무효한 매개변수
-                // 5 = 액세스 거부 또는 파일 교체 실패
-                if (exitCode == 0)
-                {
-                    ClientLogger.LogUpdate("Installer completed successfully.");
-
-                    // 설치가 성공적으로 완료되었습니다.
-                    // /RESTARTAPPLICATIONS 플래그를 사용하므로 Inno Setup 인스톨러가
-                    // 설치 후 자동으로 애플리케이션을 재시작합니다.
-                    // 따라서 현재 버전은 종료만 하면 됩니다.
-
-                    ClientLogger.LogUpdate("Installer will restart the application automatically. Exiting current version.");
-                    Application.Exit();
-                }
-                else
-                {
-                    string errorMessage = GetInstallerErrorMessage(exitCode);
-
-                    ClientLogger.LogUpdate($"Installer failed with exit code {exitCode}: {errorMessage}", "Err");
-                    
-                    // 보안: 구체적인 파일 위치 정보 노출 방지
-                    string detailedMessage = $"{errorMessage}\n\n수동 설치가 필요한 경우 시스템 관리자에게 문의하세요.";
-                    
-                    ShowTrayNotification(
-                        "업데이트 설치 실패",
-                        detailedMessage,
-                        ToolTipIcon.Error,
-                        timeoutMs: 10000);
-
-                    // 설치 실패 시 pending marker 제거하여 다음에 재시도 가능하도록 함
-                    if (File.Exists(pendingUpdateMarkerFile))
-                    {
-                        File.Delete(pendingUpdateMarkerFile);
-                    }
-                    
-                    isUpdatingClient = false;
-                }
+                // 중요: 인스톨러 실행 후 즉시 현재 앱 종료
+                // ISS 파일의 CurStepChanged가 설치 완료 후 새 버전을 자동으로 시작함
+                // 대기하지 않음으로써 인스톨러가 파일을 교체할 수 있도록 함
+                ClientLogger.LogUpdate("Installer launched successfully. Exiting to allow installation.");
+                Application.Exit();
             }
             catch (Exception ex)
             {
-                ClientLogger.LogUpdate("Failed to launch or monitor updater process.", "Err", ex);
+                ClientLogger.LogUpdate("Failed to launch installer.", "Err", ex);
 
                 ShowTrayNotification(
                   "업데이트 실행 실패",
