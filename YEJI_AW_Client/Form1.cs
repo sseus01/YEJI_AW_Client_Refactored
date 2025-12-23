@@ -46,8 +46,7 @@ namespace YEJI_AW_Client
         private const int MaxUpdateDownloadRetries = 3;        // 다운로드 최대 재시도 횟수
         private const int UpdateRetryBaseDelaySeconds = 30;    // 재시도 기본 지연 (초, exponential backoff)
         private const int InstallerTimeoutMs = 5 * 60 * 1000;  // 설치 프로세스 최대 대기 시간 (5분)
-        private const int NewVersionInitializationDelayMs = 1000; // 새 버전 초기화 대기 시간 (밀리초)
-        private const string ApplicationName = "YEJI_AW_Client"; // 애플리케이션 이름 (설치 경로에 사용)
+        private const string ApplicationName = "YEJI_AW_Client"; // 애플리케이션 이름
 
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
@@ -704,7 +703,7 @@ namespace YEJI_AW_Client
                 // /SUPPRESSMSGBOXES: 모든 메시지 박스 억제
                 // /NORESTART: 설치 후 시스템 재시작 안 함
                 // /SP-: "준비 중..." 페이지 생략
-                // /CLOSEAPPLICATIONS: 자동으로 실행 중인 앱 종료                
+                // /CLOSEAPPLICATIONS: 자동으로 실행 중인 앱 종료               
                 // /NOCANCEL: 설치 취소 버튼 비활성화 (오류 발생 시에도 프로세스가 정상 종료되도록)
                 // /LOG: 설치 로그 기록 (디버깅용)
                 // 
@@ -800,116 +799,16 @@ namespace YEJI_AW_Client
                 {
                     ClientLogger.LogUpdate("Installer completed successfully.");
 
-                    // 설치가 성공적으로 완료되면 새 버전을 실행하고 현재 앱을 종료
+                    // 설치가 성공적으로 완료되었습니다.
                     // 
-                    // 전략:
-                    // 1. Inno Setup의 기본 설치 경로에서 새로 설치된 실행 파일을 찾음
-                    // 2. 새 버전을 시작
-                    // 3. 현재 앱을 종료
+                    // ISS 파일의 CurStepChanged 프로시저에서 이미 다음을 수행합니다:
+                    // 1. YEJI_AW_Watcher.exe 실행
+                    // 2. YEJI_AW_Client.exe 실행
                     // 
-                    // 이렇게 하면:
-                    // - 업데이트 후 자동으로 새 버전이 실행됨
-                    // - YEJI_AW_Watcher도 새 버전이 시작할 때 같이 시작됨 (Program.cs에서 처리하는 경우)
-                    // - 사용자가 수동으로 재시작할 필요 없음
+                    // 따라서 여기서는 새 버전을 시작하지 않고, 현재 버전만 종료합니다.
+                    // ISS 파일이 새 버전을 자동으로 시작합니다.
 
-                    try
-                    {
-                        // 새로 설치된 실행 파일 경로 찾기
-                        // 
-                        // 주의: 이 코드는 Inno Setup 인스톨러가 다음과 같은 구조로 설치한다고 가정합니다:
-                        // - {ProgramFiles}\YEJI_AW_Client\YEJI_AW_Client.exe
-                        // 
-                        // 만약 인스톨러 설정이 변경되면 이 경로도 업데이트해야 합니다.
-                        // 더 견고한 방법은 레지스트리에서 설치 경로를 읽어오는 것이지만,
-                        // 현재는 간단한 경로 탐색으로 처리합니다.
-                        //
-                        // 우선순위:
-                        // 1. Program Files 기본 경로
-                        // 2. Program Files (x86) 경로
-                        // 3. 현재 실행 파일의 위치 (업데이트되었을 수 있음)
-
-                        string installPath = string.Empty;
-                        string[] possiblePaths = new[]
-                        {
-                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), ApplicationName, $"{ApplicationName}.exe"),
-                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), ApplicationName, $"{ApplicationName}.exe"),
-                            Application.ExecutablePath // 현재 실행 파일 경로 (덮어쓰기되었을 수 있음)
-                        };
-
-                        foreach (var path in possiblePaths)
-                        {
-                            if (string.IsNullOrWhiteSpace(path))
-                                continue;
-
-                            try
-                            {
-                                if (File.Exists(path))
-                                {
-                                    installPath = path;
-                                    break;
-                                }
-                            }
-                            catch (Exception fileCheckEx)
-                            {
-                                // 파일 접근 권한 오류 등은 무시하고 다음 경로 확인
-                                ClientLogger.LogUpdate($"Failed to check path {path}: {fileCheckEx.Message}", "DBG");
-                            }
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(installPath))
-                        {
-                            ClientLogger.LogUpdate($"Starting new version from {installPath}");
-
-                            string workingDir = Path.GetDirectoryName(installPath) ?? AppDomain.CurrentDomain.BaseDirectory;
-
-                            var startInfo = new ProcessStartInfo
-                            {
-                                FileName = installPath,
-                                UseShellExecute = true,
-                                WorkingDirectory = workingDir
-                            };
-
-                            var newProcess = Process.Start(startInfo);
-                            if (newProcess == null)
-                            {
-                                // Process.Start()가 null을 반환하는 경우는 드물지만 발생 가능
-                                // 이 경우 사용자에게 수동 재시작을 안내
-                                ClientLogger.LogUpdate("Failed to start new version: Process.Start returned null.", "Err");
-                                ShowTrayNotification(
-                                    "업데이트 완료",
-                                    "업데이트가 완료되었습니다. 프로그램을 다시 시작해주세요.",
-                                    ToolTipIcon.Info,
-                                    timeoutMs: 10000);
-                            }
-                            else
-                            {
-                                ClientLogger.LogUpdate("New version started successfully.");
-
-                                // 잠시 대기하여 새 버전이 초기화되도록 함
-                                await Task.Delay(NewVersionInitializationDelayMs);
-                            }
-                        }
-                        else
-                        {
-                            ClientLogger.LogUpdate("Could not find installed executable. User will need to manually restart.", "Warn");
-                            ShowTrayNotification(
-                                "업데이트 완료",
-                                "업데이트가 완료되었습니다. 프로그램을 다시 시작해주세요.",
-                                ToolTipIcon.Info,
-                                timeoutMs: 10000);
-                        }
-                    }
-                    catch (Exception restartEx)
-                    {
-                        ClientLogger.LogUpdate("Failed to restart new version after update.", "Err", restartEx);
-                        ShowTrayNotification(
-                            "업데이트 완료",
-                            "업데이트가 완료되었습니다. 프로그램을 다시 시작해주세요.",
-                            ToolTipIcon.Info,
-                            timeoutMs: 10000);
-                    }
-
-                    ClientLogger.LogUpdate("Exiting current version to complete update.");
+                    ClientLogger.LogUpdate("Installer will start new version automatically. Exiting current version.");
                     Application.Exit();
                 }
                 else
@@ -1016,7 +915,7 @@ namespace YEJI_AW_Client
                 _ => $"알 수 없는 오류가 발생했습니다 (코드: {exitCode})."
             };
         }
-
+        
         private void CreatePendingUpdateMarker(string targetVersion)
         {
             try
