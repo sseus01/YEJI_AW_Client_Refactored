@@ -669,7 +669,29 @@ namespace YEJI_AW_Client
 
                     await using var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
                     await response.Content.CopyToAsync(fileStream);
-                    ClientLogger.LogUpdate($"Downloaded update package {latestRelease.Version} to {tempFilePath}.", "DBG");
+
+                    long downloadedSize = fileStream.Length;
+                    long? expectedSize = response.Content.Headers.ContentLength;
+
+                    if (expectedSize.HasValue && expectedSize.Value != downloadedSize)
+                    {
+                        ClientLogger.LogUpdate(
+                            $"Download size mismatch for {latestRelease.Version}: expected {expectedSize.Value} bytes, got {downloadedSize} bytes.",
+                            "Err");
+
+                        // 손상된 인스톨러 실행을 방지하기 위해 삭제 후 재시도
+                        fileStream.Dispose();
+                        if (File.Exists(tempFilePath))
+                        {
+                            File.Delete(tempFilePath);
+                        }
+
+                        throw new IOException("Downloaded file size does not match Content-Length.");
+                    }
+
+                    ClientLogger.LogUpdate(
+                        $"Downloaded update package {latestRelease.Version} to {tempFilePath} (size: {downloadedSize} bytes).",
+                        "DBG");
                     break; // 성공 시 루프 탈출
                 }
                 catch (Exception ex)
