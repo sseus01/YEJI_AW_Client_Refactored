@@ -652,11 +652,35 @@ namespace YEJI_AW_Client
                 ? latestRelease.DownloadUrl
                 : ServerBaseUrl + latestRelease.DownloadUrl;
 
-            string targetFileName = string.IsNullOrWhiteSpace(latestRelease.FileName)
+            // 서버에서 받은 파일명을 정제하여 경로 순회 공격 및 잘못된 문자 방지
+            string rawFileName = string.IsNullOrWhiteSpace(latestRelease.FileName)
                 ? $"YEJI_AW_Client_{latestRelease.Version}.exe"
                 : latestRelease.FileName;
 
+            string targetFileName = SanitizeFileName(rawFileName);
+
+            // 파일명이 정제되어 원본과 달라진 경우 디버그 로그 남김
+            if (!string.Equals(rawFileName, targetFileName, StringComparison.Ordinal))
+            {
+                ClientLogger.LogUpdate($"Filename sanitized: '{rawFileName}' -> '{targetFileName}'", "WARN");
+            }
+
+            // 경로 구분자가 남아있는지 최종 검증 (이중 방어)
+            if (targetFileName.Any(c => PathSeparators.Contains(c)))
+            {
+                ClientLogger.LogUpdate($"Filename still contains path separators after sanitization: '{targetFileName}'. Using safe default.", "ERR");
+                targetFileName = $"YEJI_AW_Client_Setup_{DateTime.UtcNow:yyyyMMddHHmmss}.exe";
+            }
+
+            // .exe 확장자가 없으면 추가 (보안: 실행 파일만 허용)
+            if (!targetFileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientLogger.LogUpdate($"Filename missing .exe extension: '{targetFileName}'. Appending .exe", "WARN");
+                targetFileName += ".exe";
+            }
+
             string tempFilePath = Path.Combine(Path.GetTempPath(), targetFileName);
+            ClientLogger.LogUpdate($"Target download path: {tempFilePath}", "DBG");
 
             // 재시도 로직: 실패 시 exponential backoff
             for (int attempt = 1; attempt <= MaxUpdateDownloadRetries; attempt++)
@@ -691,6 +715,26 @@ namespace YEJI_AW_Client
                     await Task.Delay(TimeSpan.FromSeconds(waitSeconds));
                 }
             }
+
+            // 다운로드 완료 후 파일 존재 및 크기 검증
+            if (!File.Exists(tempFilePath))
+            {
+                ClientLogger.LogUpdate($"Downloaded file does not exist at path: {tempFilePath}", "ERR");
+                ShowTrayNotification("업데이트 실패", "다운로드한 파일을 찾을 수 없습니다.", ToolTipIcon.Error);
+                isUpdatingClient = false;
+                return;
+            }
+
+            var fileInfo = new FileInfo(tempFilePath);
+            if (fileInfo.Length == 0)
+            {
+                ClientLogger.LogUpdate($"Downloaded file is empty (0 bytes): {tempFilePath}", "ERR");
+                ShowTrayNotification("업데이트 실패", "다운로드한 파일이 비어있습니다.", ToolTipIcon.Error);
+                isUpdatingClient = false;
+                return;
+            }
+
+            ClientLogger.LogUpdate($"File validated successfully. Size: {fileInfo.Length:N0} bytes, Path: {tempFilePath}", "DBG");
 
             try
             {
@@ -729,6 +773,13 @@ namespace YEJI_AW_Client
                     ? $"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG=\"{logPath}\""
                     : string.Empty;
 
+                ClientLogger.LogUpdate($"Preparing to launch installer:", "DBG");
+                ClientLogger.LogUpdate($"  Executable: {tempFilePath}", "DBG");
+                ClientLogger.LogUpdate($"  File exists: {File.Exists(tempFilePath)}", "DBG");
+                ClientLogger.LogUpdate($"  File size: {new FileInfo(tempFilePath).Length:N0} bytes", "DBG");
+                ClientLogger.LogUpdate($"  Arguments: {arguments}", "DBG");
+                ClientLogger.LogUpdate($"  Setup log will be at: {logPath}", "DBG");
+
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = tempFilePath,
@@ -739,6 +790,7 @@ namespace YEJI_AW_Client
                     WindowStyle = ProcessWindowStyle.Minimized
                 };
 
+                ClientLogger.LogUpdate("Starting installer process...", "DBG");
                 var installerProcess = Process.Start(startInfo);
 
                 if (installerProcess == null)
@@ -746,6 +798,7 @@ namespace YEJI_AW_Client
                     throw new InvalidOperationException("Failed to start installer process.");
                 }
 
+                ClientLogger.LogUpdate($"Installer process started successfully. PID: {installerProcess.Id}", "DBG");
                 string argLog = isExecutable ? $" with args '{arguments}'" : string.Empty;
                 ClientLogger.LogUpdate($"Launching installer from {tempFilePath}{argLog}. Exiting current application immediately to avoid deadlock.");
 
@@ -753,7 +806,8 @@ namespace YEJI_AW_Client
                 // ISS 파일의 CurStepChanged가 설치 완료 후 새 버전을 자동으로 시작함
                 // 대기하지 않음으로써 인스톨러가 파일을 교체할 수 있도록 함
                 ClientLogger.LogUpdate("Installer launched successfully. Exiting to allow installation.");
-                Application.Exit();
+                ClientLogger.LogUpdate($"Check installer log at: {logPath}", "DBG");
+                Application.Exit();                
             }
             catch (Exception ex)
             {
