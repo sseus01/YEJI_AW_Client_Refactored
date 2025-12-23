@@ -669,29 +669,7 @@ namespace YEJI_AW_Client
 
                     await using var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
                     await response.Content.CopyToAsync(fileStream);
-
-                    long downloadedSize = fileStream.Length;
-                    long? expectedSize = response.Content.Headers.ContentLength;
-
-                    if (expectedSize.HasValue && expectedSize.Value != downloadedSize)
-                    {
-                        ClientLogger.LogUpdate(
-                            $"Download size mismatch for {latestRelease.Version}: expected {expectedSize.Value} bytes, got {downloadedSize} bytes.",
-                            "Err");
-
-                        // 손상된 인스톨러 실행을 방지하기 위해 삭제 후 재시도
-                        fileStream.Dispose();
-                        if (File.Exists(tempFilePath))
-                        {
-                            File.Delete(tempFilePath);
-                        }
-
-                        throw new IOException("Downloaded file size does not match Content-Length.");
-                    }
-
-                    ClientLogger.LogUpdate(
-                        $"Downloaded update package {latestRelease.Version} to {tempFilePath} (size: {downloadedSize} bytes).",
-                        "DBG");
+                    ClientLogger.LogUpdate($"Downloaded update package {latestRelease.Version} to {tempFilePath}.", "DBG");
                     break; // 성공 시 루프 탈출
                 }
                 catch (Exception ex)
@@ -820,7 +798,9 @@ namespace YEJI_AW_Client
                     ClientLogger.LogUpdate("Installer completed successfully.");
 
                     // 설치가 성공적으로 완료되었습니다.
-
+                    // /RESTARTAPPLICATIONS 플래그를 사용하므로 Inno Setup 인스톨러가
+                    // 설치 후 자동으로 애플리케이션을 재시작합니다.
+                    // 따라서 현재 버전은 종료만 하면 됩니다.
 
                     ClientLogger.LogUpdate("Installer will restart the application automatically. Exiting current version.");
                     Application.Exit();
