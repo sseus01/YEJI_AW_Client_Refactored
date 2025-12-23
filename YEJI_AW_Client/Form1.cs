@@ -808,7 +808,10 @@ namespace YEJI_AW_Client
                     // 따라서 여기서는 새 버전을 시작하지 않고, 현재 버전만 종료합니다.
                     // ISS 파일이 새 버전을 자동으로 시작합니다.
 
-                    ClientLogger.LogUpdate("Installer will start new version automatically. Exiting current version.");
+                    string currentExecutable = Application.ExecutablePath;
+                    string currentDirectory = Path.GetDirectoryName(currentExecutable) ?? string.Empty;
+
+                    ClientLogger.LogUpdate("Installer will start new version automatically via Inno Setup script. Exiting current version without manual restart scheduling.");
                     Application.Exit();
                 }
                 else
