@@ -703,14 +703,12 @@ namespace YEJI_AW_Client
                 // /SUPPRESSMSGBOXES: 모든 메시지 박스 억제
                 // /NORESTART: 설치 후 시스템 재시작 안 함
                 // /SP-: "준비 중..." 페이지 생략
-                // /CLOSEAPPLICATIONS: 자동으로 실행 중인 앱 종료               
-                // /NOCANCEL: 설치 취소 버튼 비활성화 (오류 발생 시에도 프로세스가 정상 종료되도록)
-                // /LOG: 설치 로그 기록 (디버깅용)
+                // /CLOSEAPPLICATIONS: 자동으로 실행 중인 앱 종료
+                // /RESTARTAPPLICATIONS: 설치 후 앱 재시작
                 // 
-                // 주의: /RESTARTAPPLICATIONS 플래그를 제거함
-                // 이유: 현재 앱이 인스톨러 완료 대기 후 종료되므로, 인스톨러가 앱을 재시작할 필요 없음
-                // 대신, 인스톨러 완료 후 현재 프로세스를 종료하지 않고 유지하여
-                // 설치된 새 버전이 자동으로 시작되도록 함
+                // 주의: /NOCANCEL 플래그는 제거됨
+                // 이유: /SUPPRESSMSGBOXES와 함께 사용 시 오류가 발생해도 메시지를 표시할 수 없어
+                // 설치가 조기 종료되는 문제가 발생함. /NOCANCEL 없이도 /VERYSILENT로 충분히 자동 설치 가능.
 
                 // 버전 문자열에서 파일명에 사용할 수 없는 문자 제거 (보안)
                 string sanitizedVersion = SanitizeFileName(latestRelease.Version);
@@ -727,7 +725,7 @@ namespace YEJI_AW_Client
                 // 버전 문자열은 이미 sanitize되고 임시 폴더 경로는 시스템 제어이므로 안전
                 // 추가 보안: 경로를 따옴표로 감싸 공백 등의 특수문자 처리
                 string arguments = isExecutable
-                    ? $"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /NOCANCEL /LOG=\"{logPath}\""
+                    ? $"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /LOG=\"{logPath}\""
                     : string.Empty;
 
                 var startInfo = new ProcessStartInfo
@@ -800,18 +798,9 @@ namespace YEJI_AW_Client
                     ClientLogger.LogUpdate("Installer completed successfully.");
 
                     // 설치가 성공적으로 완료되었습니다.
-                    // 
-                    // ISS 파일의 CurStepChanged 프로시저에서 이미 다음을 수행합니다:
-                    // 1. YEJI_AW_Watcher.exe 실행
-                    // 2. YEJI_AW_Client.exe 실행
-                    // 
-                    // 따라서 여기서는 새 버전을 시작하지 않고, 현재 버전만 종료합니다.
-                    // ISS 파일이 새 버전을 자동으로 시작합니다.
 
-                    string currentExecutable = Application.ExecutablePath;
-                    string currentDirectory = Path.GetDirectoryName(currentExecutable) ?? string.Empty;
 
-                    ClientLogger.LogUpdate("Installer will start new version automatically via Inno Setup script. Exiting current version without manual restart scheduling.");
+                    ClientLogger.LogUpdate("Installer will restart the application automatically. Exiting current version.");
                     Application.Exit();
                 }
                 else
