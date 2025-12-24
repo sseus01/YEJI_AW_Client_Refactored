@@ -87,6 +87,10 @@ namespace YEJI_AW_Client
         private readonly string pendingUpdateMarkerFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "pending_update.txt");
 
+        // 마지막으로 시도한 업데이트 버전 기록 (중복 시도 방지)
+        private readonly string lastAttemptedUpdateFile =
+            Path.Combine(@"C:\ProgramData\YEJI_AW", "last_update_attempt.txt");
+
         private const string ServerBaseUrl = "http://175.106.99.157:3000";
 
         private static string GetCurrentVersion()
@@ -526,6 +530,14 @@ namespace YEJI_AW_Client
                     }
 
                     string latestVersion = checkResult!.Latest!.Version;
+
+                    // 중복 업데이트 시도 방지: 최근에 이미 같은 버전 설치를 시도했는지 확인
+                    if (!forceInstall && HasRecentlyAttemptedUpdate(latestVersion))
+                    {
+                        ClientLogger.LogUpdate($"Update to {latestVersion} was recently attempted. Skipping to prevent duplicate installation.", "DBG");
+                        return;
+                    }
+
                     string priority = string.IsNullOrWhiteSpace(checkResult.Latest.Priority)
                        ? "normal"
                        : checkResult.Latest.Priority.Trim();
@@ -568,6 +580,8 @@ namespace YEJI_AW_Client
             try
             {
                 string currentVersion = GetCurrentVersion();
+                ClientLogger.LogUpdate($"Checking for update completion. Current version: {currentVersion}", "DBG");
+
                 string folder = Path.GetDirectoryName(clientVersionFile) ?? string.Empty;
 
                 if (!string.IsNullOrWhiteSpace(folder) && !Directory.Exists(folder))
@@ -582,34 +596,53 @@ namespace YEJI_AW_Client
                 if (File.Exists(clientVersionFile))
                 {
                     previousVersion = File.ReadAllText(clientVersionFile, Encoding.UTF8).Trim();
+                    ClientLogger.LogUpdate($"Previous version from file: {previousVersion}", "DBG");
+                }
+                else
+                {
+                    ClientLogger.LogUpdate("No previous version file found (first run or file deleted).", "DBG");
                 }
 
                 if (File.Exists(pendingUpdateMarkerFile))
                 {
                     pendingUpdateVersion = File.ReadAllText(pendingUpdateMarkerFile, Encoding.UTF8).Trim();
                     hasPendingUpdateMarker = true;
+                    ClientLogger.LogUpdate($"Pending update marker found for version: {pendingUpdateVersion}", "DBG");
+                }
+                else
+                {
+                    ClientLogger.LogUpdate("No pending update marker found.", "DBG");
                 }
 
                 File.WriteAllText(clientVersionFile, currentVersion, Encoding.UTF8);
+                ClientLogger.LogUpdate($"Current version saved to file: {currentVersion}", "DBG");
 
                 bool updatedFromPrevious = !string.IsNullOrWhiteSpace(previousVersion) && previousVersion != currentVersion;
                 bool updatedFromPending = !string.IsNullOrWhiteSpace(pendingUpdateVersion) && pendingUpdateVersion == currentVersion;
 
+                ClientLogger.LogUpdate($"Update detection: updatedFromPrevious={updatedFromPrevious}, updatedFromPending={updatedFromPending}", "DBG");
+
                 if (updatedFromPrevious || updatedFromPending)
                 {
+                    ClientLogger.LogUpdate($"UPDATE COMPLETED SUCCESSFULLY: {previousVersion ?? "unknown"} -> {currentVersion}");
                     ShowTrayNotification(
                        "업데이트 완료",
                        $"클라이언트가 최신 버전({currentVersion})으로 업데이트되었습니다.");
+                }
+                else
+                {
+                    ClientLogger.LogUpdate("No version change detected (normal startup).", "DBG");
                 }
 
                 if (hasPendingUpdateMarker)
                 {
                     File.Delete(pendingUpdateMarkerFile);
+                    ClientLogger.LogUpdate("Pending update marker deleted.", "DBG");
                 }
             }
             catch (Exception ex)
             {
-                ClientLogger.LogUpdate("Failed to notify update completion.", "Err", ex);
+                ClientLogger.LogUpdate("Failed to check/notify update completion.", "Err", ex);
             }
         }
 
@@ -629,7 +662,17 @@ namespace YEJI_AW_Client
         private async Task DownloadAndInstallUpdateAsync(ClientReleaseInfo latestRelease, bool bypassDelay = false)
         {
             isUpdatingClient = true;
-            ClientLogger.LogUpdate($"Starting automatic update to {latestRelease.Version} (bypassDelay={bypassDelay}).");
+            string targetVersion = latestRelease.Version;
+
+            ClientLogger.LogUpdate("=== UPDATE PROCESS STARTED ===");
+            ClientLogger.LogUpdate($"Target version: {targetVersion}");
+            ClientLogger.LogUpdate($"Current version: {GetCurrentVersion()}");
+            ClientLogger.LogUpdate($"Bypass delay: {bypassDelay}");
+            ClientLogger.LogUpdate($"Download URL: {latestRelease.DownloadUrl}");
+            ClientLogger.LogUpdate($"File name: {latestRelease.FileName}");
+
+            // 업데이트 시도 기록 (중복 시도 방지)
+            RecordUpdateAttempt(targetVersion);
 
             // 다운로드 시작 전 추가 랜덤 지연
             // 업데이트 체크 시점이 비슷하더라도 다운로드 시점을 분산시켜 서버 부하 방지
@@ -644,10 +687,7 @@ namespace YEJI_AW_Client
             {
                 ClientLogger.LogUpdate("Bypassing download delay for urgent/forced update.", "DBG");
             }
-
-            // 인스톨러의 /CLOSEAPPLICATIONS 플래그가 실행 중인 프로세스를 자동으로 종료하므로
-            // 여기서는 수동으로 프로세스를 종료하지 않음
-
+                        
             string downloadUrl = latestRelease.DownloadUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
                 ? latestRelease.DownloadUrl
                 : ServerBaseUrl + latestRelease.DownloadUrl;
@@ -680,20 +720,28 @@ namespace YEJI_AW_Client
             }
 
             string tempFilePath = Path.Combine(Path.GetTempPath(), targetFileName);
-            ClientLogger.LogUpdate($"Target download path: {tempFilePath}", "DBG");
+            ClientLogger.LogUpdate($"Final download path: {tempFilePath}", "DBG");
 
             // 재시도 로직: 실패 시 exponential backoff
+            bool downloadSuccess = false;
             for (int attempt = 1; attempt <= MaxUpdateDownloadRetries; attempt++)
             {
                 try
                 {
                     ClientLogger.LogUpdate($"Download attempt {attempt}/{MaxUpdateDownloadRetries} for {latestRelease.Version}.", "DBG");
+                    ClientLogger.LogUpdate($"Downloading from: {downloadUrl}", "DBG");
+
                     using var response = await HttpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
                     response.EnsureSuccessStatusCode();
 
+                    long? contentLength = response.Content.Headers.ContentLength;
+                    ClientLogger.LogUpdate($"Response status: {response.StatusCode}, Content-Length: {contentLength?.ToString() ?? "unknown"}", "DBG");
+
                     await using var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
                     await response.Content.CopyToAsync(fileStream);
-                    ClientLogger.LogUpdate($"Downloaded update package {latestRelease.Version} to {tempFilePath}.", "DBG");
+                    
+                    downloadSuccess = true;
+                    ClientLogger.LogUpdate($"Download completed successfully. File saved to: {tempFilePath}", "DBG");
                     break; // 성공 시 루프 탈출
                 }
                 catch (Exception ex)
@@ -703,6 +751,7 @@ namespace YEJI_AW_Client
                     if (attempt == MaxUpdateDownloadRetries)
                     {
                         // 마지막 시도 실패 시 에러 처리
+                        ClientLogger.LogUpdate("All download attempts failed. Aborting update.", "ERR");
                         ShowTrayNotification("업데이트 실패", "업데이트 파일 다운로드에 실패했습니다. 네트워크 연결을 확인한 뒤 다시 시도해주세요.", ToolTipIcon.Error);
                         isUpdatingClient = false;
                         return;
@@ -717,9 +766,11 @@ namespace YEJI_AW_Client
             }
 
             // 다운로드 완료 후 파일 존재 및 크기 검증
+            ClientLogger.LogUpdate("Validating downloaded file...", "DBG");
+
             if (!File.Exists(tempFilePath))
             {
-                ClientLogger.LogUpdate($"Downloaded file does not exist at path: {tempFilePath}", "ERR");
+                ClientLogger.LogUpdate($"VALIDATION FAILED: Downloaded file does not exist at path: {tempFilePath}", "ERR");
                 ShowTrayNotification("업데이트 실패", "다운로드한 파일을 찾을 수 없습니다.", ToolTipIcon.Error);
                 isUpdatingClient = false;
                 return;
@@ -728,19 +779,20 @@ namespace YEJI_AW_Client
             var fileInfo = new FileInfo(tempFilePath);
             if (fileInfo.Length == 0)
             {
-                ClientLogger.LogUpdate($"Downloaded file is empty (0 bytes): {tempFilePath}", "ERR");
+                ClientLogger.LogUpdate($"VALIDATION FAILED: Downloaded file is empty (0 bytes): {tempFilePath}", "ERR");
                 ShowTrayNotification("업데이트 실패", "다운로드한 파일이 비어있습니다.", ToolTipIcon.Error);
                 isUpdatingClient = false;
                 return;
             }
 
-            ClientLogger.LogUpdate($"File validated successfully. Size: {fileInfo.Length:N0} bytes, Path: {tempFilePath}", "DBG");
+            ClientLogger.LogUpdate($"VALIDATION SUCCESS: File size: {fileInfo.Length:N0} bytes, Path: {tempFilePath}");
 
             try
             {
-                CreatePendingUpdateMarker(latestRelease.Version);
+                CreatePendingUpdateMarker(targetVersion);
 
                 bool isExecutable = string.Equals(Path.GetExtension(tempFilePath), ".exe", StringComparison.OrdinalIgnoreCase);
+                ClientLogger.LogUpdate($"File extension check: isExecutable={isExecutable}", "DBG");
 
                 // Inno Setup 자동 설치 플래그: 설치 UI를 표시하지 않고 백그라운드에서 자동 설치
                 // /VERYSILENT: 모든 설치 UI 숨김 (진행률 대화상자 포함)
@@ -756,7 +808,7 @@ namespace YEJI_AW_Client
                 // 이유: /SUPPRESSMSGBOXES와 함께 사용 시 오류가 발생해도 메시지를 표시할 수 없어 조기 종료됨
 
                 // 버전 문자열에서 파일명에 사용할 수 없는 문자 제거 (보안)
-                string sanitizedVersion = SanitizeFileName(latestRelease.Version);
+                string sanitizedVersion = SanitizeFileName(targetVersion);
 
                 // 경로 순회 공격 방지: 디렉터리 구분자가 포함되지 않도록 추가 검증
                 if (sanitizedVersion.Any(c => PathSeparators.Contains(c)))
@@ -773,12 +825,14 @@ namespace YEJI_AW_Client
                     ? $"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG=\"{logPath}\""
                     : string.Empty;
 
-                ClientLogger.LogUpdate($"Preparing to launch installer:", "DBG");
-                ClientLogger.LogUpdate($"  Executable: {tempFilePath}", "DBG");
-                ClientLogger.LogUpdate($"  File exists: {File.Exists(tempFilePath)}", "DBG");
-                ClientLogger.LogUpdate($"  File size: {new FileInfo(tempFilePath).Length:N0} bytes", "DBG");
-                ClientLogger.LogUpdate($"  Arguments: {arguments}", "DBG");
-                ClientLogger.LogUpdate($"  Setup log will be at: {logPath}", "DBG");
+                ClientLogger.LogUpdate("=== INSTALLER LAUNCH CONFIGURATION ===");
+                ClientLogger.LogUpdate($"Executable path: {tempFilePath}");
+                ClientLogger.LogUpdate($"File exists: {File.Exists(tempFilePath)}");
+                ClientLogger.LogUpdate($"File size: {new FileInfo(tempFilePath).Length:N0} bytes");
+                ClientLogger.LogUpdate($"Is executable: {isExecutable}");
+                ClientLogger.LogUpdate($"Arguments: {arguments}");
+                ClientLogger.LogUpdate($"Setup log path: {logPath}");
+                ClientLogger.LogUpdate($"Current process will exit immediately after launch");
 
                 var startInfo = new ProcessStartInfo
                 {
@@ -790,28 +844,28 @@ namespace YEJI_AW_Client
                     WindowStyle = ProcessWindowStyle.Minimized
                 };
 
-                ClientLogger.LogUpdate("Starting installer process...", "DBG");
+                ClientLogger.LogUpdate("Launching installer process...");
                 var installerProcess = Process.Start(startInfo);
 
                 if (installerProcess == null)
                 {
-                    throw new InvalidOperationException("Failed to start installer process.");
+                    throw new InvalidOperationException("Process.Start returned null - installer failed to launch.");
                 }
 
-                ClientLogger.LogUpdate($"Installer process started successfully. PID: {installerProcess.Id}", "DBG");
-                string argLog = isExecutable ? $" with args '{arguments}'" : string.Empty;
-                ClientLogger.LogUpdate($"Launching installer from {tempFilePath}{argLog}. Exiting current application immediately to avoid deadlock.");
+                ClientLogger.LogUpdate($"INSTALLER LAUNCHED: PID={installerProcess.Id}, ProcessName={installerProcess.ProcessName}");
+                ClientLogger.LogUpdate($"Installation will proceed in background. Current application will now exit.");
+                ClientLogger.LogUpdate($"After installation, new version should auto-start via Inno Setup script.");
+                ClientLogger.LogUpdate($"To troubleshoot installation issues, check: {logPath}");
+                ClientLogger.LogUpdate("=== EXITING APPLICATION FOR INSTALLATION ===");
 
                 // 중요: 인스톨러 실행 후 즉시 현재 앱 종료
                 // ISS 파일의 CurStepChanged가 설치 완료 후 새 버전을 자동으로 시작함
-                // 대기하지 않음으로써 인스톨러가 파일을 교체할 수 있도록 함
-                ClientLogger.LogUpdate("Installer launched successfully. Exiting to allow installation.");
-                ClientLogger.LogUpdate($"Check installer log at: {logPath}", "DBG");
+                // 대기하지 않음으로써 인스톨러가 파일을 교체할 수 있도록 함               
                 Application.Exit();                
             }
             catch (Exception ex)
             {
-                ClientLogger.LogUpdate("Failed to launch installer.", "Err", ex);
+                ClientLogger.LogUpdate("INSTALLER LAUNCH FAILED", "ERR", ex);
 
                 ShowTrayNotification(
                   "업데이트 실행 실패",
@@ -907,6 +961,67 @@ namespace YEJI_AW_Client
             catch (Exception ex)
             {
                 ClientLogger.LogUpdate("Failed to create pending update marker.", "Err", ex);
+            }
+        }
+
+        private bool HasRecentlyAttemptedUpdate(string version)
+        {
+            try
+            {
+                if (!File.Exists(lastAttemptedUpdateFile))
+                {
+                    return false;
+                }
+
+                var lines = File.ReadAllLines(lastAttemptedUpdateFile, Encoding.UTF8);
+                if (lines.Length < 2)
+                {
+                    return false;
+                }
+
+                string attemptedVersion = lines[0].Trim();
+                if (!DateTime.TryParse(lines[1].Trim(), out DateTime attemptTime))
+                {
+                    return false;
+                }
+
+                // 같은 버전이고 30분 이내에 시도했다면 중복 시도로 판단
+                bool isSameVersion = string.Equals(attemptedVersion, version, StringComparison.OrdinalIgnoreCase);
+                bool isRecent = (DateTime.Now - attemptTime).TotalMinutes < 30;
+
+                if (isSameVersion && isRecent)
+                {
+                    ClientLogger.LogUpdate($"Recent update attempt found: version={attemptedVersion}, attempted={attemptTime:yyyy-MM-dd HH:mm:ss}, {(DateTime.Now - attemptTime).TotalMinutes:F1} minutes ago.", "DBG");
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogUpdate("Failed to check recent update attempt.", "Err", ex);
+                return false;
+            }
+        }
+
+        private void RecordUpdateAttempt(string version)
+        {
+            try
+            {
+                string folder = Path.GetDirectoryName(lastAttemptedUpdateFile) ?? string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(folder) && !Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                var content = $"{version}{Environment.NewLine}{DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+                File.WriteAllText(lastAttemptedUpdateFile, content, Encoding.UTF8);
+                ClientLogger.LogUpdate($"Recorded update attempt for version {version}.", "DBG");
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogUpdate("Failed to record update attempt.", "Err", ex);
             }
         }
 
