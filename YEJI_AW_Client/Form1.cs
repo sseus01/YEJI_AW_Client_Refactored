@@ -637,8 +637,15 @@ namespace YEJI_AW_Client
 
                 if (hasPendingUpdateMarker)
                 {
-                    File.Delete(pendingUpdateMarkerFile);
-                    ClientLogger.LogUpdate("Pending update marker deleted.", "DBG");
+                    if (updatedFromPrevious || updatedFromPending)
+                    {
+                        File.Delete(pendingUpdateMarkerFile);
+                        ClientLogger.LogUpdate("Pending update marker deleted.", "DBG");
+                    }
+                    else
+                    {
+                        ClientLogger.LogUpdate($"Pending update marker retained. Current version {currentVersion} does not match pending {pendingUpdateVersion ?? "unknown"}.", "DBG");
+                    }
                 }
             }
             catch (Exception ex)
@@ -987,6 +994,20 @@ namespace YEJI_AW_Client
         {
             try
             {
+                if (File.Exists(pendingUpdateMarkerFile))
+                {
+                    string pendingVersion = File.ReadAllText(pendingUpdateMarkerFile, Encoding.UTF8).Trim();
+                    string currentVersion = GetCurrentVersion();
+
+                    if (!string.IsNullOrWhiteSpace(pendingVersion) &&
+                        !string.Equals(pendingVersion, currentVersion, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(pendingVersion, version, StringComparison.OrdinalIgnoreCase))
+                    {
+                        ClientLogger.LogUpdate($"Pending update {pendingVersion} detected while current version is {currentVersion}. Allowing retry despite recent attempt.", "DBG");
+                        return false;
+                    }
+                }
+
                 if (!File.Exists(lastAttemptedUpdateFile))
                 {
                     return false;
