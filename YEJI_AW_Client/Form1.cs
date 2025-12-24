@@ -46,6 +46,7 @@ namespace YEJI_AW_Client
         private const int MaxUpdateDownloadRetries = 3;        // 다운로드 최대 재시도 횟수
         private const int UpdateRetryBaseDelaySeconds = 30;    // 재시도 기본 지연 (초, exponential backoff)
         private const int InstallerTimeoutMs = 5 * 60 * 1000;  // 설치 프로세스 최대 대기 시간 (5분)
+        private const int LogFlushDelayMs = 100;               // 로그 플러시 대기 시간 (밀리초)
         private const string ApplicationName = "YEJI_AW_Client"; // 애플리케이션 이름
 
         private TimeSpan workStartTime;
@@ -860,8 +861,26 @@ namespace YEJI_AW_Client
 
                 // 중요: 인스톨러 실행 후 즉시 현재 앱 종료
                 // ISS 파일의 CurStepChanged가 설치 완료 후 새 버전을 자동으로 시작함
-                // 대기하지 않음으로써 인스톨러가 파일을 교체할 수 있도록 함               
-                Application.Exit();                
+                // 
+                // Environment.Exit(0) 사용하는 이유:
+                // - 프로세스를 즉시 강제 종료하여 인스톨러가 .exe 파일을 교체할 수 있도록 함
+                // - Application.Exit()는 메시지 루프를 통한 정상 종료로 FormClosing 이벤트가 실행되고
+                //   async 작업이 있을 경우 종료가 지연될 수 있어 인스톨러가 파일 교체 실패 (Error code 5)
+                // - 0은 정상 종료를 의미하는 exit code
+                // 
+                // 참고: Form1_FormClosing에서 isUpdatingClient 플래그로 LOGOUT 이벤트를 건너뛰지만,
+                // Environment.Exit(0)는 FormClosing 이벤트를 전혀 발생시키지 않아 더 빠르고 확실함
+
+                // 로그가 디스크에 완전히 기록될 시간을 확보하기 위한 짧은 지연
+                // ClientLogger.LogUpdate는 File.AppendAllText를 사용하여 동기적으로 기록하지만,
+                // 운영체제 파일 시스템 캐시에서 디스크로 실제 쓰기가 완료되는 시간을 고려
+                // Thread.Sleep 사용: Environment.Exit(0) 전에 확실히 완료되도록 보장
+                Thread.Sleep(LogFlushDelayMs);
+
+                ClientLogger.LogUpdate("Calling Environment.Exit(0) now...");
+
+                // 이 시점 이후로는 코드가 실행되지 않음 - 프로세스 즉시 종료
+                Environment.Exit(0);
             }
             catch (Exception ex)
             {
@@ -3536,6 +3555,14 @@ namespace YEJI_AW_Client
         {
             try
             {
+                // 업데이트 중인 경우 LOGOUT 이벤트 전송을 건너뜀
+                // 이유: 빠른 종료를 위해 서버 통신을 생략하고 즉시 프로세스를 종료해야 인스톨러가 파일을 교체할 수 있음
+                if (isUpdatingClient)
+                {
+                    ClientLogger.LogUpdate("Application closing for update. Skipping LOGOUT event to ensure quick termination.", "DBG");
+                    return;
+                }
+
                 // Windows 시스템 종료 중이면 PC_OFF는 이미 전송했으므로 LOGOUT만 전송
                 if (isSystemShuttingDown)
                 {
