@@ -11,9 +11,10 @@
     <FileVersion>2.1.6.1</FileVersion>
     <InformationalVersion>2.1.6.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-	<AssemblyTitle>YEJI_AW_Client</AssemblyTitle>
+	<AssemblyTitle>YEJI-On</AssemblyTitle>
+    <AssemblyName>YEJI-On</AssemblyName>
     <Company>YEJISOLUTION</Company>
-    <Product>YEJI_AW 클라이언트</Product>
+    <Product>YEJI-On 클라이언트</Product>
     <Description>사내근태솔루션</Description>
     <Copyright>YEJISOLUTION</Copyright>
   </PropertyGroup>

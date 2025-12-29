@@ -23,9 +23,9 @@ namespace YEJI_AW_Client
 #if DEBUG
             // 디버그 시에는 실제 배포본과 격리된 뮤텍스 이름을 사용해
             // 이미 동작 중인 프로세스가 있어도 별도로 실행/디버깅할 수 있도록 한다.
-            const string MutexName = @"Global\YEJI_AW_Client_DEBUG";
+            const string MutexName = @"Global\YEJI-On_DEBUG";
 #else
-            const string MutexName = @"Global\YEJI_AW_Client";
+            const string MutexName = @"Global\YEJI-On";
 #endif
 
             using var mutex = new Mutex(true, MutexName, out bool createdNew);

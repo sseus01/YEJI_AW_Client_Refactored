@@ -65,7 +65,7 @@
             // notifyIcon
             // 
             notifyIcon.Icon = (Icon)resources.GetObject("notifyIcon.Icon");
-            notifyIcon.Text = "YEJI_AW_Client";
+            notifyIcon.Text = "YEJI-On";
             notifyIcon.Visible = true;
             // 
             // flowLayoutPanel1

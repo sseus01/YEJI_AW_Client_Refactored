@@ -47,7 +47,7 @@ namespace YEJI_AW_Client
         private const int UpdateRetryBaseDelaySeconds = 30;    // 재시도 기본 지연 (초, exponential backoff)
         private const int InstallerTimeoutMs = 5 * 60 * 1000;  // 설치 프로세스 최대 대기 시간 (5분)
         private const int LogFlushDelayMs = 100;               // 로그 플러시 대기 시간 (밀리초)
-        private const string ApplicationName = "YEJI_AW_Client"; // 애플리케이션 이름
+        private const string ApplicationName = "YEJI-On"; // 애플리케이션 이름
 
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
@@ -702,7 +702,7 @@ namespace YEJI_AW_Client
 
             // 서버에서 받은 파일명을 정제하여 경로 순회 공격 및 잘못된 문자 방지
             string rawFileName = string.IsNullOrWhiteSpace(latestRelease.FileName)
-                ? $"YEJI_AW_Client_{latestRelease.Version}.exe"
+                ? $"YEJI-On_{latestRelease.Version}.exe"
                 : latestRelease.FileName;
 
             string targetFileName = SanitizeFileName(rawFileName);
@@ -717,7 +717,7 @@ namespace YEJI_AW_Client
             if (targetFileName.Any(c => PathSeparators.Contains(c)))
             {
                 ClientLogger.LogUpdate($"Filename still contains path separators after sanitization: '{targetFileName}'. Using safe default.", "ERR");
-                targetFileName = $"YEJI_AW_Client_Setup_{DateTime.UtcNow:yyyyMMddHHmmss}.exe";
+                targetFileName = $"YEJI-On_Setup_{DateTime.UtcNow:yyyyMMddHHmmss}.exe";
             }
 
             // .exe 확장자가 없으면 추가 (보안: 실행 파일만 허용)
@@ -824,7 +824,7 @@ namespace YEJI_AW_Client
                     sanitizedVersion = "unknown";
                 }
 
-                string logPath = Path.Combine(Path.GetTempPath(), $"YEJI_AW_Client_Setup_{sanitizedVersion}.log");
+                string logPath = Path.Combine(Path.GetTempPath(), $"YEJI-On_Setup_{sanitizedVersion}.log");
 
                 // Inno Setup은 경로에 따옴표가 포함된 경우 \" 이스케이프 처리가 필요
                 // 버전 문자열은 이미 sanitize되고 임시 폴더 경로는 시스템 제어이므로 안전
