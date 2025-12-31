@@ -37,6 +37,9 @@ namespace YEJI_AW_Client
         private Timer heartbeatTimer;   // 주기적 상태 전송
         private Timer updateCheckTimer; // 주기적 업데이트 확인
         private bool isUpdatingClient;  // 자동 업데이트 진행 여부 플래그
+        private Timer? userInfoRetryTimer; // 서버 미등록 시 사용자 정보 재입력 안내용
+        private bool userInfoPromptScheduled;
+        private readonly object userInfoPromptLock = new();
         private Random updateRandom;    // 업데이트 지연 랜덤 생성기
 
         // 업데이트 부하 분산 설정
@@ -93,6 +96,7 @@ namespace YEJI_AW_Client
             Path.Combine(@"C:\ProgramData\YEJI_AW", "last_update_attempt.txt");
 
         private const string ServerBaseUrl = "http://175.106.99.157:3000";
+        private const int UserInfoRetryDelayMs = 60 * 1000;
 
         private static string GetCurrentVersion()
         {
@@ -2509,7 +2513,9 @@ namespace YEJI_AW_Client
             };
         }
 
-        private async Task PostClientStatusAsync(string url)
+        private record struct ClientStatusResult(bool Success, bool UserNotFound);
+
+        private async Task<ClientStatusResult> PostClientStatusAsync(string url)
         {
             var payload = BuildClientStatusPayload();
             string json = JsonSerializer.Serialize(payload);
@@ -2529,10 +2535,12 @@ namespace YEJI_AW_Client
                         $"[{payload.EmpNo}/{payload.PcName}] {url} 응답 오류",
                         response: response,
                         body: responseBody);
+                    return new ClientStatusResult(false, response.StatusCode == HttpStatusCode.NotFound);
                 }
                 else
                 {
                     ClientLogger.LogWeb($"[{payload.EmpNo}] POST {endpoint} success.", "DBG");
+                    return new ClientStatusResult(true, false);
                 }
             }
             catch (Exception ex)
@@ -2540,6 +2548,7 @@ namespace YEJI_AW_Client
                 LogClientStatusIssue(
                     $"[{payload.EmpNo}/{payload.PcName}] {url} 요청 예외",
                     ex);
+                return new ClientStatusResult(false, false);
             }
         }
 
@@ -2583,6 +2592,67 @@ namespace YEJI_AW_Client
             {
                 // 로깅 실패는 무시
             }
+        }
+
+        private void ScheduleUserInfoReentryPrompt()
+        {
+            lock (userInfoPromptLock)
+            {
+                if (userInfoPromptScheduled)
+                {
+                    return;
+                }
+
+                CleanupUserInfoRetryTimerLocked();
+
+                userInfoPromptScheduled = true;
+                userInfoRetryTimer = new Timer
+                {
+                    Interval = UserInfoRetryDelayMs
+                };
+
+                userInfoRetryTimer.Tick += UserInfoRetryTimer_Tick;
+
+                userInfoRetryTimer.Start();
+            }
+        }
+
+        private void UserInfoRetryTimer_Tick(object? sender, EventArgs e)
+        {
+            lock (userInfoPromptLock)
+            {
+                CleanupUserInfoRetryTimerLocked();
+                userInfoPromptScheduled = false;
+            }
+
+            MessageBox.Show(
+                "서버에서 사용자 정보를 찾을 수 없습니다. 이름과 사번을 다시 입력해주세요.",
+                "사용자 정보 필요",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+
+            OnEditUserInfo(this, EventArgs.Empty);
+        }
+
+        private void CleanupUserInfoRetryTimer()
+        {
+            lock (userInfoPromptLock)
+            {
+                CleanupUserInfoRetryTimerLocked();
+            }
+        }
+
+        private void CleanupUserInfoRetryTimerLocked()
+        {
+            if (userInfoRetryTimer == null)
+            {
+                return;
+            }
+
+            userInfoRetryTimer.Stop();
+            userInfoRetryTimer.Tick -= UserInfoRetryTimer_Tick;
+            userInfoRetryTimer.Dispose();
+            userInfoRetryTimer = null;
         }
 
         private static string TryGetEndpoint(string url)
@@ -2782,7 +2852,11 @@ namespace YEJI_AW_Client
             try
             {
                 // /api/client/heartbeat로 변경
-                await PostClientStatusAsync($"{ServerBaseUrl}/api/client/heartbeat");
+                var result = await PostClientStatusAsync($"{ServerBaseUrl}/api/client/heartbeat");
+                if (result.UserNotFound)
+                {
+                    ScheduleUserInfoReentryPrompt();
+                }
             }
             catch
             {
@@ -2860,7 +2934,11 @@ namespace YEJI_AW_Client
         {
             try
             {
-                await PostClientStatusAsync($"{ServerBaseUrl}/api/client/register");
+                var result = await PostClientStatusAsync($"{ServerBaseUrl}/api/client/register");
+                if (result.UserNotFound)
+                {
+                    ScheduleUserInfoReentryPrompt();
+                }
             }
             catch
             {
