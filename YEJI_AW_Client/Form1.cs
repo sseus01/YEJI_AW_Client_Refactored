@@ -182,7 +182,12 @@ namespace YEJI_AW_Client
 
         private Timer? employeeOvertimeStatusTimer;
         private bool isCheckingEmployeeOvertimeStatus;
-        private Dictionary<string, string> lastKnownOvertimeStatuses = new();        
+        private Dictionary<string, string> lastKnownOvertimeStatuses = new();
+
+        private bool startupSequenceRunning;
+        private bool startupSequenceNeedsRetry;
+        private DateTime lastStartupRetryAttempt = DateTime.MinValue;
+        private readonly TimeSpan startupRetryCooldown = TimeSpan.FromMinutes(1);
 
 
 #if DEBUG
@@ -338,19 +343,15 @@ namespace YEJI_AW_Client
             employeeOvertimeStatusTimer.Interval = (int)employeeOvertimeCheckInterval.TotalMilliseconds;
             employeeOvertimeStatusTimer.Tick += async (s, e) => await CheckEmployeeOvertimeStatusAsync();
 
-            this.Load += async (s, e) =>
+            this.Load += (s, e) =>
             {
                 this.Hide();
                 this.ShowInTaskbar = false;
-                ShowUpdateCompletionNotificationIfNeeded();
-                await ResendPendingIdleEventsAsync();
-                await FetchWorkTimeFromServerAsync();
-                await CheckClientUpdateAsync();
-                await RegisterOrUpdateClientAsync();
-                await CheckAfterHoursOnStartupAsync();
+                ShowUpdateCompletionNotificationIfNeeded();               
                 heartbeatTimer.Start();
                 updateCheckTimer.Start();
                 employeeOvertimeStatusTimer.Start();
+                _ = RunStartupSequenceAsync();
             };
 
             InitializeTrayMenu();
@@ -371,6 +372,9 @@ namespace YEJI_AW_Client
             SystemEvents.SessionSwitch += SystemEvents_SessionSwitch;
             // Windows 시스템 종료 이벤트 구독
             SystemEvents.SessionEnding += SystemEvents_SessionEnding;
+
+            // 네트워크 복구 시 초기화 재시도
+            NetworkChange.NetworkAvailabilityChanged += NetworkChange_NetworkAvailabilityChanged;
         }
 
         // 폼 완전 종료 시 전원 이벤트 구독 해제
@@ -379,6 +383,7 @@ namespace YEJI_AW_Client
             SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
             SystemEvents.SessionSwitch -= SystemEvents_SessionSwitch;
             SystemEvents.SessionEnding -= SystemEvents_SessionEnding;
+            NetworkChange.NetworkAvailabilityChanged -= NetworkChange_NetworkAvailabilityChanged;
             base.OnFormClosed(e);
         }
 
@@ -423,6 +428,65 @@ namespace YEJI_AW_Client
                 // 4) 그것도 없으면 기본값
                 SetDefaultWorkTime();
             }
+        }
+
+        private async Task RunStartupSequenceAsync()
+        {
+            if (startupSequenceRunning)
+            {
+                return;
+            }
+
+            startupSequenceRunning = true;
+            startupSequenceNeedsRetry = false;
+            lastStartupRetryAttempt = DateTime.Now;
+
+            try
+            {
+                startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("ResendPendingIdleEvents", ResendPendingIdleEventsAsync);
+                startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("FetchWorkTimeFromServer", FetchWorkTimeFromServerAsync);
+                startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("CheckClientUpdate", () => CheckClientUpdateAsync());
+                startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("RegisterOrUpdateClient", RegisterOrUpdateClientAsync);
+                startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("CheckAfterHoursOnStartup", CheckAfterHoursOnStartupAsync);
+            }
+            finally
+            {
+                startupSequenceRunning = false;
+            }
+        }
+
+        private async Task<bool> ExecuteStartupStepAsync(string stepName, Func<Task> step)
+        {
+            try
+            {
+                await step();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Startup step failed: {stepName}.", "Err", ex);
+                return false;
+            }
+        }
+
+        private void NetworkChange_NetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)
+        {
+            if (!e.IsAvailable)
+            {
+                return;
+            }
+
+            if (!startupSequenceNeedsRetry || startupSequenceRunning)
+            {
+                return;
+            }
+
+            if (DateTime.Now - lastStartupRetryAttempt < startupRetryCooldown)
+            {
+                return;
+            }
+
+            _ = RunStartupSequenceAsync();
         }
 
         // WorkTimeInfo 하나를 받아서 실제 변수들에 적용하는 공통 함수
