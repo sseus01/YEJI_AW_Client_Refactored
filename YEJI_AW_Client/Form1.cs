@@ -176,6 +176,8 @@ namespace YEJI_AW_Client
         private Timer? managerNotificationTimer;
         private bool isCheckingManagerNotifications;
         private HashSet<string> lastAlertedManagerNotificationIds = new();
+        private BalloonNotificationKind lastBalloonKind = BalloonNotificationKind.None;
+        private DateTime lastBalloonShownAt = DateTime.MinValue;
         private ToolStripMenuItem? managerNotificationsMenuItem;
         private DateTime lastManagerNotificationAlertTime = DateTime.MinValue;
         private ManagerNotificationListForm? managerNotificationListForm;
@@ -192,6 +194,15 @@ namespace YEJI_AW_Client
         private readonly TimeSpan startupRetryCooldown = TimeSpan.FromMinutes(1);
 
         private int taskbarCreatedMessageId;
+
+        private static readonly TimeSpan BalloonClickWindow = TimeSpan.FromSeconds(10);
+
+        private enum BalloonNotificationKind
+        {
+            None,
+            Manager,
+            General
+        }
 
 #if DEBUG
         private DateTime? debugBaseDateTime;
@@ -756,6 +767,8 @@ namespace YEJI_AW_Client
                 return;
             }
 
+            lastBalloonKind = BalloonNotificationKind.General;
+            lastBalloonShownAt = DateTime.Now;
             notifyIcon.BalloonTipTitle = title;
             notifyIcon.BalloonTipText = message;
             notifyIcon.BalloonTipIcon = icon;
@@ -3368,6 +3381,8 @@ namespace YEJI_AW_Client
             if (newNotifications.Count == 0)
                 return;
 
+            lastBalloonKind = BalloonNotificationKind.Manager;
+            lastBalloonShownAt = DateTime.Now;
             notifyIcon.BalloonTipTitle = "연장근무승인 결재";
             notifyIcon.BalloonTipText = $"새 연장 근무 신청 {newNotifications.Count}건이 도착했습니다. 클릭하여 확인하세요.";
             notifyIcon.ShowBalloonTip(4000);
@@ -3461,6 +3476,8 @@ namespace YEJI_AW_Client
             if (notifyIcon == null)
                 return;
 
+            lastBalloonKind = BalloonNotificationKind.General;
+            lastBalloonShownAt = DateTime.Now;
             string statusText = request.Status?.Trim().ToUpperInvariant() == "APPROVED" ? "승인" : "반려";
             string approverInfo = !string.IsNullOrWhiteSpace(request.Approver) ? $" (승인자: {request.Approver})" : string.Empty;
 
@@ -3864,6 +3881,23 @@ namespace YEJI_AW_Client
         {
             try
             {
+                if (!isManagerUser && !IsDebugBuild())
+                {
+                    return Task.CompletedTask;
+                }
+
+                if (lastBalloonKind != BalloonNotificationKind.Manager)
+                {
+                    return Task.CompletedTask;
+                }
+
+                if (DateTime.Now - lastBalloonShownAt > BalloonClickWindow)
+                {
+                    return Task.CompletedTask;
+                }
+
+                lastBalloonKind = BalloonNotificationKind.None;
+
                 // 이미 열려있는 창이 있으면 앞으로 가져오기
                 if (managerNotificationListForm != null && !managerNotificationListForm.IsDisposed)
                 {
@@ -3872,10 +3906,7 @@ namespace YEJI_AW_Client
                     return Task.CompletedTask;
                 }
 
-                managerNotificationListForm = new ManagerNotificationListForm(ServerBaseUrl, HttpClient, employeeId, employeeName, lastAlertedManagerNotificationIds);
-                managerNotificationListForm.Owner = this;
-                managerNotificationListForm.FormClosed += (s, e) => managerNotificationListForm = null;
-                managerNotificationListForm.Show();
+                return OpenManagerNotificationsAsync(lastAlertedManagerNotificationIds);
             }
             catch
             {
