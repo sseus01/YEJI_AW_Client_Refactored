@@ -189,6 +189,7 @@ namespace YEJI_AW_Client
         private DateTime lastStartupRetryAttempt = DateTime.MinValue;
         private readonly TimeSpan startupRetryCooldown = TimeSpan.FromMinutes(1);
 
+        private int taskbarCreatedMessageId;
 
 #if DEBUG
         private DateTime? debugBaseDateTime;
@@ -200,6 +201,9 @@ namespace YEJI_AW_Client
 
         [DllImport("user32.dll")]
         private static extern int GetSystemMetrics(int nIndex);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern int RegisterWindowMessage(string lpString);
 
         private const int SM_CXSCREEN = 0;  // 실제 화면 너비 (DPI 스케일링 무시)
         private const int SM_CYSCREEN = 1;  // 실제 화면 높이 (DPI 스케일링 무시)
@@ -360,6 +364,8 @@ namespace YEJI_AW_Client
             // 종료 시 SHUTDOWN 이벤트 전송
             this.FormClosing += Form1_FormClosing;
 
+            taskbarCreatedMessageId = RegisterWindowMessage("TaskbarCreated");
+
             // 프로그램 시작 시 이벤트 전송:
             // - PC_ON: Windows 시스템 부팅 시각 (GetSystemBootTime 사용)
             // - LOGIN: 클라이언트 프로그램 시작 시각 (현재 시각)
@@ -375,6 +381,25 @@ namespace YEJI_AW_Client
 
             // 네트워크 복구 시 초기화 재시도
             NetworkChange.NetworkAvailabilityChanged += NetworkChange_NetworkAvailabilityChanged;
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            if (taskbarCreatedMessageId == 0)
+            {
+                taskbarCreatedMessageId = RegisterWindowMessage("TaskbarCreated");
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == taskbarCreatedMessageId)
+            {
+                RestoreNotifyIcon();
+            }
+
+            base.WndProc(ref m);
         }
 
         // 폼 완전 종료 시 전원 이벤트 구독 해제
@@ -2242,6 +2267,7 @@ namespace YEJI_AW_Client
                 }
 
                 ResetIdleState(resumeTime);
+                RestoreNotifyIcon();
             }
         }
 
@@ -2286,6 +2312,7 @@ namespace YEJI_AW_Client
                 }
 
                 ResetIdleState(unlockTime);
+                RestoreNotifyIcon();
             }
         }
 
@@ -3687,6 +3714,32 @@ namespace YEJI_AW_Client
 
             // 관리자 여부 비동기 확인: 관리자라면 관리용 메뉴 추가
             _ = CheckAndAddManagerMenuAsync();
+        }
+
+        private void RestoreNotifyIcon()
+        {
+            if (notifyIcon == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (trayMenu == null || trayMenu.IsDisposed)
+                {
+                    InitializeTrayMenu();
+                }
+
+                var resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
+                notifyIcon.Icon = (Icon)resources.GetObject("notifyIcon.Icon");
+                notifyIcon.Text = ApplicationName;
+                notifyIcon.Visible = false;
+                notifyIcon.Visible = true;
+            }
+            catch
+            {
+                // 트레이 아이콘 복구 실패는 무시
+            }
         }
 
         private Task OnManagerNotificationBalloonClickedAsync()
