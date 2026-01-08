@@ -158,6 +158,8 @@ namespace YEJI_AW_Client
         private Form? pcOffAlertForm;
         private Label? shutdownCountdownLabel;
         private Label? pcOffStatusLabel;
+        private Form? shutdownCountdownTrayForm;
+        private Label? shutdownCountdownTrayLabel;
         private bool isTemporaryDisableActive;
         private Form? tempDisableTrayForm;
         private Label? tempDisableRemainingLabel;
@@ -1569,6 +1571,7 @@ namespace YEJI_AW_Client
         {
             scheduledShutdownTime = targetTime;
             shutdownCountdownTimer.Start();
+            ShowShutdownCountdownTray();
             UpdateShutdownCountdownLabel();
         }
 
@@ -1577,6 +1580,7 @@ namespace YEJI_AW_Client
             if (!scheduledShutdownTime.HasValue)
             {
                 shutdownCountdownTimer.Stop();
+                CloseShutdownCountdownTray();
                 return;
             }
 
@@ -1585,6 +1589,7 @@ namespace YEJI_AW_Client
             if (GetCurrentDateTime() >= scheduledShutdownTime.Value)
             {
                 shutdownCountdownTimer.Stop();
+                CloseShutdownCountdownTray();
                 ForceShutdown();
             }
         }
@@ -1593,12 +1598,14 @@ namespace YEJI_AW_Client
         {
             if (shutdownCountdownLabel == null || !shutdownCountdownLabel.IsHandleCreated)
             {
+                UpdateShutdownCountdownTray();
                 return;
             }
 
             if (!scheduledShutdownTime.HasValue)
             {
                 shutdownCountdownLabel!.Text = string.Empty;
+                UpdateShutdownCountdownTray();
                 return;
             }
 
@@ -1614,6 +1621,116 @@ namespace YEJI_AW_Client
             }
 
             shutdownCountdownLabel!.Text = $"남은 시간: {(int)remaining.TotalSeconds}초";
+            UpdateShutdownCountdownTray();
+        }
+
+        private void ShowShutdownCountdownTray()
+        {
+            if (!scheduledShutdownTime.HasValue)
+            {
+                return;
+            }
+
+            if (shutdownCountdownTrayForm == null || shutdownCountdownTrayForm.IsDisposed)
+            {
+                shutdownCountdownTrayForm = BuildShutdownCountdownTrayForm();
+            }
+
+            UpdateShutdownCountdownTray();
+            PositionShutdownCountdownTrayForm();
+            shutdownCountdownTrayForm.Show();
+            shutdownCountdownTrayForm.TopMost = true;
+            shutdownCountdownTrayForm.BringToFront();
+        }
+
+        private Form BuildShutdownCountdownTrayForm()
+        {
+            var form = new Form
+            {
+                FormBorderStyle = FormBorderStyle.FixedSingle,
+                StartPosition = FormStartPosition.Manual,
+                ShowInTaskbar = false,
+                ControlBox = false,
+                TopMost = true,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ClientSize = new Size(260, 80)
+            };
+
+            var container = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                Padding = new Padding(10)
+            };
+
+            container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            container.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            var titleLabel = new Label
+            {
+                AutoSize = true,
+                Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Bold),
+                Text = "PC 종료까지 남은시간"
+            };
+
+            shutdownCountdownTrayLabel = new Label
+            {
+                AutoSize = true,
+                Font = new Font(FontFamily.GenericSansSerif, 18, FontStyle.Bold),
+                Text = "--:--"
+            };
+
+            container.Controls.Add(titleLabel, 0, 0);
+            container.Controls.Add(shutdownCountdownTrayLabel, 0, 1);
+
+            form.Controls.Add(container);
+            return form;
+        }
+
+        private void PositionShutdownCountdownTrayForm()
+        {
+            if (shutdownCountdownTrayForm == null)
+            {
+                return;
+            }
+
+            const int margin = 10;
+            var workingArea = Screen.PrimaryScreen?.WorkingArea ?? Screen.GetWorkingArea(this);
+            int x = workingArea.Right - shutdownCountdownTrayForm.Width - margin;
+            int y = workingArea.Bottom - shutdownCountdownTrayForm.Height - margin;
+            shutdownCountdownTrayForm.Location = new Point(Math.Max(workingArea.Left + margin, x), Math.Max(workingArea.Top + margin, y));
+        }
+
+        private void UpdateShutdownCountdownTray()
+        {
+            if (shutdownCountdownTrayLabel == null)
+            {
+                return;
+            }
+
+            if (!scheduledShutdownTime.HasValue)
+            {
+                shutdownCountdownTrayLabel.Text = string.Empty;
+                return;
+            }
+
+            var remaining = scheduledShutdownTime.Value - GetCurrentDateTime();
+            if (remaining < TimeSpan.Zero)
+            {
+                remaining = TimeSpan.Zero;
+            }
+
+            shutdownCountdownTrayLabel.Text = $"{remaining.Minutes:D2}분 {remaining.Seconds:D2}초";
+        }
+
+        private void CloseShutdownCountdownTray()
+        {
+            if (shutdownCountdownTrayForm != null)
+            {
+                shutdownCountdownTrayForm.Hide();
+            }
         }
 
         private void ForceShutdown()
@@ -1742,6 +1859,7 @@ namespace YEJI_AW_Client
                 scheduledShutdownTime = null;
                 cachedShutdownExempt = null;
                 shutdownCountdownTimer.Stop();
+                CloseShutdownCountdownTray();
                 pcOffKeyDate = currentDate;
                 pcOffCountInitializedForDay = false;
                 remainingTempDisableCount = 0;
