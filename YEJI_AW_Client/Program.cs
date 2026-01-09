@@ -40,6 +40,8 @@ namespace YEJI_AW_Client
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            Application.ApplicationExit += (_, _) => TrayIconCleanup.Dispose();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => TrayIconCleanup.Dispose();
             ClientLogger.LogAgent("Application initialization sequence started.");
 
             string userInfoPath = GetUserInfoFilePath();

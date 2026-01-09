@@ -280,6 +280,7 @@ namespace YEJI_AW_Client
         public Form1(string employeeName, string employeeId)
         {
             InitializeComponent();
+            TrayIconCleanup.Register(notifyIcon);
 
             // 오래된 로그 파일 정리 (30일 이상)
             ClientLogger.CleanupOldLogs(30);
