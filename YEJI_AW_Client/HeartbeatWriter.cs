@@ -1,10 +1,9 @@
 ﻿using System;
 using System.IO;
-using System.Timers;
 
 public class HeartbeatWriter : IDisposable
 {
-    private readonly Timer _timer;
+    private readonly System.Timers.Timer _timer;
     private readonly string _heartbeatFilePath;
 
     /// <summary>
@@ -20,7 +19,7 @@ public class HeartbeatWriter : IDisposable
             Directory.CreateDirectory(dir);
         }
 
-        _timer = new Timer(intervalMs);
+        _timer = new System.Timers.Timer(intervalMs);
         _timer.Elapsed += (s, e) => WriteHeartbeat();
         _timer.AutoReset = true;
         _timer.Start();
