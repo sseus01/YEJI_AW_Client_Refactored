@@ -21,8 +21,6 @@ namespace YEJI_AW_Client
         static void Main()
         {
 #if DEBUG
-            // 디버그 시에는 실제 배포본과 격리된 뮤텍스 이름을 사용해
-            // 이미 동작 중인 프로세스가 있어도 별도로 실행/디버깅할 수 있도록 한다.
             const string MutexName = @"Global\YEJI-On_DEBUG";
 #else
             const string MutexName = @"Global\YEJI-On";
@@ -39,6 +37,7 @@ namespace YEJI_AW_Client
 #endif
                 return;
             }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             ClientLogger.LogAgent("Application initialization sequence started.");
@@ -70,14 +69,35 @@ namespace YEJI_AW_Client
                 return;
             }
 
+            HeartbeatWriter? hbWriter = null;
             try
             {
+                // Heartbeat 파일 경로: ProgramData\YEJI_AW\heartbeat\heartbeat.txt
+                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                var heartbeatFile = Path.Combine(programData, "YEJI_AW", "heartbeat", "heartbeat.txt");
+
+                // HeartbeatWriter는 앞서 제공한 HeartbeatWriter.cs 파일을 프로젝트에 추가해야 합니다.
+                hbWriter = new HeartbeatWriter(heartbeatFile, 30000); // 30초마다 갱신
+
                 ClientLogger.LogAgent($"Launching main form for {userInfo.Id} ({userInfo.Name}).");
                 Application.Run(new Form1(userInfo.Name, userInfo.Id));
             }
             finally
             {
-                mutex.ReleaseMutex();
+                try
+                {
+                    // Heartbeat 정리
+                    hbWriter?.Dispose();
+                }
+                catch { }
+
+                // 기존 코드 유지를 위해 뮤텍스 해제 및 로그
+                try
+                {
+                    mutex.ReleaseMutex();
+                }
+                catch { }
+
                 ClientLogger.LogAgent("Application shutdown sequence completed.");
             }
         }
