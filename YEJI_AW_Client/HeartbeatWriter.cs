@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using Microsoft.Win32;
 
 public class HeartbeatWriter : IDisposable
 {
@@ -12,11 +13,35 @@ public class HeartbeatWriter : IDisposable
         _heartbeatFilePath = heartbeatFilePath ?? throw new ArgumentNullException(nameof(heartbeatFilePath));
         _log = logAction;
 
+        // 디렉토리가 존재하는지 확인
+        EnsureDirectoryExists();
+
+        _timer = new System.Timers.Timer(intervalMs);
+        _timer.Elapsed += (s, e) => WriteHeartbeat();
+        _timer.AutoReset = true;
+
+        // 타이머 시작 전에 즉시 초기 heartbeat 작성
+        // 파일이 처음부터 존재하고 최신 상태임을 보장하여
+        // Watcher가 오래된 파일을 감지하고 프로세스를 재시작하는 것을 방지
+        WriteHeartbeat();
+
+        // 주기적 업데이트를 위해 타이머 시작
+        _timer.Start();
+
+        // 절전 모드에서 복구 시 즉시 heartbeat 갱신
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+
+        Log($"HeartbeatWriter started, path={_heartbeatFilePath}, intervalMs={intervalMs}");
+    }
+
+    private void EnsureDirectoryExists()
+    {
         try
         {
             var dir = Path.GetDirectoryName(_heartbeatFilePath);
             if (!string.IsNullOrEmpty(dir))
             {
+                // Directory.CreateDirectory는 멱등성 - 디렉토리가 이미 존재해도 예외를 발생시키지 않음
                 Directory.CreateDirectory(dir);
             }
         }
@@ -25,19 +50,27 @@ public class HeartbeatWriter : IDisposable
             Log($"Heartbeat directory create failed: {ex}");
             // 예외를 던지지 않고 생성 실패 로그만 남김(상태 진단용)
         }
+    }
 
-        _timer = new System.Timers.Timer(intervalMs);
-        _timer.Elapsed += (s, e) => WriteHeartbeat();
-        _timer.AutoReset = true;
-        _timer.Start();
-
-        Log($"HeartbeatWriter started, path={_heartbeatFilePath}, intervalMs={intervalMs}");
+    private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume)
+        {
+            // 절전 모드에서 복구 시 즉시 heartbeat 갱신
+            // System.Timers.Timer는 절전 중 멈추므로 즉시 갱신 필요
+            Log("Power mode changed to RESUME - writing immediate heartbeat");
+            WriteHeartbeat();
+        }
     }
 
     private void WriteHeartbeat()
     {
         try
         {
+            // 쓰기 전에 디렉토리가 존재하는지 확인 (삭제되었을 경우를 대비)
+            EnsureDirectoryExists();
+
+            // 현재 UTC 시간을 ISO 8601 형식으로 작성
             File.WriteAllText(_heartbeatFilePath, DateTime.UtcNow.ToString("o"));
         }
         catch (Exception ex)
@@ -50,6 +83,9 @@ public class HeartbeatWriter : IDisposable
     {
         try
         {
+            // 이벤트 구독 해제
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+
             _timer?.Stop();
             _timer?.Dispose();
             Log("HeartbeatWriter disposed");
