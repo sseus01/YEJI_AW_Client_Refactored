@@ -72,6 +72,8 @@ namespace YEJI_AW_Client
         private string computerName = Environment.MachineName;
         private string computerIP;
 
+        private readonly HeartbeatWriter? heartbeatWriter; // Watcher 타임아웃 방지용
+
         private readonly string pendingIdleEventsFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "pending_idle_events.json");
 
@@ -218,6 +220,12 @@ namespace YEJI_AW_Client
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern int RegisterWindowMessage(string lpString);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr OpenInputDesktop(int dwFlags, bool fInherit, int dwDesiredAccess);
+
+        [DllImport("user32.dll")]
+        private static extern bool CloseDesktop(IntPtr hDesktop);
+
         private const int SM_CXSCREEN = 0;  // 실제 화면 너비 (DPI 스케일링 무시)
         private const int SM_CYSCREEN = 1;  // 실제 화면 높이 (DPI 스케일링 무시)
 
@@ -277,10 +285,12 @@ namespace YEJI_AW_Client
         }
 #endif
 
-        public Form1(string employeeName, string employeeId)
+        public Form1(string employeeName, string employeeId, HeartbeatWriter? heartbeatWriter = null)
         {
             InitializeComponent();
             TrayIconCleanup.Register(notifyIcon);
+
+            this.heartbeatWriter = heartbeatWriter;
 
             // 오래된 로그 파일 정리 (30일 이상)
             ClientLogger.CleanupOldLogs(30);
@@ -395,6 +405,14 @@ namespace YEJI_AW_Client
 
             // 네트워크 복구 시 초기화 재시도
             NetworkChange.NetworkAvailabilityChanged += NetworkChange_NetworkAvailabilityChanged;
+
+            // 앱 시작 시 세션이 이미 잠겨있는지 확인
+            // (사용자가 화면을 잠근 상태에서 앱이 재시작된 경우)
+            if (IsSessionLocked())
+            {
+                sessionLockStartTime = GetCurrentDateTime();
+                ClientLogger.LogAgent($"Session is locked at app start, initializing sessionLockStartTime to {sessionLockStartTime:HH:mm:ss}.", "DBG");
+            }
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -2413,6 +2431,7 @@ namespace YEJI_AW_Client
                 // 화면 잠금 시작 (Windows+L 등)
                 sessionLockStartTime = GetCurrentDateTime();
                 ClientLogger.LogService($"Session locked at {sessionLockStartTime:HH:mm:ss}.", "DBG");
+                ClientLogger.LogAgent($"Session lock detected, sessionLockStartTime set to {sessionLockStartTime:HH:mm:ss}.", "DBG");
                 await SendPcEventAsync("SESSION_LOCK");
             }
             else if (e.Reason == SessionSwitchReason.SessionUnlock)
@@ -2420,11 +2439,13 @@ namespace YEJI_AW_Client
                 // 화면 잠금 해제
                 DateTime unlockTime = GetCurrentDateTime();
                 ClientLogger.LogService($"Session unlocked at {unlockTime:HH:mm:ss}.", "DBG");
+                ClientLogger.LogAgent($"Session unlock detected, unlockTime={unlockTime:HH:mm:ss}, sessionLockStartTime={sessionLockStartTime:HH:mm:ss}.", "DBG");
                 await SendPcEventAsync("SESSION_UNLOCK");
 
                 // sessionLockStartTime이 유효한 값인지 확인 (프로그램 시작 후 첫 unlock 이벤트 방지)
                 if (sessionLockStartTime == DateTime.MinValue)
                 {
+                    ClientLogger.LogAgent($"sessionLockStartTime is MinValue, skipping idle interval processing.", "DBG");
                     ResetIdleState(unlockTime);
                     return;
                 }
@@ -2435,12 +2456,18 @@ namespace YEJI_AW_Client
                 bool lockDuringWork = IsWorkingTime(lockTimeOfDay);
                 bool unlockDuringWork = IsWorkingTime(unlockTimeOfDay);
 
+                ClientLogger.LogAgent($"Lock time: {sessionLockStartTime:HH:mm:ss}, Unlock time: {unlockTime:HH:mm:ss}, Lock during work: {lockDuringWork}, Unlock during work: {unlockDuringWork}.", "DBG");
+                
                 if (lockDuringWork || unlockDuringWork)
                 {
                     // 잠금/해제 중 하나라도 근무시간이면 자리비움으로 처리
                     // SplitIdleInterval이 근무시간 구간만 추출함
                     ClientLogger.LogAgent($"Idle interval detected during session lock/unlock {sessionLockStartTime:HH:mm}-{unlockTime:HH:mm}.", "DBG");
                     await HandleIdleIntervalAsync(sessionLockStartTime, unlockTime);
+                }
+                else
+                {
+                    ClientLogger.LogAgent($"No work time overlap for session lock/unlock, skipping idle interval.", "DBG");
                 }
 
                 ResetIdleState(unlockTime);
@@ -2454,6 +2481,28 @@ namespace YEJI_AW_Client
             lastInputTime = currentTime;
             isIdle = false;
             hasShownPopup = false;
+        }
+
+        // 세션이 현재 잠겨있는지 확인
+        private bool IsSessionLocked()
+        {
+            try
+            {
+                const int DESKTOP_READOBJECTS = 0x0001;
+                IntPtr hDesktop = OpenInputDesktop(0, false, DESKTOP_READOBJECTS);
+                if (hDesktop == IntPtr.Zero)
+                {
+                    // OpenInputDesktop이 실패하면 데스크톱이 잠겨있음
+                    return true;
+                }
+                CloseDesktop(hDesktop);
+                return false;
+            }
+            catch
+            {
+                // 오류 발생 시 안전하게 잠기지 않은 것으로 간주
+                return false;
+            }
         }
 
         // -----------------------------
@@ -2622,6 +2671,10 @@ namespace YEJI_AW_Client
 
         private async Task ShowIdleReasonPopupAsync(DateTime start, DateTime end)
         {
+            // 모달 다이얼로그 표시 전 heartbeat 강제 갱신
+            // Watcher가 120초 타임아웃으로 앱을 재시작하는 것을 방지
+            heartbeatWriter?.ForceUpdate();
+
             try
             {
                 ClientLogger.LogAgent($"Showing idle reason popup for {start:HH:mm:ss}-{end:HH:mm:ss}.", "DBG");

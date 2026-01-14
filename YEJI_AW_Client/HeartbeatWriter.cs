@@ -31,6 +31,10 @@ public class HeartbeatWriter : IDisposable
         // 절전 모드에서 복구 시 즉시 heartbeat 갱신
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
+        // 세션 잠금/해제 시 즉시 heartbeat 갱신
+        // Watcher가 잠금 중 120초 타임아웃으로 앱을 재시작하는 것을 방지
+        SystemEvents.SessionSwitch += OnSessionSwitch;
+
         Log($"HeartbeatWriter started, path={_heartbeatFilePath}, intervalMs={intervalMs}");
     }
 
@@ -63,6 +67,23 @@ public class HeartbeatWriter : IDisposable
         }
     }
 
+    private void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
+    {
+        // 세션 잠금/해제 시 즉시 heartbeat 갱신
+        // 세션 잠금 중에도 타이머가 동작하지만, 안전을 위해 즉시 갱신
+        // 이를 통해 Watcher가 120초 타임아웃으로 앱을 재시작하는 것을 방지
+        if (e.Reason == SessionSwitchReason.SessionLock)
+        {
+            Log("Session locked - writing immediate heartbeat");
+            WriteHeartbeat();
+        }
+        else if (e.Reason == SessionSwitchReason.SessionUnlock)
+        {
+            Log("Session unlocked - writing immediate heartbeat");
+            WriteHeartbeat();
+        }
+    }
+
     private void WriteHeartbeat()
     {
         try
@@ -79,12 +100,23 @@ public class HeartbeatWriter : IDisposable
         }
     }
 
+    /// <summary>
+    /// 즉시 heartbeat를 갱신합니다. 
+    /// 모달 다이얼로그 표시 전 등 120초 타임아웃이 우려되는 경우 호출하세요.
+    /// </summary>
+    public void ForceUpdate()
+    {
+        Log("Force heartbeat update requested");
+        WriteHeartbeat();
+    }
+
     public void Dispose()
     {
         try
         {
             // 이벤트 구독 해제
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
 
             _timer?.Stop();
             _timer?.Dispose();

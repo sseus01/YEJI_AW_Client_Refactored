@@ -71,18 +71,19 @@ namespace YEJI_AW_Client
                 return;
             }
 
+            // Heartbeat 파일 경로: ProgramData\YEJI_AW\heartbeat\heartbeat.txt
+            // HeartbeatWriter는 사용자 정보가 확정된 후에만 시작
+            // 이렇게 하면 최초 설치 시 사용자 정보 입력 중에 watchdog에 의해 프로세스가 종료되는 것을 방지
+            var heartbeatFile = Path.Combine(InfoFolder, "heartbeat", "heartbeat.txt");
+
             HeartbeatWriter? hbWriter = null;
             try
             {
-                // Heartbeat 파일 경로: ProgramData\YEJI_AW\heartbeat\heartbeat.txt
-                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-                var heartbeatFile = Path.Combine(programData, "YEJI_AW", "heartbeat", "heartbeat.txt");
-
                 // HeartbeatWriter는 앞서 제공한 HeartbeatWriter.cs 파일을 프로젝트에 추가해야 합니다.
                 hbWriter = new HeartbeatWriter(heartbeatFile, 30000); // 30초마다 갱신
 
                 ClientLogger.LogAgent($"Launching main form for {userInfo.Id} ({userInfo.Name}).");
-                Application.Run(new Form1(userInfo.Name, userInfo.Id));
+                Application.Run(new Form1(userInfo.Name, userInfo.Id, hbWriter));
             }
             finally
             {
