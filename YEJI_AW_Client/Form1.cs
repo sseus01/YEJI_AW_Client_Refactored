@@ -67,6 +67,22 @@ namespace YEJI_AW_Client
         // 자리비움 기준 시간 (서버에서 가져와 덮어씀, 기본 10분)
         private TimeSpan idleThreshold = TimeSpan.FromMinutes(10);
 
+        /// <summary>
+        /// 절전/세션 복귀 시 실제 사용자 입력 vs 시스템 초기화 구분 임계값 (초).
+        /// GetLastInputTime()이 resume/unlock 시각과 이 값보다 가까우면 시스템 초기화로 판단.
+        /// Threshold in seconds to distinguish between actual user input and system initialization
+        /// when resuming from suspend/sleep or unlocking session.
+        /// </summary>
+        private const int ResumeInputDetectionThresholdSeconds = 5;
+
+        /// <summary>
+        /// lastInputTime 보정 시 suspendStartTime보다 약간 이전으로 설정하기 위한 오프셋 (초).
+        /// 이상 상태(lastInputTime > suspendStartTime) 발견 시 사용.
+        /// Offset in seconds to adjust lastInputTime when an anomalous state is detected
+        /// (lastInputTime later than suspendStartTime).
+        /// </summary>
+        private const int LastInputTimeAdjustmentOffsetSeconds = 1;
+
         private string employeeName;
         private string employeeId;
         private string computerName = Environment.MachineName;
@@ -2398,12 +2414,15 @@ namespace YEJI_AW_Client
                 // suspendStartTime이 유효한 값인지 확인 (프로그램 시작 후 첫 resume 이벤트 방지)
                 if (suspendStartTime == DateTime.MinValue)
                 {
-                    ResetIdleState(resumeTime);
+                    // 실제 마지막 입력 시간으로 설정 (절전 전 입력 시간을 보존)
+                    lastInputTime = GetLastInputTime();
+                    RestoreNotifyIcon();
                     return;
                 }
 
                 var suspendTimeOfDay = suspendStartTime.TimeOfDay;
                 var resumeTimeOfDay = resumeTime.TimeOfDay;
+                var suspendDuration = resumeTime - suspendStartTime;
 
                 bool suspendDuringWork = IsWorkingTime(suspendTimeOfDay);
                 bool resumeDuringWork = IsWorkingTime(resumeTimeOfDay);
@@ -2411,12 +2430,44 @@ namespace YEJI_AW_Client
                 if (suspendDuringWork || resumeDuringWork)
                 {
                     // 절전/복귀 중 하나라도 근무시간이면 자리비움으로 처리
-                    // SplitIdleInterval이 근무시간 구간만 추출함
-                    ClientLogger.LogAgent($"Idle interval detected during suspend/resume {suspendStartTime:HH:mm}-{resumeTime:HH:mm}.", "DBG");
-                    await HandleIdleIntervalAsync(suspendStartTime, resumeTime);
+                    // 실제 idle 시작 시간은 lastInputTime (절전 시작보다 이전일 수 있음)
+                    // 예: 10:00에 마지막 입력, 10:05에 절전, 10:15에 복귀
+                    //     → 실제 idle은 10:00-10:15 (15분)
+                    DateTime actualIdleStart = lastInputTime < suspendStartTime ? lastInputTime : suspendStartTime;
+
+                    ClientLogger.LogAgent($"Idle interval detected during suspend/resume. Last input: {lastInputTime:HH:mm:ss}, Suspend: {suspendStartTime:HH:mm:ss}, Resume: {resumeTime:HH:mm:ss}, Duration: {suspendDuration.TotalMinutes:F1} min, Actual idle start: {actualIdleStart:HH:mm:ss}.", "DBG");
+                    await HandleIdleIntervalAsync(actualIdleStart, resumeTime);
                 }
 
-                ResetIdleState(resumeTime);
+                // 절전 복귀 후 실제 마지막 입력 시간으로 갱신
+                // 절전 전 사용자의 실제 마지막 활동 시간을 추정하여 보존
+                // (절전 직전에 사용자가 활동했다면 suspendStartTime을, 아니면 이전 lastInputTime 유지)
+                DateTime estimatedLastInput = GetLastInputTime();
+
+                // GetLastInputTime()이 현재 시각에 가까운 값을 반환하는 경우
+                // (절전 복귀 직후 시스템이 초기화되면서 발생 가능)
+                // 이 경우 suspendStartTime 이전의 lastInputTime을 보존해야 함
+                if (Math.Abs((resumeTime - estimatedLastInput).TotalSeconds) < ResumeInputDetectionThresholdSeconds)
+                {
+                    // 절전 복귀 직후이므로 실제 사용자 입력이 아님
+                    // lastInputTime을 절전 전 값 또는 suspendStartTime 이전 값으로 유지
+                    if (lastInputTime > suspendStartTime)
+                    {
+                        // lastInputTime이 절전 시작보다 나중이면 이상한 상태
+                        // suspendStartTime보다 약간 이전으로 보정
+                        ClientLogger.LogService($"ANOMALY DETECTED: lastInputTime ({lastInputTime:HH:mm:ss}) > suspendStartTime ({suspendStartTime:HH:mm:ss}). Adjusting to {suspendStartTime.AddSeconds(-LastInputTimeAdjustmentOffsetSeconds):HH:mm:ss}.", "WARN");
+                        lastInputTime = suspendStartTime.AddSeconds(-LastInputTimeAdjustmentOffsetSeconds);
+                    }
+                    // 그렇지 않으면 기존 lastInputTime 유지 (절전 전 값)
+                    ClientLogger.LogService($"Preserving lastInputTime from before suspend: {lastInputTime:HH:mm:ss}", "DBG");
+                }
+                else
+                {
+                    // 실제 사용자 입력으로 보임 (임계값 이상 차이)
+                    lastInputTime = estimatedLastInput;
+                    ClientLogger.LogService($"Updated lastInputTime to actual input time: {lastInputTime:HH:mm:ss}", "DBG");
+                }
+                           
                 RestoreNotifyIcon();
             }
         }
@@ -2456,21 +2507,44 @@ namespace YEJI_AW_Client
                 bool lockDuringWork = IsWorkingTime(lockTimeOfDay);
                 bool unlockDuringWork = IsWorkingTime(unlockTimeOfDay);
 
-                ClientLogger.LogAgent($"Lock time: {sessionLockStartTime:HH:mm:ss}, Unlock time: {unlockTime:HH:mm:ss}, Lock during work: {lockDuringWork}, Unlock during work: {unlockDuringWork}.", "DBG");
-                
+                var lockDuration = unlockTime - sessionLockStartTime;
+                ClientLogger.LogAgent($"Lock time: {sessionLockStartTime:HH:mm:ss}, Unlock time: {unlockTime:HH:mm:ss}, Duration: {lockDuration.TotalMinutes:F1} min, Lock during work: {lockDuringWork}, Unlock during work: {unlockDuringWork}.", "DBG");
+
                 if (lockDuringWork || unlockDuringWork)
                 {
                     // 잠금/해제 중 하나라도 근무시간이면 자리비움으로 처리
-                    // SplitIdleInterval이 근무시간 구간만 추출함
-                    ClientLogger.LogAgent($"Idle interval detected during session lock/unlock {sessionLockStartTime:HH:mm}-{unlockTime:HH:mm}.", "DBG");
-                    await HandleIdleIntervalAsync(sessionLockStartTime, unlockTime);
+                    // 실제 idle 시작 시간은 lastInputTime (화면 잠금보다 이전일 수 있음)
+                    // 예: 10:00에 마지막 입력, 10:05에 화면 잠금 (자리 비운 후 나중에 잠금), 10:15에 해제
+                    //     → 실제 idle은 10:00-10:15 (15분)
+                    DateTime actualIdleStart = lastInputTime < sessionLockStartTime ? lastInputTime : sessionLockStartTime;
+
+                    ClientLogger.LogAgent($"Idle interval detected during session lock/unlock. Last input: {lastInputTime:HH:mm:ss}, Lock: {sessionLockStartTime:HH:mm:ss}, Unlock: {unlockTime:HH:mm:ss}, Actual idle start: {actualIdleStart:HH:mm:ss}.", "DBG");
+                    await HandleIdleIntervalAsync(actualIdleStart, unlockTime);
                 }
                 else
                 {
                     ClientLogger.LogAgent($"No work time overlap for session lock/unlock, skipping idle interval.", "DBG");
                 }
 
-                ResetIdleState(unlockTime);
+                // 세션 잠금 해제 시에는 사용자가 비밀번호를 입력했으므로 실제 입력이 있음
+                // 따라서 unlockTime 또는 실제 입력 시간으로 갱신
+                DateTime actualInputTime = GetLastInputTime();
+
+                // 실제 입력이 unlock 시간과 가까우면 (임계값 이내) 실제 입력 시간 사용
+                if (Math.Abs((unlockTime - actualInputTime).TotalSeconds) < ResumeInputDetectionThresholdSeconds)
+                {
+                    lastInputTime = actualInputTime;
+                    ClientLogger.LogService($"Updated lastInputTime to actual input after unlock: {lastInputTime:HH:mm:ss}", "DBG");
+                }
+                else
+                {
+                    // 임계값 이상 차이나면 unlock 시간을 사용 (보수적 접근)
+                    lastInputTime = unlockTime;
+                    ClientLogger.LogService($"Updated lastInputTime to unlock time: {lastInputTime:HH:mm:ss}", "DBG");
+                }
+
+                isIdle = false;
+                hasShownPopup = false;
                 RestoreNotifyIcon();
             }
         }
