@@ -61,9 +61,22 @@ public class HeartbeatWriter : IDisposable
         if (e.Mode == PowerModes.Resume)
         {
             // 절전 모드에서 복구 시 즉시 heartbeat 갱신
-            // System.Timers.Timer는 절전 중 멈추므로 즉시 갱신 필요
-            Log("Power mode changed to RESUME - writing immediate heartbeat");
+            // System.Timers.Timer는 절전 중 멈추고 일부 시스템에서 자동으로 재시작되지 않을 수 있음
+            Log("Power mode changed to RESUME - writing immediate heartbeat and restarting timer");
             WriteHeartbeat();
+
+            // 타이머를 명시적으로 재시작하여 절전 모드 이후에도 주기적 업데이트가 계속되도록 보장
+            // 일부 시스템에서 타이머가 자동으로 재시작되지 않는 문제를 해결
+            try
+            {
+                _timer?.Stop();
+                _timer?.Start();
+                Log("Timer restarted successfully after resume");
+            }
+            catch (Exception ex)
+            {
+                Log($"Failed to restart timer after resume: {ex.Message}");
+            }
         }
     }
 
@@ -79,8 +92,21 @@ public class HeartbeatWriter : IDisposable
         }
         else if (e.Reason == SessionSwitchReason.SessionUnlock)
         {
-            Log("Session unlocked - writing immediate heartbeat");
+            Log("Session unlocked - writing immediate heartbeat and restarting timer");
             WriteHeartbeat();
+
+            // 세션 잠금 해제 후 타이머를 명시적으로 재시작
+            // 일부 환경에서 잠금 중 타이머가 멈출 수 있으므로 재시작으로 확실하게 동작 보장
+            try
+            {
+                _timer?.Stop();
+                _timer?.Start();
+                Log("Timer restarted successfully after session unlock");
+            }
+            catch (Exception ex)
+            {
+                Log($"Failed to restart timer after session unlock: {ex.Message}");
+            }
         }
     }
 
