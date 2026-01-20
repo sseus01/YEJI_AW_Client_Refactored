@@ -1408,7 +1408,7 @@ namespace YEJI_AW_Client
                     }
                 }
 
-                / 진행 중인 연장근무가 있으면 우선, 없으면 다음 연장근무 반환
+                // 진행 중인 연장근무가 있으면 우선, 없으면 다음 연장근무 반환
                 return currentOvertimeEnd ?? nextOvertimeEnd;
             }
             catch
@@ -1533,7 +1533,7 @@ namespace YEJI_AW_Client
         {
             // 연장근무 알림인 경우: offTime이 종료 시각이므로 그 시각에 PC 종료
             // 일반 업무 종료/일시해제 후속 알림인 경우: 1분 후 PC 종료
-            ScheduleShutdown(isOvertimeAlert ? offTime :
+            ScheduleShutdown(isOvertimeAlert ? offTime : GetCurrentDateTime().AddMinutes(1));
 
             if (!pcOffCountInitializedForDay)
             {
