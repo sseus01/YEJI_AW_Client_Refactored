@@ -52,6 +52,10 @@ namespace YEJI_AW_Client
         private const int LogFlushDelayMs = 100;               // 로그 플러시 대기 시간 (밀리초)
         private const string ApplicationName = "YEJI-On"; // 애플리케이션 이름
 
+        // PC 종료 알림 관련 상수
+        private const int OvertimeAlertMinutesBeforeEnd = 5;    // 연장근무 종료 몇 분 전에 알림 표시
+        private const int AlertTimeChangeThresholdSeconds = 1;   // 알림 시각 변경 감지 임계값 (초)
+
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
         private TimeSpan lunchStartTime;
@@ -1274,7 +1278,38 @@ namespace YEJI_AW_Client
 
                 await EnsurePcOffSettingsAsync();
 
-                if (await IsShutdownExemptAsync(now))
+                // 연장근무 종료 시간 확인 (연장근무가 있으면 연장근무 종료 N분 전에 알림)
+                var overtimeEndTime = await GetApprovedOvertimeEndTimeAsync(now);
+                if (overtimeEndTime.HasValue)
+                {
+                    // 연장근무 종료 N분 전을 PC 종료 알림 시각으로 설정
+                    var overtimeAlertTime = overtimeEndTime.Value.AddMinutes(-OvertimeAlertMinutesBeforeEnd);
+
+                    // 알림 시각이 변경되었는지 확인 (임계값 이상 차이나면 변경된 것으로 간주)
+                    bool alertTimeChanged = !pcOffAlertTargetTime.HasValue ||
+                                          Math.Abs((pcOffAlertTargetTime.Value - overtimeAlertTime).TotalSeconds) > AlertTimeChangeThresholdSeconds;
+
+                    if (alertTimeChanged)
+                    {
+                        pcOffAlertTargetTime = overtimeAlertTime;
+                        hasShownPcOffAlert = false;
+                    }
+
+                    if (hasShownPcOffAlert)
+                        return;
+
+                    if (now >= pcOffAlertTargetTime.Value)
+                    {
+                        CloseTempDisableTray();
+                        hasShownPcOffAlert = true;
+                        await ShowPcOffAlertAsync(now, overtimeEndTime.Value, triggeredAfterBoot, isTemporaryDisableActive, isOvertimeAlert: true);
+                        isTemporaryDisableActive = false;
+                    }
+                    return;
+                }
+
+                // 종료 예외가 있으면 PC 종료하지 않음
+                if (await HasActiveShutdownExceptionAsync(now))
                     return;
 
                 if (pcOffAlertTargetTime == null)
@@ -1300,21 +1335,7 @@ namespace YEJI_AW_Client
             }
         }
 
-        private async Task<bool> IsShutdownExemptAsync(DateTime now)
-        {
-            if (cachedShutdownExempt.HasValue &&
-               (now - lastShutdownExemptCheckTime) < TimeSpan.FromMinutes(1))
-            {
-                return cachedShutdownExempt.Value;
-            }
-
-            bool exempt = await HasApprovedOvertimeTodayAsync(now) || await HasActiveShutdownExceptionAsync(now);
-            cachedShutdownExempt = exempt;
-            lastShutdownExemptCheckTime = now;
-            return exempt;
-        }
-
-        private async Task<bool> HasApprovedOvertimeTodayAsync(DateTime now)
+        private async Task<DateTime?> GetApprovedOvertimeEndTimeAsync(DateTime now)
         {
             try
             {
@@ -1323,12 +1344,17 @@ namespace YEJI_AW_Client
                 using var response = await HttpClient.GetAsync(url);
                 if (!response.IsSuccessStatusCode)
                 {
-                    return false;
+                    return null;
                 }
 
                 string json = await response.Content.ReadAsStringAsync();
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
+
+                DateTime? currentOvertimeEnd = null;
+                DateTime? nextOvertimeEnd = null;
+                DateTime? nextOvertimeStart = null;
+
                 foreach (var entry in EnumerateArrayLike(root))
                 {
                     string status = GetElementString(entry, "status", "approvalStatus", "approval_status", "result");
@@ -1338,18 +1364,59 @@ namespace YEJI_AW_Client
                     }
 
                     string workDate = GetElementString(entry, "workDate", "work_date", "date");
-                    if (DateTime.TryParse(workDate, out var parsedDate) && parsedDate.Date == now.Date)
+                    if (!DateTime.TryParse(workDate, out var parsedDate) || parsedDate.Date != now.Date)
                     {
-                        return true;
+                        continue;
+                    }
+
+                    // 연장근무 시작 시간과 종료 시간 파싱
+                    string startTime = GetElementString(entry, "startTime", "start_time", "start");
+                    string endTime = GetElementString(entry, "endTime", "end_time", "end");
+
+                    if (!TimeSpan.TryParse(startTime, out var startTimeSpan) || !TimeSpan.TryParse(endTime, out var endTimeSpan))
+                    {
+                        continue;
+                    }
+
+                    DateTime startDateTime = now.Date.Add(startTimeSpan);
+                    DateTime endDateTime = now.Date.Add(endTimeSpan);
+
+                    // 현재 시각보다 이후의 종료 시간만 고려
+                    if (endDateTime <= now)
+                    {
+                        continue;
+                    }
+
+                    // 현재 진행 중인 연장근무인지 확인
+                    if (now >= startDateTime && now < endDateTime)
+                    {
+                        // 진행 중인 연장근무 중 가장 늦게 끝나는 것 선택
+                        if (currentOvertimeEnd == null || endDateTime > currentOvertimeEnd.Value)
+                        {
+                            currentOvertimeEnd = endDateTime;
+                        }
+                    }
+                    // 아직 시작하지 않은 연장근무
+                    else if (now < startDateTime)
+                    {
+                        // 다음 연장근무 중 가장 빨리 시작하는 것 선택
+                        if (nextOvertimeStart == null || startDateTime < nextOvertimeStart.Value)
+                        {
+                            nextOvertimeStart = startDateTime;
+                            nextOvertimeEnd = endDateTime;
+                        }
                     }
                 }
+
+                / 진행 중인 연장근무가 있으면 우선, 없으면 다음 연장근무 반환
+                return currentOvertimeEnd ?? nextOvertimeEnd;
             }
             catch
             {
-                // 실패 시 예외 사용자로 간주하지 않음
+                // 실패 시 null 반환
             }
 
-            return false;
+            return null;
         }
 
         private async Task<bool> HasActiveShutdownExceptionAsync(DateTime now)
@@ -1462,9 +1529,11 @@ namespace YEJI_AW_Client
             return string.Empty;
         }
 
-        private async Task ShowPcOffAlertAsync(DateTime now, DateTime offTime, bool triggeredAfterBoot, bool isFollowUpAlert)
+        private async Task ShowPcOffAlertAsync(DateTime now, DateTime offTime, bool triggeredAfterBoot, bool isFollowUpAlert, bool isOvertimeAlert = false)
         {
-            ScheduleShutdown(GetCurrentDateTime().AddMinutes(1));
+            // 연장근무 알림인 경우: offTime이 종료 시각이므로 그 시각에 PC 종료
+            // 일반 업무 종료/일시해제 후속 알림인 경우: 1분 후 PC 종료
+            ScheduleShutdown(isOvertimeAlert ? offTime :
 
             if (!pcOffCountInitializedForDay)
             {
@@ -1508,8 +1577,8 @@ namespace YEJI_AW_Client
             };
 
             string headline = isFollowUpAlert
-               ? "연장 시간이 종료되어 PC 종료까지 1분이 남았습니다."
-               : $"업무시간이 종료되어 PC가 종료됩니다(기준 시각: {offTime:HH:mm}). 일시해제후 진행 업무는 연장근무에 해당되지 않습니다.";
+               ? $"연장근무 종료 시각이 임박했습니다. PC가 종료됩니다 (종료 시각: {offTime:HH:mm})."
+               : $"업무시간이 종료되어 PC가 종료됩니다 (기준 시각: {offTime:HH:mm}). 일시해제후 진행 업무는 연장근무에 해당되지 않습니다.";
 
             var messageLabel = new Label
             {
@@ -1523,12 +1592,12 @@ namespace YEJI_AW_Client
             {
                 Dock = DockStyle.Top,
                 Height = 30,
-                Text = "1분 후 PC가 강제종료됩니다.",
+                Text = "", // UpdateShutdownCountdownLabel에서 채워짐
                 Font = new Font(FontFamily.GenericSansSerif, 10, FontStyle.Regular)
             };
 
             string statusText = triggeredAfterBoot || remainingTempDisableCount <= 0
-                ? "1분 후 PC가 강제종료됩니다."
+                ? "" // UpdateShutdownCountdownLabel에서 채워짐
                 : $"일시 해제 신청 가능 횟수: {Math.Max(0, remainingTempDisableCount)}회";
 
             pcOffStatusLabel = new Label
@@ -1665,10 +1734,18 @@ namespace YEJI_AW_Client
 
             if (pcOffStatusLabel != null && remaining <= TimeSpan.FromMinutes(1) && remainingTempDisableCount <= 0)
             {
-                pcOffStatusLabel.Text = "1분 후 PC가 강제종료됩니다.";
+                pcOffStatusLabel.Text = $"{(int)remaining.TotalSeconds}초 후 PC가 강제종료됩니다.";
             }
 
-            shutdownCountdownLabel!.Text = $"남은 시간: {(int)remaining.TotalSeconds}초";
+            // 남은 시간을 분과 초로 표시
+            if (remaining.TotalMinutes >= 1)
+            {
+                shutdownCountdownLabel!.Text = $"남은 시간: {remaining.Minutes}분 {remaining.Seconds}초";
+            }
+            else
+            {
+                shutdownCountdownLabel!.Text = $"남은 시간: {(int)remaining.TotalSeconds}초";
+            }
             UpdateShutdownCountdownTray();
         }
 
