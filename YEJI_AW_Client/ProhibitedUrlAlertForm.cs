@@ -1,21 +1,31 @@
-﻿using System.Drawing;
+﻿using System
+using System.Drawing;
 using System.Windows.Forms;
 
 namespace YEJI_AW_Client
 {
     public sealed class ProhibitedUrlAlertForm : Form
     {
-        public ProhibitedUrlAlertForm(string fullUrl)
+        private readonly Panel dialogPanel;
+
+        public ProhibitedUrlAlertForm(string companyName, string fullUrl)
         {
             Text = "영업 금지 안내";
-            StartPosition = FormStartPosition.CenterScreen;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.Manual;
+            FormBorderStyle = FormBorderStyle.None;
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
             TopMost = true;
-            BackColor = Color.FromArgb(243, 246, 251);
-            ClientSize = new Size(520, 360);
+            BackColor = Color.FromArgb(240, 243, 249);
+            WindowState = FormWindowState.Maximized;
+
+            dialogPanel = new Panel
+            {
+                Size = new Size(520, 360),
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle
+            };
 
             var headerPanel = new Panel
             {
@@ -51,6 +61,18 @@ namespace YEJI_AW_Client
                 Text = "해당 URL은 광고주의 요청으로 영업 및 컨택 금지 업체로 지정되었습니다.\n해당 광고주에게는 전화, 이메일, SMS등 모든 컨텍을 삼가해주길 바랍니다."
             };
 
+            string displayCompanyName = string.IsNullOrWhiteSpace(companyName) ? "-" : companyName;
+
+            var companyLabel = new Label
+            {
+                AutoSize = true,
+                Dock = DockStyle.Top,
+                Padding = new Padding(0, 8, 0, 2),
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(34, 34, 34),
+                Text = $"업체명 : {displayCompanyName}"
+            };
+
             var blockedLabel = new Label
             {
                 AutoSize = true,
@@ -58,7 +80,7 @@ namespace YEJI_AW_Client
                 Padding = new Padding(0, 8, 0, 6),
                 Font = new Font("Segoe UI", 10F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(34, 34, 34),
-                Text = "영업금지 URL"
+                Text = "영업금지 URL :"
             };
                       
             var fullUrlLabel = new Label
@@ -70,18 +92,7 @@ namespace YEJI_AW_Client
                 ForeColor = Color.FromArgb(34, 34, 34),
                 Text = fullUrl
             };
-
-            var noteLabel = new Label
-            {
-                AutoSize = false,
-                Dock = DockStyle.Top,
-                Height = 48,
-                Padding = new Padding(0, 12, 0, 0),
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Regular),
-                ForeColor = Color.FromArgb(86, 86, 86),
-                Text = "접속 해제가 필요할 경우 기업문화팀으로 문의해 주세요."
-            };
-
+          
             var closeButton = new Button
             {
                 Text = "닫기",
@@ -99,16 +110,26 @@ namespace YEJI_AW_Client
             };
             buttonPanel.Controls.Add(closeButton);
 
-            bodyPanel.Controls.Add(buttonPanel);
-            bodyPanel.Controls.Add(noteLabel);
+            bodyPanel.Controls.Add(buttonPanel);            
             bodyPanel.Controls.Add(fullUrlLabel);
             bodyPanel.Controls.Add(blockedLabel);
+            bodyPanel.Controls.Add(companyLabel);
             bodyPanel.Controls.Add(descriptionLabel);
 
-            Controls.Add(bodyPanel);
-            Controls.Add(headerPanel);
+            dialogPanel.Controls.Add(bodyPanel);
+            dialogPanel.Controls.Add(headerPanel);
+
+            Controls.Add(dialogPanel);
 
             AcceptButton = closeButton;
+            Load += (_, _) => CenterDialogPanel();
+            Resize += (_, _) => CenterDialogPanel();
+        }
+
+        private void CenterDialogPanel()
+        {
+            dialogPanel.Left = Math.Max(0, (ClientSize.Width - dialogPanel.Width) / 2);
+            dialogPanel.Top = Math.Max(0, (ClientSize.Height - dialogPanel.Height) / 2);
         }
     }
 }

@@ -90,9 +90,7 @@ namespace YEJI_AW_Client
                 if (root == null)
                     return null;
 
-                var condition = new AndCondition(
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
-                    new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true));
+                var condition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit);
 
                 var edits = root.FindAll(TreeScope.Subtree, condition);
                 foreach (AutomationElement edit in edits)
