@@ -175,8 +175,7 @@ namespace YEJI_AW_Client
         private readonly TimeSpan employeeOvertimeCheckInterval = TimeSpan.FromSeconds(60);
         private DateTime pcOffKeyDate;
         private DateTime? scheduledShutdownTime;
-        private bool? cachedShutdownExempt;
-        private DateTime lastShutdownExemptCheckTime;
+        
         private PcOffSettings pcOffSettings = new();
         private int remainingTempDisableCount;
         private DateTime lastPcOffSettingsFetchTime;
@@ -2142,8 +2141,7 @@ namespace YEJI_AW_Client
             {
                 hasShownPcOffAlert = false;
                 pcOffAlertTargetTime = null;
-                scheduledShutdownTime = null;
-                cachedShutdownExempt = null;
+                scheduledShutdownTime = null;                
                 shutdownCountdownTimer.Stop();
                 CloseShutdownCountdownTray();
                 pcOffKeyDate = currentDate;
@@ -4295,7 +4293,7 @@ namespace YEJI_AW_Client
                 }
 
                 var resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
-                notifyIcon.Icon = (Icon)resources.GetObject("notifyIcon.Icon");
+                notifyIcon.Icon = (Icon?)resources.GetObject("notifyIcon.Icon") ?? notifyIcon.Icon;
                 notifyIcon.Text = ApplicationName;
                 notifyIcon.Visible = false;
                 notifyIcon.Visible = true;

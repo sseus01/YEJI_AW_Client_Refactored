@@ -114,6 +114,7 @@ namespace YEJI_AW_Client
         {
             if (disposing)
             {
+                components?.Dispose();
                 headerFont?.Dispose();
                 buttonFont?.Dispose();
             }
