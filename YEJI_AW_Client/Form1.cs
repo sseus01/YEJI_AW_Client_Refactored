@@ -3541,7 +3541,8 @@ namespace YEJI_AW_Client
                 notifyIcon.ShowBalloonTip(5000);
 
                 string companyName = ResolveCompanyName(url);
-                using var alertForm = new ProhibitedUrlAlertForm(companyName, fullUrl);
+                IntPtr browserWindowHandle = BrowserUrlMonitor.GetForegroundBrowserWindowHandle();
+                using var alertForm = new ProhibitedUrlAlertForm(companyName, fullUrl, browserWindowHandle);
                 alertForm.ShowDialog(this);
             }
             catch (Exception ex)

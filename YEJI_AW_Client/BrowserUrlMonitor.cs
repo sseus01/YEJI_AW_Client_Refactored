@@ -19,6 +19,12 @@ namespace YEJI_AW_Client
         [DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
@@ -36,6 +42,13 @@ namespace YEJI_AW_Client
         private static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string? lpszWindow);
 
         private const uint OBJID_WINDOW = 0x00000000;
+        private const uint WM_CLOSE = 0x0010;
+        private const uint WM_KEYDOWN = 0x0100;
+        private const uint WM_KEYUP = 0x0101;
+        private const uint WM_SYSKEYDOWN = 0x0104;
+        private const uint WM_SYSKEYUP = 0x0105;
+        private const int VK_MENU = 0x12;
+        private const int VK_LEFT = 0x25;
 
         private static readonly HashSet<string> SupportedBrowsers = new()
         {
@@ -80,6 +93,53 @@ namespace YEJI_AW_Client
             {
                 return null;
             }
+        }
+
+        public static IntPtr GetForegroundBrowserWindowHandle()
+        {
+            try
+            {
+                IntPtr hwnd = GetForegroundWindow();
+                if (hwnd == IntPtr.Zero)
+                    return IntPtr.Zero;
+
+                GetWindowThreadProcessId(hwnd, out uint processId);
+                if (processId == 0)
+                    return IntPtr.Zero;
+
+                using var process = Process.GetProcessById((int)processId);
+                string processName = process.ProcessName.ToLowerInvariant();
+
+                if (!IsSupportedBrowser(processName))
+                    return IntPtr.Zero;
+
+                return hwnd;
+            }
+            catch
+            {
+                return IntPtr.Zero;
+            }
+        }
+
+        public static bool TryCloseBrowserWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+                return false;
+
+            return PostMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        public static bool TrySendBrowserBack(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+                return false;
+
+            SetForegroundWindow(hwnd);
+            PostMessage(hwnd, WM_SYSKEYDOWN, new IntPtr(VK_MENU), IntPtr.Zero);
+            PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_LEFT), IntPtr.Zero);
+            PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_LEFT), IntPtr.Zero);
+            PostMessage(hwnd, WM_SYSKEYUP, new IntPtr(VK_MENU), IntPtr.Zero);
+            return true;
         }
 
         private static string? TryGetUrlFromUiAutomation(IntPtr hwnd, string browserName)

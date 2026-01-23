@@ -5,11 +5,13 @@ using System.Windows.Forms;
 namespace YEJI_AW_Client
 {
     public sealed class ProhibitedUrlAlertForm : Form
-   
+    {
         private readonly Panel dialogPanel;
+        private readonly IntPtr browserWindowHandle;
 
-        public ProhibitedUrlAlertForm(string companyName, string fullUrl)
+        public ProhibitedUrlAlertForm(string companyName, string fullUrl, IntPtr browserWindowHandle)
         {
+            this.browserWindowHandle = browserWindowHandle;
             Text = "영업 금지 안내";
             StartPosition = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.None;
@@ -92,7 +94,31 @@ namespace YEJI_AW_Client
                 ForeColor = Color.FromArgb(34, 34, 34),
                 Text = fullUrl
             };
-          
+
+            var closeBrowserButton = new Button
+            {
+                Text = "브라우저 닫기",
+                AutoSize = true,
+                Anchor = AnchorStyles.Right
+            };
+            closeBrowserButton.Click += (_, _) =>
+            {
+                BrowserUrlMonitor.TryCloseBrowserWindow(this.browserWindowHandle);
+                Close();
+            };
+
+            var backButton = new Button
+            {
+                Text = "뒤로가기",
+                AutoSize = true,
+                Anchor = AnchorStyles.Right
+            };
+            backButton.Click += (_, _) =>
+            {
+                BrowserUrlMonitor.TrySendBrowserBack(this.browserWindowHandle);
+                Close();
+            };
+
             var closeButton = new Button
             {
                 Text = "닫기",
@@ -109,6 +135,8 @@ namespace YEJI_AW_Client
                 Height = 44
             };
             buttonPanel.Controls.Add(closeButton);
+            buttonPanel.Controls.Add(backButton);
+            buttonPanel.Controls.Add(closeBrowserButton);
 
             bodyPanel.Controls.Add(buttonPanel);            
             bodyPanel.Controls.Add(fullUrlLabel);
@@ -120,6 +148,10 @@ namespace YEJI_AW_Client
             dialogPanel.Controls.Add(headerPanel);
 
             Controls.Add(dialogPanel);
+
+            bool hasBrowserHandle = this.browserWindowHandle != IntPtr.Zero;
+            closeBrowserButton.Enabled = hasBrowserHandle;
+            backButton.Enabled = hasBrowserHandle;
 
             AcceptButton = closeButton;
             Load += (_, _) => CenterDialogPanel();
