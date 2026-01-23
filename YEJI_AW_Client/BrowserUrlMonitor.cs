@@ -385,6 +385,9 @@ namespace YEJI_AW_Client
                     if (urlLower.Contains(prohibitedLower) ||
                         normalizedUrlLower.Contains(prohibitedNormalizedUrl))
                         return true;
+
+                    // 경로가 포함된 금지 URL은 도메인 단독 매칭으로 확장하지 않음
+                    continue;
                 }
 
                 // 2. 도메인만 지정된 경우 (경로 무관하게 차단)
