@@ -3518,36 +3518,22 @@ namespace YEJI_AW_Client
             try
             {
                 string title = "영업금지 사이트 알림";
-                (string domainUrl, string fullUrl) = BuildProhibitedUrlDisplay(url);
+                string fullUrl = NormalizeUrlForDisplay(url);
 
                 // 트레이 아이콘 풍선 알림 표시
                 notifyIcon.BalloonTipTitle = title;
-                notifyIcon.BalloonTipText = $"도메인: {domainUrl}\n전체 주소: {fullUrl}";
+                notifyIcon.BalloonTipText = $"영업금지 URL: {fullUrl}";
                 notifyIcon.BalloonTipIcon = ToolTipIcon.Warning;
                 notifyIcon.ShowBalloonTip(5000);
 
-                using var alertForm = new ProhibitedUrlAlertForm(domainUrl, fullUrl);
+                using var alertForm = new ProhibitedUrlAlertForm(fullUrl);
                 alertForm.ShowDialog(this);
             }
             catch (Exception ex)
             {
                 ClientLogger.LogAgent($"Failed to show prohibited URL alert: {ex.Message}", "Err");
             }
-        }
-
-        private static (string DomainUrl, string FullUrl) BuildProhibitedUrlDisplay(string url)
-        {
-            string fullUrl = NormalizeUrlForDisplay(url);
-
-            if (Uri.TryCreate(fullUrl, UriKind.Absolute, out Uri? uri))
-            {
-                string domainUrl = $"{uri.Scheme}://{uri.Host}";
-                return (domainUrl, fullUrl);
-            }
-
-            string domainFallback = BrowserUrlMonitor.ExtractDomain(url) ?? url;
-            return (domainFallback, fullUrl);
-        }
+        }              
 
         private static string NormalizeUrlForDisplay(string url)
         {
