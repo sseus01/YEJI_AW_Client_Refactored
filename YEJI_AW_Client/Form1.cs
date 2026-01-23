@@ -215,7 +215,11 @@ namespace YEJI_AW_Client
         // URL 모니터링 관련
         private Timer? urlMonitorTimer;
         private List<string> prohibitedUrls = new();
+        private List<BanUrlRow> prohibitedUrlRows = new();
         private string? previousUrl; // 이전 URL을 추적하여 변경 감지
+        private string? lastAlertedUrl;
+        private DateTime lastAlertedAt = DateTime.MinValue;
+        private static readonly TimeSpan prohibitedAlertCooldown = TimeSpan.FromSeconds(15);
         private Dictionary<string, string> lastKnownOvertimeStatuses = new();
         
         private bool startupSequenceRunning;
@@ -601,6 +605,7 @@ namespace YEJI_AW_Client
 
                     // 메모리에 URL 목록 적용
                     prohibitedUrls = ExtractUrlsFromCache(cache);
+                    prohibitedUrlRows = new List<BanUrlRow>(cache.Urls);
 
                     ClientLogger.LogAgent($"Synced prohibited URLs: {apiResponse.Count} changes, total {prohibitedUrls.Count} URLs in cache.", "DBG");
                 }
@@ -614,6 +619,7 @@ namespace YEJI_AW_Client
                 if (cache != null && cache.Urls.Count > 0)
                 {
                     prohibitedUrls = ExtractUrlsFromCache(cache);
+                    prohibitedUrlRows = new List<BanUrlRow>(cache.Urls);
                     ClientLogger.LogAgent($"Loaded {prohibitedUrls.Count} prohibited URLs from local cache.", "DBG");
                 }
             }
@@ -734,6 +740,7 @@ namespace YEJI_AW_Client
 
             // 영업금지 URL 목록 적용
             prohibitedUrls = info.ProhibitedUrls ?? new List<string>();
+            prohibitedUrlRows = new List<BanUrlRow>();
             ClientLogger.LogAgent($"Loaded {prohibitedUrls.Count} prohibited URLs from configuration.", "DBG");
         }
 
@@ -3488,8 +3495,7 @@ namespace YEJI_AW_Client
                 string? currentUrl = BrowserUrlMonitor.GetCurrentBrowserUrl();
 
                 if (string.IsNullOrWhiteSpace(currentUrl))
-                {
-                    previousUrl = null;
+                {                   
                     return;
                 }
 
@@ -3500,6 +3506,14 @@ namespace YEJI_AW_Client
                 // URL이 변경되었고 금지된 URL인 경우에만 알림 표시 (반복 알림 없음)
                 if (urlChanged && BrowserUrlMonitor.IsProhibitedUrl(currentUrl, prohibitedUrls))
                 {
+                    string normalizedUrl = NormalizeUrlForDisplay(currentUrl);
+                    if (IsAlertSuppressed(normalizedUrl))
+                    {
+                        return;
+                    }
+
+                    lastAlertedUrl = normalizedUrl;
+                    lastAlertedAt = DateTime.Now;
                     ShowProhibitedUrlAlert(currentUrl);
 
                     // 로그 기록 (전체 URL 경로 포함)
@@ -3526,14 +3540,58 @@ namespace YEJI_AW_Client
                 notifyIcon.BalloonTipIcon = ToolTipIcon.Warning;
                 notifyIcon.ShowBalloonTip(5000);
 
-                using var alertForm = new ProhibitedUrlAlertForm(fullUrl);
+                string companyName = ResolveCompanyName(url);
+                using var alertForm = new ProhibitedUrlAlertForm(companyName, fullUrl);
                 alertForm.ShowDialog(this);
             }
             catch (Exception ex)
             {
                 ClientLogger.LogAgent($"Failed to show prohibited URL alert: {ex.Message}", "Err");
             }
-        }              
+        }
+
+        private string ResolveCompanyName(string url)
+        {
+            if (prohibitedUrlRows == null || prohibitedUrlRows.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            foreach (var row in prohibitedUrlRows)
+            {
+                if (string.IsNullOrWhiteSpace(row.Url))
+                {
+                    continue;
+                }
+
+                if (BrowserUrlMonitor.IsProhibitedUrl(url, new List<string> { row.Url }))
+                {
+                    return row.CompanyName ?? string.Empty;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private bool IsAlertSuppressed(string normalizedUrl)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedUrl))
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(lastAlertedUrl))
+            {
+                return false;
+            }
+
+            if (!string.Equals(lastAlertedUrl, normalizedUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return DateTime.Now - lastAlertedAt < prohibitedAlertCooldown;
+        }
 
         private static string NormalizeUrlForDisplay(string url)
         {
