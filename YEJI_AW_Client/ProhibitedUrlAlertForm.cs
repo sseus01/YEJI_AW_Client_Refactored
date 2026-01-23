@@ -1,11 +1,11 @@
-﻿using System
+﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 
 namespace YEJI_AW_Client
 {
     public sealed class ProhibitedUrlAlertForm : Form
-    {
+   
         private readonly Panel dialogPanel;
 
         public ProhibitedUrlAlertForm(string companyName, string fullUrl)
