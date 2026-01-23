@@ -101,6 +101,10 @@ namespace YEJI_AW_Client
         private readonly string clientConfigFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "client_config.json");
 
+        // 영업금지 URL 캐시 파일
+        private readonly string prohibitedUrlsCacheFile =
+            Path.Combine(@"C:\ProgramData\YEJI_AW", "prohibited_urls_cache.json");
+
         // 클라이언트 상태 전송 실패 기록용
         private readonly string clientStatusLogFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "client_status.log");
@@ -208,8 +212,13 @@ namespace YEJI_AW_Client
 
         private Timer? employeeOvertimeStatusTimer;
         private bool isCheckingEmployeeOvertimeStatus;
-        private Dictionary<string, string> lastKnownOvertimeStatuses = new();
 
+        // URL 모니터링 관련
+        private Timer? urlMonitorTimer;
+        private List<string> prohibitedUrls = new();
+        private string? previousUrl; // 이전 URL을 추적하여 변경 감지
+        private Dictionary<string, string> lastKnownOvertimeStatuses = new();
+        
         private bool startupSequenceRunning;
         private bool startupSequenceNeedsRetry;
         private DateTime lastStartupRetryAttempt = DateTime.MinValue;
@@ -354,10 +363,14 @@ namespace YEJI_AW_Client
             shutdownCountdownTimer.Interval = 1000;
             shutdownCountdownTimer.Tick += ShutdownCountdownTimer_Tick;
 
-            // 설정(client_config) 갱신 타이머 (5분간격)
+            // 설정(client_config) 및 영업금지 URL 갱신 타이머 (5분간격)
             configTimer = new Timer();
-            configTimer.Interval = 5 * 60 * 1000; ; // 5분
-            configTimer.Tick += async (s, e) => await FetchWorkTimeFromServerAsync();
+            configTimer.Interval = 5 * 60 * 1000; // 5분
+            configTimer.Tick += async (s, e) =>
+            {
+                await FetchWorkTimeFromServerAsync();
+                await FetchProhibitedUrlsAsync();
+            };
             configTimer.Start();
 
             memoryTrimTimer = new Timer();
@@ -391,6 +404,11 @@ namespace YEJI_AW_Client
             employeeOvertimeStatusTimer.Interval = (int)employeeOvertimeCheckInterval.TotalMilliseconds;
             employeeOvertimeStatusTimer.Tick += async (s, e) => await CheckEmployeeOvertimeStatusAsync();
 
+            // URL 모니터링 타이머 (1초마다 체크하여 빠른 감지)
+            urlMonitorTimer = new Timer();
+            urlMonitorTimer.Interval = 1000; // 1초 - 도메인 접속 시 즉시 감지하기 위해 짧은 간격 사용
+            urlMonitorTimer.Tick += (s, e) => CheckBrowserUrl();
+
             this.Load += (s, e) =>
             {
                 this.Hide();
@@ -399,6 +417,7 @@ namespace YEJI_AW_Client
                 heartbeatTimer.Start();
                 updateCheckTimer.Start();
                 employeeOvertimeStatusTimer.Start();
+                urlMonitorTimer?.Start();
                 _ = RunStartupSequenceAsync();
             };
 
@@ -507,6 +526,143 @@ namespace YEJI_AW_Client
             }
         }
 
+        // -----------------------------
+        // 영업금지 URL 목록 가져오기 (증분 동기화)
+        // -----------------------------
+        private async Task FetchProhibitedUrlsAsync()
+        {
+            try
+            {
+                // 로컬 캐시 로드
+                var cache = LoadProhibitedUrlsCache();
+
+                // since 파라미터 설정 (마지막 동기화 시각)
+                string? sinceParam = cache?.LastSyncTime;
+
+                // API 호출
+                var client = HttpClient;
+                string url = $"{ServerBaseUrl}/api/client/ban-urls";
+                if (!string.IsNullOrWhiteSpace(sinceParam))
+                {
+                    url += $"?since={Uri.EscapeDataString(sinceParam)}";
+                }
+
+                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                var apiResponse = await JsonSerializer.DeserializeAsync<BanUrlsResponse>(stream, JsonOptions);
+
+                if (apiResponse != null && apiResponse.Success)
+                {
+                    // 캐시 업데이트
+                    if (cache == null)
+                    {
+                        cache = new ProhibitedUrlsCache();
+                    }
+
+                    // 성능 개선: Dictionary를 사용하여 O(1) 조회
+                    var urlDict = cache.Urls.ToDictionary(u => u.Url, u => u);
+
+                    // 새로운 URL 추가/업데이트
+                    if (apiResponse.Rows != null && apiResponse.Rows.Count > 0)
+                    {
+                        foreach (var row in apiResponse.Rows)
+                        {
+                            if (!string.IsNullOrWhiteSpace(row.Url))
+                            {
+                                if (urlDict.TryGetValue(row.Url, out var existing))
+                                {
+                                    // 기존 항목 업데이트
+                                    existing.CompanyName = row.CompanyName;
+                                    existing.UpdatedAt = row.UpdatedAt;
+                                }
+                                else
+                                {
+                                    // 새 항목 추가
+                                    cache.Urls.Add(row);
+                                }
+                            }
+                        }
+                    }
+
+                    // 동기화 시각 업데이트
+                    if (!string.IsNullOrWhiteSpace(apiResponse.NextSince))
+                    {
+                        cache.LastSyncTime = apiResponse.NextSince;
+                    }
+                    else
+                    {
+                        cache.LastSyncTime = apiResponse.ServerTime;
+                        ClientLogger.LogAgent("NextSince is null, using ServerTime for sync timestamp.", "DBG");
+                    }
+
+                    // 캐시 저장
+                    SaveProhibitedUrlsCache(cache);
+
+                    // 메모리에 URL 목록 적용
+                    prohibitedUrls = ExtractUrlsFromCache(cache);
+
+                    ClientLogger.LogAgent($"Synced prohibited URLs: {apiResponse.Count} changes, total {prohibitedUrls.Count} URLs in cache.", "DBG");
+                }
+            }
+            catch (Exception ex)
+            {
+                // 동기화 실패 시 로컬 캐시에서 로드
+                ClientLogger.LogAgent($"Failed to sync prohibited URLs: {ex.Message}", "DBG");
+
+                var cache = LoadProhibitedUrlsCache();
+                if (cache != null && cache.Urls.Count > 0)
+                {
+                    prohibitedUrls = ExtractUrlsFromCache(cache);
+                    ClientLogger.LogAgent($"Loaded {prohibitedUrls.Count} prohibited URLs from local cache.", "DBG");
+                }
+            }
+        }
+
+        private static List<string> ExtractUrlsFromCache(ProhibitedUrlsCache cache)
+        {
+            return cache.Urls.Select(u => u.Url).ToList();
+        }
+
+        private ProhibitedUrlsCache? LoadProhibitedUrlsCache()
+        {
+            try
+            {
+                if (!File.Exists(prohibitedUrlsCacheFile))
+                {
+                    return null;
+                }
+
+                string json = File.ReadAllText(prohibitedUrlsCacheFile, Encoding.UTF8);
+                return JsonSerializer.Deserialize<ProhibitedUrlsCache>(json, JsonOptions);
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Failed to load prohibited URLs cache: {ex.Message}", "DBG");
+                return null;
+            }
+        }
+
+        private void SaveProhibitedUrlsCache(ProhibitedUrlsCache cache)
+        {
+            try
+            {
+                string? folder = Path.GetDirectoryName(prohibitedUrlsCacheFile);
+                if (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                string json = JsonSerializer.Serialize(cache, JsonOptions);
+                File.WriteAllText(prohibitedUrlsCacheFile, json, Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Failed to save prohibited URLs cache: {ex.Message}", "Err");
+            }
+        }
+
         private async Task RunStartupSequenceAsync()
         {
             if (startupSequenceRunning)
@@ -522,6 +678,7 @@ namespace YEJI_AW_Client
             {
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("ResendPendingIdleEvents", ResendPendingIdleEventsAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("FetchWorkTimeFromServer", FetchWorkTimeFromServerAsync);
+                startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("FetchProhibitedUrls", FetchProhibitedUrlsAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("CheckClientUpdate", () => CheckClientUpdateAsync());
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("RegisterOrUpdateClient", RegisterOrUpdateClientAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("CheckAfterHoursOnStartup", CheckAfterHoursOnStartupAsync);
@@ -575,6 +732,10 @@ namespace YEJI_AW_Client
             lunchStartTime = SafeParseTime(info.LunchStart, new TimeSpan(12, 30, 0));
             lunchEndTime = SafeParseTime(info.LunchEnd, new TimeSpan(13, 30, 0));
             idleThreshold = TimeSpan.FromMinutes(info.IdleThresholdMinutes);
+
+            // 영업금지 URL 목록 적용
+            prohibitedUrls = info.ProhibitedUrls ?? new List<string>();
+            ClientLogger.LogAgent($"Loaded {prohibitedUrls.Count} prohibited URLs from configuration.", "DBG");
         }
 
         private static TimeSpan SafeParseTime(string time, TimeSpan fallback)
@@ -3314,6 +3475,69 @@ namespace YEJI_AW_Client
             }
         }
 
+        // -----------------------------
+        // URL 모니터링 및 금지 사이트 확인
+        // -----------------------------
+        private void CheckBrowserUrl()
+        {
+            try
+            {
+                // 금지 URL 목록이 없으면 체크하지 않음
+                if (prohibitedUrls == null || prohibitedUrls.Count == 0)
+                    return;
+
+                // 현재 활성화된 브라우저의 URL 가져오기
+                string? currentUrl = BrowserUrlMonitor.GetCurrentBrowserUrl();
+
+                if (string.IsNullOrWhiteSpace(currentUrl))
+                {
+                    previousUrl = null;
+                    return;
+                }
+
+                // URL이 변경되었는지 확인 (도메인 접속 시 즉시 감지)
+                bool urlChanged = previousUrl != currentUrl;
+                previousUrl = currentUrl;
+
+                // URL이 변경되었고 금지된 URL인 경우에만 알림 표시 (반복 알림 없음)
+                if (urlChanged && BrowserUrlMonitor.IsProhibitedUrl(currentUrl, prohibitedUrls))
+                {
+                    ShowProhibitedUrlAlert(currentUrl);
+
+                    // 로그 기록 (전체 URL 경로 포함)
+                    ClientLogger.LogAgent($"Prohibited URL accessed: {currentUrl}", "WARN");
+                }
+            }
+            catch (Exception ex)
+            {
+                // URL 체크 실패는 조용히 무시 (중요하지 않은 기능)
+                ClientLogger.LogAgent($"URL monitoring error: {ex.Message}", "DBG");
+            }
+        }
+
+        private void ShowProhibitedUrlAlert(string url)
+        {
+            try
+            {
+                string domain = BrowserUrlMonitor.ExtractDomain(url) ?? url;
+                string message = $"영업금지 사이트에 접속하였습니다.\n\n도메인: {domain}\n\n업무와 관련 없는 사이트 접속을 자제해 주세요.";
+                string title = "영업금지 사이트 알림";
+
+                // 트레이 아이콘 풍선 알림 표시
+                notifyIcon.BalloonTipTitle = title;
+                notifyIcon.BalloonTipText = $"도메인: {domain}";
+                notifyIcon.BalloonTipIcon = ToolTipIcon.Warning;
+                notifyIcon.ShowBalloonTip(5000);
+
+                // 메시지 박스로도 표시 (선택적)
+                MessageBox.Show(message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Failed to show prohibited URL alert: {ex.Message}", "Err");
+            }
+        }
+
         private async Task ResendPendingIdleEventsAsync()
         {
             if (!File.Exists(pendingIdleEventsFile))
@@ -4249,6 +4473,7 @@ namespace YEJI_AW_Client
         public string LunchStart { get; set; } = "12:30";
         public string LunchEnd { get; set; } = "13:30";
         public int IdleThresholdMinutes { get; set; } = 10;
+        public List<string> ProhibitedUrls { get; set; } = new List<string>();
     }
 
     public class PcOffSettings
@@ -4259,6 +4484,44 @@ namespace YEJI_AW_Client
         public int TempUsageMinutes { get; set; } = 1;
         [JsonPropertyName("tempPopupImage")]
         public string TempPopupImage { get; set; } = string.Empty;
+    }
+
+    // 영업금지 URL API 응답
+    public class BanUrlsResponse
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+
+        [JsonPropertyName("server_time")]
+        public string ServerTime { get; set; } = "";
+
+        [JsonPropertyName("next_since")]
+        public string? NextSince { get; set; }
+
+        [JsonPropertyName("count")]
+        public int Count { get; set; }
+
+        [JsonPropertyName("rows")]
+        public List<BanUrlRow> Rows { get; set; } = new List<BanUrlRow>();
+    }
+
+    public class BanUrlRow
+    {
+        [JsonPropertyName("url")]
+        public string Url { get; set; } = "";
+
+        [JsonPropertyName("company_name")]
+        public string CompanyName { get; set; } = "";
+
+        [JsonPropertyName("updated_at")]
+        public string UpdatedAt { get; set; } = "";
+    }
+
+    // 로컬 캐시 구조
+    public class ProhibitedUrlsCache
+    {
+        public string? LastSyncTime { get; set; }
+        public List<BanUrlRow> Urls { get; set; } = new List<BanUrlRow>();
     }
 
     public class PcEventData
