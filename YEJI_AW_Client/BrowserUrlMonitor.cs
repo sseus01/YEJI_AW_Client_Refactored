@@ -39,7 +39,7 @@ namespace YEJI_AW_Client
 
         private static readonly HashSet<string> SupportedBrowsers = new()
         {
-            "chrome", "msedge", "firefox", "opera", "brave", "iexplore"
+             "chrome", "msedge", "firefox", "opera", "brave", "iexplore", "whale"
         };
 
         /// <summary>
