@@ -66,7 +66,7 @@ namespace YEJI_AW_Client
 
                 // 창 제목에서 URL 추출 시도
                 string? url = ExtractUrlFromWindowTitle(hwnd, processName);
-                
+
                 return url;
             }
             catch
@@ -104,7 +104,7 @@ namespace YEJI_AW_Client
                 // 브라우저별로 제목에서 URL 추출
                 // 대부분의 브라우저는 "페이지 제목 - URL" 또는 "URL - 브라우저 이름" 형식 사용
                 string url = ParseUrlFromTitle(title, browserName);
-                
+
                 return url;
             }
             catch
@@ -217,7 +217,7 @@ namespace YEJI_AW_Client
                 if (prohibitedLower.Contains("/"))
                 {
                     // 금지 URL이 경로를 포함하는 경우
-                    if (urlLower.Contains(prohibitedLower) || 
+                    if (urlLower.Contains(prohibitedLower) ||
                         urlLower.StartsWith("http://" + prohibitedLower) ||
                         urlLower.StartsWith("https://" + prohibitedLower))
                         return true;
