@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Windows.Automation;
 
 namespace YEJI_AW_Client
 {
@@ -64,6 +65,12 @@ namespace YEJI_AW_Client
                 if (!IsSupportedBrowser(processName))
                     return null;
 
+                string? automationUrl = TryGetUrlFromUiAutomation(hwnd, processName);
+                if (!string.IsNullOrWhiteSpace(automationUrl))
+                {
+                    return automationUrl;
+                }
+
                 // 창 제목에서 URL 추출 시도
                 string? url = ExtractUrlFromWindowTitle(hwnd, processName);
 
@@ -75,6 +82,53 @@ namespace YEJI_AW_Client
             }
         }
 
+        private static string? TryGetUrlFromUiAutomation(IntPtr hwnd, string browserName)
+        {
+            try
+            {
+                var root = AutomationElement.FromHandle(hwnd);
+                if (root == null)
+                    return null;
+
+                var condition = new AndCondition(
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                    new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true));
+
+                var edits = root.FindAll(TreeScope.Subtree, condition);
+                foreach (AutomationElement edit in edits)
+                {
+                    if (edit.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) && pattern is ValuePattern valuePattern)
+                    {
+                        string value = valuePattern.Current.Value;
+                        if (IsLikelyUrl(value))
+                            return value.Trim();
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
+
+            return null;
+        }
+
+        private static bool IsLikelyUrl(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            string trimmed = value.Trim();
+
+            if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (trimmed.Contains(' ') || trimmed.Contains('	'))
+                return false;
+
+            return trimmed.Contains('.') && trimmed.Length > 3;
+        }
         /// <summary>
         /// 프로세스 이름이 지원되는 브라우저인지 확인합니다.
         /// </summary>
