@@ -301,6 +301,45 @@ namespace YEJI_AW_Client
             return null;
         }
 
+        private static string NormalizeDomain(string? domain)
+        {
+            if (string.IsNullOrWhiteSpace(domain))
+                return string.Empty;
+
+            string normalized = domain.Trim().ToLowerInvariant();
+            if (normalized.StartsWith("www.", StringComparison.Ordinal))
+                normalized = normalized.Substring(4);
+
+            return normalized;
+        }
+
+        private static bool TryCreateUri(string url, out Uri? uri)
+        {
+            if (Uri.TryCreate(url, UriKind.Absolute, out uri))
+                return true;
+
+            if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                return Uri.TryCreate("https://" + url, UriKind.Absolute, out uri);
+            }
+
+            return false;
+        }
+
+        private static string NormalizeUrlHost(string url)
+        {
+            if (!TryCreateUri(url, out Uri? uri) || uri == null)
+                return url.ToLowerInvariant();
+
+            var builder = new UriBuilder(uri)
+            {
+                Host = NormalizeDomain(uri.Host)
+            };
+
+            return builder.Uri.ToString().ToLowerInvariant();
+        }
+
         /// <summary>
         /// URL이 금지된 URL 목록에 포함되는지 확인합니다.
         /// 도메인뿐만 아니라 서브도메인 및 하부 경로까지 체크합니다.
@@ -314,8 +353,11 @@ namespace YEJI_AW_Client
             if (string.IsNullOrWhiteSpace(domain))
                 return false;
 
+            string normalizedDomain = NormalizeDomain(domain);
+
             // URL 전체를 소문자로 변환 (경로 포함)
             string urlLower = url.ToLowerInvariant();
+            string normalizedUrlLower = NormalizeUrlHost(url);
 
             foreach (var prohibited in prohibitedUrls)
             {
@@ -323,34 +365,46 @@ namespace YEJI_AW_Client
                     continue;
 
                 string prohibitedLower = prohibited.ToLowerInvariant().Trim();
+                string prohibitedNormalizedDomain = NormalizeDomain(ExtractDomain(prohibitedLower));
+                bool prohibitedHasPath = false;
+                string prohibitedNormalizedUrl = prohibitedLower;
+
+                if (TryCreateUri(prohibitedLower, out Uri? prohibitedUri) && prohibitedUri != null)
+                {
+                    prohibitedNormalizedDomain = NormalizeDomain(prohibitedUri.Host);
+                    prohibitedHasPath = !string.IsNullOrEmpty(prohibitedUri.AbsolutePath) &&
+                        !prohibitedUri.AbsolutePath.Equals("/", StringComparison.Ordinal);
+                    prohibitedNormalizedUrl = NormalizeUrlHost(prohibitedLower);
+                }
 
                 // 1. 전체 URL 패턴 매칭 (경로 포함)
                 // 예: abc.abc.com/blog 형태의 금지 URL
-                if (prohibitedLower.Contains("/"))
+                if (prohibitedHasPath)
                 {
                     // 금지 URL이 경로를 포함하는 경우
                     if (urlLower.Contains(prohibitedLower) ||
-                        urlLower.StartsWith("http://" + prohibitedLower) ||
-                        urlLower.StartsWith("https://" + prohibitedLower))
+                        normalizedUrlLower.Contains(prohibitedNormalizedUrl))
                         return true;
                 }
 
                 // 2. 도메인만 지정된 경우 (경로 무관하게 차단)
                 // 정확한 도메인 일치 (domain은 이미 ToLowerInvariant 처리됨)
-                if (domain.Equals(prohibitedLower, StringComparison.Ordinal))
+                if (normalizedDomain.Equals(prohibitedNormalizedDomain, StringComparison.Ordinal))
                     return true;
 
                 // 하위 도메인 포함 (예: abc.abc.com을 abc.com으로 차단)
-                if (domain.EndsWith("." + prohibitedLower, StringComparison.Ordinal))
+                if (!string.IsNullOrEmpty(prohibitedNormalizedDomain) &&
+                    normalizedDomain.EndsWith("." + prohibitedNormalizedDomain, StringComparison.Ordinal))
                     return true;
 
                 // 와일드카드 패턴 지원 (예: *.example.com 형식의 금지 URL)
                 if (prohibitedLower.StartsWith("*."))
                 {
-                    string baseDomain = prohibitedLower.Substring(2);
-                    if (domain.Equals(baseDomain, StringComparison.Ordinal) ||
-                        domain.EndsWith("." + baseDomain, StringComparison.Ordinal))
+                    string baseDomain = NormalizeDomain(prohibitedLower.Substring(2));
+                    if (normalizedDomain.Equals(baseDomain, StringComparison.Ordinal) ||
+                        normalizedDomain.EndsWith("." + baseDomain, StringComparison.Ordinal))
                         return true;
+                    return true;
                 }
             }
 

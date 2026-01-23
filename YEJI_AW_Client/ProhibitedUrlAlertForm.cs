@@ -94,19 +94,7 @@ namespace YEJI_AW_Client
                 ForeColor = Color.FromArgb(34, 34, 34),
                 Text = fullUrl
             };
-
-            var closeBrowserButton = new Button
-            {
-                Text = "브라우저 닫기",
-                AutoSize = true,
-                Anchor = AnchorStyles.Right
-            };
-            closeBrowserButton.Click += (_, _) =>
-            {
-                BrowserUrlMonitor.TryCloseBrowserWindow(this.browserWindowHandle);
-                Close();
-            };
-
+            
             var backButton = new Button
             {
                 Text = "뒤로가기",
@@ -135,8 +123,7 @@ namespace YEJI_AW_Client
                 Height = 44
             };
             buttonPanel.Controls.Add(closeButton);
-            buttonPanel.Controls.Add(backButton);
-            buttonPanel.Controls.Add(closeBrowserButton);
+            buttonPanel.Controls.Add(backButton);           
 
             bodyPanel.Controls.Add(buttonPanel);            
             bodyPanel.Controls.Add(fullUrlLabel);
@@ -150,7 +137,6 @@ namespace YEJI_AW_Client
             Controls.Add(dialogPanel);
 
             bool hasBrowserHandle = this.browserWindowHandle != IntPtr.Zero;
-            closeBrowserButton.Enabled = hasBrowserHandle;
             backButton.Enabled = hasBrowserHandle;
 
             AcceptButton = closeButton;
