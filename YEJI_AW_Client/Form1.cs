@@ -564,11 +564,28 @@ namespace YEJI_AW_Client
                         cache = new ProhibitedUrlsCache();
                     }
 
-                    // 서버에서 리셋 요청이 온 경우 로컬 캐시 초기화
-                    if (apiResponse.ResetRequired)
+                    // 서버에서 리셋 요청이 온 경우 또는 reset_at이 LastSyncTime보다 최신인 경우 로컬 캐시 초기화
+                    bool needsReset = apiResponse.ResetRequired;
+
+                    // reset_at 타임스탬프가 있고 LastSyncTime이 있는 경우, 타임스탬프를 비교하여 리셋 필요 여부 확인
+                    if (!needsReset && !string.IsNullOrWhiteSpace(apiResponse.ResetAt) && !string.IsNullOrWhiteSpace(cache.LastSyncTime))
+                    {
+                        if (DateTime.TryParse(apiResponse.ResetAt, out DateTime resetTime) &&
+                            DateTime.TryParse(cache.LastSyncTime, out DateTime lastSyncTime))
+                        {
+                            if (resetTime > lastSyncTime)
+                            {
+                                needsReset = true;
+                                ClientLogger.LogAgent($"Reset detected: reset_at ({apiResponse.ResetAt}) > LastSyncTime ({cache.LastSyncTime})", "DBG");
+                            }
+                        }
+                    }
+
+                    if (needsReset)
                     {
                         cache.Urls.Clear();
                         cache.LastSyncTime = null; // 초기화 시 LastSyncTime도 초기화하여 다음 요청 시 전체 데이터를 가져오도록 함
+                        ClientLogger.LogAgent("Cleared prohibited URLs cache due to server reset.", "DBG");
                     }
 
                     // 성능 개선: Dictionary를 사용하여 O(1) 조회
@@ -613,7 +630,7 @@ namespace YEJI_AW_Client
 
                     // 동기화 시각 업데이트
                     // 리셋 요청이 있었던 경우 LastSyncTime을 null로 유지하여 다음 요청 시 전체 데이터를 가져오도록 함
-                    if (!apiResponse.ResetRequired)
+                    if (!needsReset)
                     {
                         if (!string.IsNullOrWhiteSpace(apiResponse.NextSince))
                         {
