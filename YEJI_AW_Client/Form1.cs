@@ -544,10 +544,10 @@ namespace YEJI_AW_Client
 
                 // API 호출
                 var client = HttpClient;
-                string url = $"{ServerBaseUrl}/api/client/ban-urls";
+                string url = $"{ServerBaseUrl}/api/client/ban-urls?include_deleted=1";
                 if (!string.IsNullOrWhiteSpace(sinceParam))
                 {
-                    url += $"?since={Uri.EscapeDataString(sinceParam)}";
+                    url += $"&since={Uri.EscapeDataString(sinceParam)}";
                 }
 
                 using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
@@ -564,26 +564,48 @@ namespace YEJI_AW_Client
                         cache = new ProhibitedUrlsCache();
                     }
 
+                    // 서버에서 리셋 요청이 온 경우 로컬 캐시 초기화
+                    if (apiResponse.ResetRequired)
+                    {
+                        cache.Urls.Clear();
+                        ClientLogger.LogAgent($"Server requested reset. Clearing local cache. Reset time: {apiResponse.ResetAt}", "DBG");
+                    }
+
                     // 성능 개선: Dictionary를 사용하여 O(1) 조회
                     var urlDict = cache.Urls.ToDictionary(u => u.Url, u => u);
 
-                    // 새로운 URL 추가/업데이트
+                    // 새로운 URL 추가/업데이트 및 삭제 처리
                     if (apiResponse.Rows != null && apiResponse.Rows.Count > 0)
                     {
                         foreach (var row in apiResponse.Rows)
                         {
                             if (!string.IsNullOrWhiteSpace(row.Url))
                             {
-                                if (urlDict.TryGetValue(row.Url, out var existing))
+                                if (row.Deleted)
                                 {
-                                    // 기존 항목 업데이트
-                                    existing.CompanyName = row.CompanyName;
-                                    existing.UpdatedAt = row.UpdatedAt;
+                                    // 삭제된 항목은 로컬 캐시에서 제거
+                                    if (urlDict.TryGetValue(row.Url, out var toDelete))
+                                    {
+                                        cache.Urls.Remove(toDelete);
+                                        urlDict.Remove(row.Url);
+                                    }
                                 }
                                 else
                                 {
-                                    // 새 항목 추가
-                                    cache.Urls.Add(row);
+                                    // 삭제되지 않은 항목은 업서트
+                                    if (urlDict.TryGetValue(row.Url, out var existing))
+                                    {
+                                        // 기존 항목 업데이트
+                                        existing.CompanyName = row.CompanyName;
+                                        existing.UpdatedAt = row.UpdatedAt;
+                                        existing.Deleted = false;
+                                    }
+                                    else
+                                    {
+                                        // 새 항목 추가
+                                        cache.Urls.Add(row);
+                                        urlDict[row.Url] = row;
+                                    }
                                 }
                             }
                         }
@@ -4582,6 +4604,12 @@ namespace YEJI_AW_Client
 
         [JsonPropertyName("rows")]
         public List<BanUrlRow> Rows { get; set; } = new List<BanUrlRow>();
+
+        [JsonPropertyName("reset_at")]
+        public string? ResetAt { get; set; }
+
+        [JsonPropertyName("reset_required")]
+        public bool ResetRequired { get; set; } = false;
     }
 
     public class BanUrlRow
@@ -4594,6 +4622,9 @@ namespace YEJI_AW_Client
 
         [JsonPropertyName("updated_at")]
         public string UpdatedAt { get; set; } = "";
+
+        [JsonPropertyName("deleted")]
+        public bool Deleted { get; set; } = false;
     }
 
     // 로컬 캐시 구조
