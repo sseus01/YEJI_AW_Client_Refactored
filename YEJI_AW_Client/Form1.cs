@@ -568,7 +568,7 @@ namespace YEJI_AW_Client
                     if (apiResponse.ResetRequired)
                     {
                         cache.Urls.Clear();
-                        ClientLogger.LogAgent($"Server requested reset. Clearing local cache. Reset time: {apiResponse.ResetAt}", "DBG");
+                        cache.LastSyncTime = null; // 초기화 시 LastSyncTime도 초기화하여 다음 요청 시 전체 데이터를 가져오도록 함
                     }
 
                     // 성능 개선: Dictionary를 사용하여 O(1) 조회
@@ -612,14 +612,18 @@ namespace YEJI_AW_Client
                     }
 
                     // 동기화 시각 업데이트
-                    if (!string.IsNullOrWhiteSpace(apiResponse.NextSince))
+                    // 리셋 요청이 있었던 경우 LastSyncTime을 null로 유지하여 다음 요청 시 전체 데이터를 가져오도록 함
+                    if (!apiResponse.ResetRequired)
                     {
-                        cache.LastSyncTime = apiResponse.NextSince;
-                    }
-                    else
-                    {
-                        cache.LastSyncTime = apiResponse.ServerTime;
-                        ClientLogger.LogAgent("NextSince is null, using ServerTime for sync timestamp.", "DBG");
+                        if (!string.IsNullOrWhiteSpace(apiResponse.NextSince))
+                        {
+                            cache.LastSyncTime = apiResponse.NextSince;
+                        }
+                        else
+                        {
+                            cache.LastSyncTime = apiResponse.ServerTime;
+                            ClientLogger.LogAgent("NextSince is null, using ServerTime for sync timestamp.", "DBG");
+                        }
                     }
 
                     // 캐시 저장
