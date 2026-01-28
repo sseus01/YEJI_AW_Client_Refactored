@@ -221,7 +221,10 @@ namespace YEJI_AW_Client
         private DateTime lastAlertedAt = DateTime.MinValue;
         private static readonly TimeSpan prohibitedAlertCooldown = TimeSpan.FromSeconds(15);
         private Dictionary<string, string> lastKnownOvertimeStatuses = new();
-        
+
+        // 브라우저 모니터링 활성화 여부 (서버 설정에서 가져옴, 기본값: true)
+        private bool enableBrowserMonitoring = true;
+
         private bool startupSequenceRunning;
         private bool startupSequenceNeedsRetry;
         private DateTime lastStartupRetryAttempt = DateTime.MinValue;
@@ -785,6 +788,13 @@ namespace YEJI_AW_Client
             prohibitedUrls = info.ProhibitedUrls ?? new List<string>();
             prohibitedUrlRows = new List<BanUrlRow>();
             ClientLogger.LogAgent($"Loaded {prohibitedUrls.Count} prohibited URLs from configuration.", "DBG");
+
+            // 브라우저 모니터링 활성화 여부 적용
+            enableBrowserMonitoring = info.EnableBrowserMonitoring;
+            if (!enableBrowserMonitoring)
+            {
+                ClientLogger.LogAgent("Browser URL monitoring is disabled by server configuration.", "INF");
+            }
         }
 
         private static TimeSpan SafeParseTime(string time, TimeSpan fallback)
@@ -3530,6 +3540,10 @@ namespace YEJI_AW_Client
         {
             try
             {
+                // 브라우저 모니터링이 비활성화된 경우 체크하지 않음
+                if (!enableBrowserMonitoring)
+                    return;
+
                 // 금지 URL 목록이 없으면 체크하지 않음
                 if (prohibitedUrls == null || prohibitedUrls.Count == 0)
                     return;
@@ -4634,6 +4648,12 @@ namespace YEJI_AW_Client
         public string LunchEnd { get; set; } = "13:30";
         public int IdleThresholdMinutes { get; set; } = 10;
         public List<string> ProhibitedUrls { get; set; } = new List<string>();
+
+        /// <summary>
+        /// 브라우저 URL 모니터링 활성화 여부 (기본값: true)
+        /// 구버전 Chrome에서 멈춤 현상이 발생하는 경우 false로 설정하여 비활성화 가능
+        /// </summary>
+        public bool EnableBrowserMonitoring { get; set; } = true;
     }
 
     public class PcOffSettings

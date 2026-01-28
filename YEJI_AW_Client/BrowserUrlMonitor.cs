@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Automation;
 
 namespace YEJI_AW_Client
@@ -13,6 +15,8 @@ namespace YEJI_AW_Client
     /// </summary>
     public class BrowserUrlMonitor
     {
+        // UI Automation 호출 타임아웃 (밀리초) - Chrome 구버전 호환성 문제 방지
+        private const int UiAutomationTimeoutMs = 1000;
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
 
@@ -55,6 +59,17 @@ namespace YEJI_AW_Client
              "chrome", "msedge", "firefox", "opera", "brave", "iexplore", "whale"
         };
 
+        // Chrome 버전 캐시 (프로세스당 한 번만 체크)
+        private static readonly Dictionary<string, string?> browserVersionCache = new();
+        private static readonly object versionCacheLock = new();
+
+        // UI Automation 타임아웃/실패 추적 (예방 조치)
+        private static int consecutiveTimeouts = 0;
+        private static DateTime? suspendedUntil = null;
+        private static readonly object timeoutTrackingLock = new();
+        private const int MaxConsecutiveTimeouts = 5;  // 연속 5회 타임아웃 시 일시 중단
+        private const int SuspensionMinutes = 5;        // 5분간 중단
+
         /// <summary>
         /// 현재 활성화된 브라우저 창에서 URL을 추출합니다.
         /// </summary>
@@ -63,6 +78,26 @@ namespace YEJI_AW_Client
         {
             try
             {
+                // Circuit Breaker 패턴: 연속 타임아웃 발생 시 일시 중단
+                lock (timeoutTrackingLock)
+                {
+                    if (suspendedUntil.HasValue)
+                    {
+                        if (DateTime.Now < suspendedUntil.Value)
+                        {
+                            // 아직 중단 기간 중
+                            return null;
+                        }
+                        else
+                        {
+                            // 중단 기간 종료 - 재시도 허용
+                            suspendedUntil = null;
+                            consecutiveTimeouts = 0;
+                            ClientLogger.LogAgent("Browser monitoring resumed after suspension period.", "INF");
+                        }
+                    }
+                }
+
                 IntPtr hwnd = GetForegroundWindow();
                 if (hwnd == IntPtr.Zero)
                     return null;
@@ -78,9 +113,20 @@ namespace YEJI_AW_Client
                 if (!IsSupportedBrowser(processName))
                     return null;
 
-                string? automationUrl = TryGetUrlFromUiAutomation(hwnd, processName);
+                // Chrome인 경우 버전 체크 (최초 1회만 로그 기록)
+                if (processName.Equals("chrome", StringComparison.OrdinalIgnoreCase))
+                {
+                    GetBrowserVersion(processName); // 버전 정보 캐싱 및 로그 기록
+                }
+
+                string? automationUrl = TryGetUrlFromUiAutomationWithTimeout(hwnd, processName);
                 if (!string.IsNullOrWhiteSpace(automationUrl))
                 {
+                    // 성공 시 타임아웃 카운터 리셋
+                    lock (timeoutTrackingLock)
+                    {
+                        consecutiveTimeouts = 0;
+                    }
                     return automationUrl;
                 }
 
@@ -140,6 +186,66 @@ namespace YEJI_AW_Client
             PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_LEFT), IntPtr.Zero);
             PostMessage(hwnd, WM_SYSKEYUP, new IntPtr(VK_MENU), IntPtr.Zero);
             return true;
+        }
+
+        /// <summary>
+        /// UI Automation을 사용한 URL 추출을 타임아웃과 함께 실행합니다.
+        /// Chrome 구버전에서 발생할 수 있는 멈춤 현상을 방지합니다.
+        /// </summary>
+        private static string? TryGetUrlFromUiAutomationWithTimeout(IntPtr hwnd, string browserName)
+        {
+            using var cts = new CancellationTokenSource();
+            try
+            {
+                // Task를 사용하여 타임아웃 적용
+                var task = Task.Run(() => TryGetUrlFromUiAutomation(hwnd, browserName), cts.Token);
+
+                if (task.Wait(UiAutomationTimeoutMs))
+                {
+                    return task.Result;
+                }
+                else
+                {
+                    // 타임아웃 발생 - 작업 취소 시도
+                    cts.Cancel();
+
+                    // 연속 타임아웃 추적 (Circuit Breaker 패턴)
+                    lock (timeoutTrackingLock)
+                    {
+                        consecutiveTimeouts++;
+
+                        if (consecutiveTimeouts >= MaxConsecutiveTimeouts)
+                        {
+                            suspendedUntil = DateTime.Now.AddMinutes(SuspensionMinutes);
+                            ClientLogger.LogAgent(
+                                $"Browser monitoring suspended for {SuspensionMinutes} minutes due to {consecutiveTimeouts} consecutive timeouts. " +
+                                $"This usually indicates browser compatibility issues. Consider updating {browserName} to the latest version.",
+                                "WRN");
+                        }
+                        else
+                        {
+                            // 로그 기록 (Chrome 구버전 호환성 문제 가능성)
+                            ClientLogger.LogAgent(
+                                $"Browser URL extraction timed out for {browserName} (timeout #{consecutiveTimeouts}). " +
+                                $"Consider updating browser to latest version.",
+                                "WRN");
+                        }
+                    }
+
+                    return null;
+                }
+            }
+            catch (AggregateException ex)
+            {
+                // Task 내부 예외 처리
+                ClientLogger.LogAgent($"Browser URL extraction failed for {browserName}: {ex.InnerException?.Message}", "WRN");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Browser URL extraction error for {browserName}: {ex.Message}", "WRN");
+                return null;
+            }
         }
 
         private static string? TryGetUrlFromUiAutomation(IntPtr hwnd, string browserName)
@@ -412,6 +518,139 @@ namespace YEJI_AW_Client
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// 브라우저 버전을 가져옵니다. (Chrome 호환성 문제 진단용)
+        /// </summary>
+        private static string? GetBrowserVersion(string processName)
+        {
+            try
+            {
+                lock (versionCacheLock)
+                {
+                    // 캐시에 있으면 반환
+                    if (browserVersionCache.TryGetValue(processName, out string? cachedVersion))
+                    {
+                        return cachedVersion;
+                    }
+                }
+
+                // Chrome 실행 파일 경로 찾기
+                var processes = Process.GetProcessesByName(processName);
+                if (processes.Length == 0)
+                    return null;
+
+                try
+                {
+                    // 첫 번째 프로세스에서 버전 정보 가져오기
+                    string? filePath = processes[0].MainModule?.FileName;
+
+                    if (string.IsNullOrEmpty(filePath) || !System.IO.File.Exists(filePath))
+                        return null;
+
+                    var versionInfo = FileVersionInfo.GetVersionInfo(filePath);
+                    string version = versionInfo.FileVersion ?? versionInfo.ProductVersion ?? "Unknown";
+
+                    // 캐시에 저장
+                    lock (versionCacheLock)
+                    {
+                        browserVersionCache[processName] = version;
+                    }
+
+                    // Chrome인 경우 버전 로그 기록
+                    if (processName.Equals("chrome", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ClientLogger.LogAgent($"Chrome browser version detected: {version}", "INF");
+                    }
+
+                    return version;
+                }
+                finally
+                {
+                    // 모든 프로세스 핸들 정리
+                    foreach (var proc in processes)
+                    {
+                        proc.Dispose();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Failed to get browser version for {processName}: {ex.Message}", "DBG");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Chrome 버전이 최소 요구 버전보다 낮은지 확인합니다.
+        /// 구버전 Chrome에서 UI Automation 호환성 문제가 있을 수 있습니다.
+        /// </summary>
+        public static bool IsOutdatedChromeVersion(int minMajorVersion = 120)
+        {
+            try
+            {
+                string? version = GetBrowserVersion("chrome");
+                if (string.IsNullOrEmpty(version))
+                    return false;
+
+                // 버전 문자열에서 메이저 버전 추출 (예: "120.0.6099.130" -> 120)
+                string[] parts = version.Split('.');
+                if (parts.Length > 0 && int.TryParse(parts[0], out int majorVersion))
+                {
+                    if (majorVersion < minMajorVersion)
+                    {
+                        ClientLogger.LogAgent($"Chrome version {version} is outdated (minimum recommended: {minMajorVersion}). Please update to latest version to avoid compatibility issues.", "WRN");
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Failed to check Chrome version: {ex.Message}", "DBG");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 브라우저 모니터링이 현재 중단 상태인지 확인합니다.
+        /// Circuit Breaker 패턴에 의해 연속 타임아웃 발생 시 일시 중단됩니다.
+        /// </summary>
+        public static bool IsBrowserMonitoringSuspended()
+        {
+            lock (timeoutTrackingLock)
+            {
+                if (suspendedUntil.HasValue && DateTime.Now < suspendedUntil.Value)
+                {
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 브라우저 모니터링 상태 정보를 반환합니다. (진단용)
+        /// </summary>
+        public static string GetMonitoringStatus()
+        {
+            lock (timeoutTrackingLock)
+            {
+                if (suspendedUntil.HasValue && DateTime.Now < suspendedUntil.Value)
+                {
+                    var remainingTime = suspendedUntil.Value - DateTime.Now;
+                    return $"Suspended (resumes in {remainingTime.TotalMinutes:F1} minutes, {consecutiveTimeouts} consecutive timeouts)";
+                }
+                else if (consecutiveTimeouts > 0)
+                {
+                    return $"Active (warning: {consecutiveTimeouts} recent timeout(s))";
+                }
+                else
+                {
+                    return "Active (healthy)";
+                }
+            }
         }
     }
 }
