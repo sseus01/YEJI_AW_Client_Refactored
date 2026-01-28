@@ -208,6 +208,7 @@ namespace YEJI_AW_Client
         private ManagerNotificationListForm? managerNotificationListForm;
 
         private bool isManagerUser;
+        private bool hasHistoryViewPermission;
 
         private Timer? employeeOvertimeStatusTimer;
         private bool isCheckingEmployeeOvertimeStatus;
@@ -3767,6 +3768,10 @@ namespace YEJI_AW_Client
                 await using var stream = await response.Content.ReadAsStreamAsync();
                 var mgr = await JsonSerializer.DeserializeAsync<ManagerInfoResponse>(stream, JsonOptions);
 
+                // 이력조회 권한: Manager 정보가 있거나 Permissions가 있으면 조직 이력 보기 권한이 있음
+                hasHistoryViewPermission = mgr?.Success == true
+                    && ((mgr.Manager != null) || (mgr.Permissions != null && mgr.Permissions.Count > 0));
+
                 // 권한 체크: IsApprovalManager가 true이고 ApprovalManagerId가 null이 아닐 때만 승인 권한 있음
                 // Manager 객체가 있어도 IsApprovalManager가 false이면 이력조회 권한만 있는 것임
                 bool isManager = mgr?.Success == true
@@ -4194,9 +4199,9 @@ namespace YEJI_AW_Client
             // 일반 사용자: 본인 이력, 기본 당일
             var history = await FetchIdleHistoryForDateRangeAsync(employeeId, GetCurrentDate(), GetCurrentDate());
 
-            // 관리자인 경우 조직 이력 보기 버튼을 추가하여 조직 전체 이력을 볼 수 있게 함
+            // 이력조회 권한이 있는 경우 조직 이력 보기 버튼을 추가하여 조직 전체 이력을 볼 수 있게 함
             Action? onViewOrgHistory = null;
-            if (isManagerUser)
+            if (hasHistoryViewPermission)
             {
                 onViewOrgHistory = () =>
                 {
@@ -4206,7 +4211,7 @@ namespace YEJI_AW_Client
                 };
             }
 
-            var form = new IdleHistoryForm(history, isManagerUser, onViewOrgHistory);
+            var form = new IdleHistoryForm(history, hasHistoryViewPermission, onViewOrgHistory);
             ShowTrayMenuForm(form);
             form.Dispose(); // ShowDialog() is synchronous, so this happens after the form closes
         }

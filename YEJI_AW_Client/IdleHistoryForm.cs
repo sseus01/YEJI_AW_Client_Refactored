@@ -7,14 +7,14 @@ namespace YEJI_AW_Client
 {
     public partial class IdleHistoryForm : Form
     {
-        private readonly bool isManager;
+        private readonly bool hasHistoryViewPermission;
         private readonly Action? onViewOrgHistory;
         private Font? headerFont;
         private Font? buttonFont;
 
-        public IdleHistoryForm(List<IdleEventData> history, bool isManager = false, Action? onViewOrgHistory = null)
+        public IdleHistoryForm(List<IdleEventData> history, bool hasHistoryViewPermission = false, Action? onViewOrgHistory = null)
         {
-            this.isManager = isManager;
+            this.hasHistoryViewPermission = hasHistoryViewPermission;
             this.onViewOrgHistory = onViewOrgHistory;
             InitializeComponent();
 
@@ -41,7 +41,7 @@ namespace YEJI_AW_Client
 
             ImproveDataGridViewStyle();
 
-            if (isManager && onViewOrgHistory != null)
+            if (hasHistoryViewPermission && onViewOrgHistory != null)
             {
                 AddOrgHistoryButton();
             }
