@@ -121,7 +121,7 @@ namespace YEJI_AW_Client
                 {
                     awayReasons = localReasons;
                     UpdateReasonCache(awayReasons);
-                    MessageBox.Show("네트워크가 불안정하여 저장된 사유 목록을 불러옵니다.");
+                    MessageBox.Show(this, "네트워크가 불안정하여 저장된 사유 목록을 불러옵니다.");
                 }
                 else
                 {
@@ -137,7 +137,7 @@ namespace YEJI_AW_Client
                         }
                     };
 
-                    MessageBox.Show("사유 목록을 불러오지 못했습니다. 네트워크 상태를 확인해주세요. (기타 선택 가능)");
+                    MessageBox.Show(this, "사유 목록을 불러오지 못했습니다. 네트워크 상태를 확인해주세요. (기타 선택 가능)");
                 }
             }
 
@@ -217,7 +217,7 @@ namespace YEJI_AW_Client
         {
             if (awayReasons.Count == 0)
             {
-                MessageBox.Show("사유 목록을 불러오는 중입니다. 잠시 후 다시 시도해주세요.");
+                MessageBox.Show(this, "사유 목록을 불러오는 중입니다. 잠시 후 다시 시도해주세요.");
                 return;
             }
 
@@ -248,7 +248,7 @@ namespace YEJI_AW_Client
 
             if (string.IsNullOrEmpty(level1) || string.IsNullOrEmpty(level2) || string.IsNullOrEmpty(level3))
             {
-                MessageBox.Show("사유를 모두 선택하세요.");
+                MessageBox.Show(this, "사유를 모두 선택하세요.");
                 return;
             }
 
@@ -270,7 +270,7 @@ namespace YEJI_AW_Client
             }
             else if (string.IsNullOrWhiteSpace(DetailReason))
             {
-                MessageBox.Show("사유를 입력해주세요.");
+                MessageBox.Show(this, "사유를 입력해주세요.");
                 return;
             }
 
@@ -285,7 +285,7 @@ namespace YEJI_AW_Client
         {
             if (!isSaved)
             {
-                MessageBox.Show("사유를 선택 및 입력 후 저장해야 합니다.");
+                MessageBox.Show(this, "사유를 선택 및 입력 후 저장해야 합니다.");
                 e.Cancel = true;
             }
         }

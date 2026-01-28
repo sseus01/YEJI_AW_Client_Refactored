@@ -3039,7 +3039,7 @@ namespace YEJI_AW_Client
             {
                 ClientLogger.LogAgent($"Showing idle reason popup for {start:HH:mm:ss}-{end:HH:mm:ss}.", "DBG");
                 using IdleReasonForm form = new IdleReasonForm(start, end, ServerBaseUrl);
-                var result = form.ShowDialog();
+                var result = form.ShowDialog(this);
 
                 if (result == DialogResult.OK)
                 {
@@ -4396,10 +4396,24 @@ namespace YEJI_AW_Client
             {
                 notifyIcon.ContextMenuStrip = trayMenu;
                 notifyIcon.Visible = true;
+
+                // 왼쪽 클릭 시 트레이 아이콘 근처에 메뉴를 표시하도록 이벤트 핸들러 추가
+                notifyIcon.MouseClick -= NotifyIcon_MouseClick;
+                notifyIcon.MouseClick += NotifyIcon_MouseClick;
             }
 
             // 관리자 여부 비동기 확인: 관리자라면 관리용 메뉴 추가
             _ = CheckAndAddManagerMenuAsync();
+        }
+
+        private void NotifyIcon_MouseClick(object? sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left && trayMenu != null)
+            {
+                // 트레이 아이콘 근처에 메뉴를 표시
+                // ContextMenuStrip.Show를 사용하여 현재 커서 위치에 메뉴 표시
+                trayMenu.Show(Cursor.Position);
+            }
         }
 
         private void RestoreNotifyIcon()
