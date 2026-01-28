@@ -3829,10 +3829,10 @@ namespace YEJI_AW_Client
                     return;
                 }
 
-                // 10분마다 알림을 반복적으로 표시 (확인하지 않은 경우)
+                // 5분마다 알림을 반복적으로 표시 (확인하지 않은 경우)
                 bool isNewSet = !newIds.SetEquals(lastAlertedManagerNotificationIds);
                 bool shouldShowReminder = lastManagerNotificationAlertTime != DateTime.MinValue
-                    && (DateTime.Now - lastManagerNotificationAlertTime) >= TimeSpan.FromMinutes(10);
+                     && (DateTime.Now - lastManagerNotificationAlertTime) >= TimeSpan.FromMinutes(5);
 
                 if (forceShowPopup || isNewSet || shouldShowReminder)
                 {

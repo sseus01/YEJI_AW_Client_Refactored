@@ -300,8 +300,11 @@ namespace YEJI_AW_Client
             {
                 bool hasValidRequest = !string.IsNullOrWhiteSpace(row.RequestId);
                 string status = (row.RawRequestStatus ?? string.Empty).Trim().ToUpperInvariant();
-                bool approveEnabled = hasValidRequest && (status == "PENDING" || status == "REJECTED" || string.IsNullOrWhiteSpace(status));
-                bool rejectEnabled = hasValidRequest && (status == "PENDING" || status == "APPROVED" || string.IsNullOrWhiteSpace(status));
+                bool isWorkDatePassed = IsWorkDatePassed(row.WorkDate);
+
+                // 연장근무일자가 지난 경우 승인/반려 불가
+                bool approveEnabled = hasValidRequest && !isWorkDatePassed && (status == "PENDING" || status == "REJECTED" || string.IsNullOrWhiteSpace(status));
+                bool rejectEnabled = hasValidRequest && !isWorkDatePassed && (status == "PENDING" || status == "APPROVED" || string.IsNullOrWhiteSpace(status));
                 btnApprove.Enabled = approveEnabled;
                 btnReject.Enabled = rejectEnabled;
             }
@@ -599,6 +602,23 @@ namespace YEJI_AW_Client
             return normalized != STATUS_APPROVED && normalized != STATUS_REJECTED;
         }
 
+        private static bool IsWorkDatePassed(string workDate)
+        {
+            // 연장근무일자가 지난 경우 true를 반환
+            if (string.IsNullOrWhiteSpace(workDate))
+            {
+                return false; // 날짜 정보가 없으면 제한하지 않음
+            }
+
+            if (DateTime.TryParse(workDate, out var workDateTime))
+            {
+                // 오늘 날짜와 비교 (시간 부분 제외)
+                return workDateTime.Date < DateTime.Today;
+            }
+
+            return false; // 파싱 실패 시 제한하지 않음
+        }
+
         private async System.Threading.Tasks.Task MarkNotificationsViewedAsync(IEnumerable<string> ids)
         {
             foreach (var id in ids.Where(i => !string.IsNullOrWhiteSpace(i)))
@@ -624,6 +644,13 @@ namespace YEJI_AW_Client
             if (dgvNotifications.CurrentRow?.DataBoundItem is not ManagerNotificationRow row || string.IsNullOrWhiteSpace(row.RequestId))
             {
                 MessageBox.Show("처리할 신청을 선택해주세요.");
+                return;
+            }
+
+            // 연장근무일자가 지난 경우 승인/반려 불가
+            if (IsWorkDatePassed(row.WorkDate))
+            {
+                MessageBox.Show("연장근무일자가 지난 신청은 승인 또는 반려 처리할 수 없습니다.", "처리 불가", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
