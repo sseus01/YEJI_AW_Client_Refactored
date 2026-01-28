@@ -3719,6 +3719,23 @@ namespace YEJI_AW_Client
             }
         }
 
+        /// <summary>
+        /// 연장근무승인 결재 권한 체크 및 관리자 메뉴 활성화
+        /// 
+        /// 권한 체크 방법:
+        /// 1. API 호출: GET /api/client/manager-info?employeeId={employeeId}
+        /// 2. 응답 확인: ManagerInfoResponse 객체
+        ///    - Success: true (API 호출 성공)
+        ///    - Manager: not null (관리자 정보 존재)
+        ///    - Manager.IsApprovalManager: true (승인관리자임)
+        ///    - Manager.ApprovalManagerId: not null (승인관리자 ID 존재)
+        /// 3. 권한 판정: mgr?.Success == true && mgr.Manager?.IsApprovalManager == true && mgr.Manager?.ApprovalManagerId != null
+        /// 
+        /// 참고:
+        /// - Manager 필드가 있어도 IsApprovalManager가 false이면 이력조회 권한만 있음
+        /// - Permissions 필드: 이력조회 권한 정보 (승인 권한과 무관)
+        /// </summary>
+        /// 
         private async Task CheckAndAddManagerMenuAsync()
         {
             try
@@ -3727,6 +3744,7 @@ namespace YEJI_AW_Client
                 if (string.IsNullOrEmpty(emp))
                     return;
 
+                // API 호출: 연장근무 승인관리자 정보 조회
                 string url = $"{ServerBaseUrl}/api/client/manager-info?employeeId={Uri.EscapeDataString(emp)}";
                 using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
                 if (!response.IsSuccessStatusCode)
@@ -3734,7 +3752,13 @@ namespace YEJI_AW_Client
 
                 await using var stream = await response.Content.ReadAsStreamAsync();
                 var mgr = await JsonSerializer.DeserializeAsync<ManagerInfoResponse>(stream, JsonOptions);
-                bool isManager = mgr?.Success == true && mgr.Manager != null;
+
+                // 권한 체크: IsApprovalManager가 true이고 ApprovalManagerId가 null이 아닐 때만 승인 권한 있음
+                // Manager 객체가 있어도 IsApprovalManager가 false이면 이력조회 권한만 있는 것임
+                bool isManager = mgr?.Success == true
+                    && mgr.Manager?.IsApprovalManager == true
+                    && mgr.Manager?.ApprovalManagerId != null;
+
                 isManagerUser = isManager;
                 if (isManager)
                 {
@@ -4698,6 +4722,9 @@ namespace YEJI_AW_Client
         [JsonPropertyName("message")] public string? Message { get; set; } = string.Empty;
     }
 
+    /// <summary>
+    /// 이력조회 권한 정보 (연장근무 승인 권한과 무관)
+    /// </summary> 
     public class ManagerPermission
     {
         public string Catcode { get; set; } = string.Empty;
@@ -4705,17 +4732,43 @@ namespace YEJI_AW_Client
         public string Catcode3 { get; set; } = string.Empty;
     }
 
+    /// <summary>
+    /// 연장근무 승인관리자 정보
+    /// </summary>
     public class ManagerInfoDto
     {
         public string EmployeeId { get; set; } = string.Empty;
         public string Username { get; set; } = string.Empty;
         public string DisplayName { get; set; } = string.Empty;
+        public string EmployeeName { get; set; } = string.Empty;
+        public string DefaultOrgCode { get; set; } = string.Empty;
+
+        /// <summary>연장근무 승인관리자 여부 (승인 권한 판정에 필요)</summary>
+        public bool IsApprovalManager { get; set; }
+
+        /// <summary>승인관리자 ID (승인 권한 판정에 필요)</summary>
+        public int? ApprovalManagerId { get; set; }
     }
+
+    /// <summary>
+    /// 관리자 정보 API 응답
+    /// 
+    /// 연장근무승인 결재 권한 체크 방법:
+    /// - Success가 true이고 Manager가 null이 아니고
+    /// - Manager.IsApprovalManager가 true이고 Manager.ApprovalManagerId가 null이 아니면 → 연장근무 승인 권한 있음
+    /// - Manager가 있어도 IsApprovalManager가 false이면 → 이력조회 권한만 있음
+    /// - Permissions는 이력조회 권한으로 연장근무 승인 권한과 무관함
+    /// </summary>
 
     public class ManagerInfoResponse
     {
+        /// <summary>API 호출 성공 여부</summary>
         public bool Success { get; set; }
+
+        /// <summary>관리자 정보 (Manager.IsApprovalManager가 true이고 Manager.ApprovalManagerId가 null이 아니면 승인 권한 있음)</summary>
         public ManagerInfoDto? Manager { get; set; }
+
+        /// <summary>이력조회 권한 정보 (연장근무 승인 권한과 무관)</summary>
         public List<ManagerPermission>? Permissions { get; set; }
     }
 
