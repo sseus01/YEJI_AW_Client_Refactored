@@ -148,6 +148,7 @@ namespace YEJI_AW_Client
 
         private DateTime suspendStartTime = DateTime.MinValue;
         private DateTime sessionLockStartTime = DateTime.MinValue;
+        private DateTime lastInputBeforeLock = DateTime.MinValue;
         private bool wasInLunchBreak = false;
 
         private static readonly HttpClient HttpClient = new HttpClient
@@ -457,7 +458,8 @@ namespace YEJI_AW_Client
             if (IsSessionLocked())
             {
                 sessionLockStartTime = GetCurrentDateTime();
-                ClientLogger.LogAgent($"Session is locked at app start, initializing sessionLockStartTime to {sessionLockStartTime:HH:mm:ss}.", "DBG");
+                lastInputBeforeLock = lastInputTime;
+                ClientLogger.LogAgent($"Session is locked at app start, initializing sessionLockStartTime to {sessionLockStartTime:HH:mm:ss}, lastInputBeforeLock={lastInputBeforeLock:HH:mm:ss}.", "DBG");
             }
         }
 
@@ -2778,8 +2780,10 @@ namespace YEJI_AW_Client
             {
                 // 화면 잠금 시작 (Windows+L 등)
                 sessionLockStartTime = GetCurrentDateTime();
+                // 화면 잠금 시점의 lastInputTime을 보존 (노트북 덮개 닫기 등의 경우 실제 idle 시작 시간을 추적하기 위함)
+                lastInputBeforeLock = lastInputTime;
                 ClientLogger.LogService($"Session locked at {sessionLockStartTime:HH:mm:ss}.", "DBG");
-                ClientLogger.LogAgent($"Session lock detected, sessionLockStartTime set to {sessionLockStartTime:HH:mm:ss}.", "DBG");
+                ClientLogger.LogAgent($"Session lock detected, sessionLockStartTime set to {sessionLockStartTime:HH:mm:ss}, lastInputBeforeLock={lastInputBeforeLock:HH:mm:ss}.", "DBG");
                 await SendPcEventAsync("SESSION_LOCK");
             }
             else if (e.Reason == SessionSwitchReason.SessionUnlock)
@@ -2810,35 +2814,61 @@ namespace YEJI_AW_Client
                 if (lockDuringWork || unlockDuringWork)
                 {
                     // 잠금/해제 중 하나라도 근무시간이면 자리비움으로 처리
-                    // 실제 idle 시작 시간은 lastInputTime (화면 잠금보다 이전일 수 있음)
-                    // 예: 10:00에 마지막 입력, 10:05에 화면 잠금 (자리 비운 후 나중에 잠금), 10:15에 해제
-                    //     → 실제 idle은 10:00-10:15 (15분)
-                    DateTime actualIdleStart = lastInputTime < sessionLockStartTime ? lastInputTime : sessionLockStartTime;
+                    // 실제 idle 시작 시간은 lastInputBeforeLock (화면 잠금 전 마지막 입력 시간)
+                    // 노트북 덮개를 닫는 경우: 예) 9:30에 마지막 입력 후 덮개 닫음, 9:50에 덮개 열고 잠금 해제
+                    //     → sessionLockStartTime은 9:50경 (깨어난 시각), lastInputBeforeLock은 9:30경
+                    //     → 실제 idle은 9:30-9:50 (20분)
+                    DateTime preservedLastInput = lastInputBeforeLock != DateTime.MinValue ? lastInputBeforeLock : lastInputTime;
+                    DateTime actualIdleStart = preservedLastInput < sessionLockStartTime ? preservedLastInput : sessionLockStartTime;
 
-                    ClientLogger.LogAgent($"Idle interval detected during session lock/unlock. Last input: {lastInputTime:HH:mm:ss}, Lock: {sessionLockStartTime:HH:mm:ss}, Unlock: {unlockTime:HH:mm:ss}, Actual idle start: {actualIdleStart:HH:mm:ss}.", "DBG");
-                    await HandleIdleIntervalAsync(actualIdleStart, unlockTime);
+                    ClientLogger.LogAgent($"Idle interval detected during session lock/unlock. Last input before lock: {preservedLastInput:HH:mm:ss}, Lock: {sessionLockStartTime:HH:mm:ss}, Unlock: {unlockTime:HH:mm:ss}, Actual idle start: {actualIdleStart:HH:mm:ss}.", "DBG");
                 }
                 else
                 {
                     ClientLogger.LogAgent($"No work time overlap for session lock/unlock, skipping idle interval.", "DBG");
                 }
 
-                // 세션 잠금 해제 시에는 사용자가 비밀번호를 입력했으므로 실제 입력이 있음
-                // 따라서 unlockTime 또는 실제 입력 시간으로 갱신
-                DateTime actualInputTime = GetLastInputTime();
+                // 세션 잠금 해제 후 lastInputTime 갱신 로직
+                // 절전/복귀와 유사하게, GetLastInputTime()이 unlock 시각과 가까우면 시스템 초기화로 판단
+                // 이 경우 잠금 전 lastInputTime을 보존해야 함
+                DateTime estimatedLastInput = GetLastInputTime();
 
-                // 실제 입력이 unlock 시간과 가까우면 (임계값 이내) 실제 입력 시간 사용
-                if (Math.Abs((unlockTime - actualInputTime).TotalSeconds) < ResumeInputDetectionThresholdSeconds)
+                if (Math.Abs((unlockTime - estimatedLastInput).TotalSeconds) < ResumeInputDetectionThresholdSeconds)
                 {
-                    lastInputTime = actualInputTime;
-                    ClientLogger.LogService($"Updated lastInputTime to actual input after unlock: {lastInputTime:HH:mm:ss}", "DBG");
+                    // unlock 직후이므로 실제 사용자 입력이 아닌 시스템 초기화
+                    // lastInputTime을 잠금 전 값 또는 sessionLockStartTime 이전 값으로 유지
+                    if (lastInputBeforeLock != DateTime.MinValue)
+                    {
+                        if (lastInputBeforeLock > sessionLockStartTime)
+                        {
+                            // lastInputBeforeLock이 잠금 시작보다 나중이면 이상한 상태
+                            // sessionLockStartTime보다 약간 이전으로 보정
+                            ClientLogger.LogService($"ANOMALY DETECTED: lastInputBeforeLock ({lastInputBeforeLock:HH:mm:ss}) > sessionLockStartTime ({sessionLockStartTime:HH:mm:ss}). Adjusting to {sessionLockStartTime.AddSeconds(-LastInputTimeAdjustmentOffsetSeconds):HH:mm:ss}.", "WARN");
+                            lastInputTime = sessionLockStartTime.AddSeconds(-LastInputTimeAdjustmentOffsetSeconds);
+                        }
+                        else
+                        {
+                            // 잠금 전 값 사용
+                            lastInputTime = lastInputBeforeLock;
+                            ClientLogger.LogService($"Preserving lastInputTime from before lock: {lastInputTime:HH:mm:ss}", "DBG");
+                        }
+                    }
+                    else
+                    {
+                        // lastInputBeforeLock이 없으면 unlock 시간 사용 (보수적 접근)
+                        lastInputTime = unlockTime;
+                        ClientLogger.LogService($"No preserved lastInputBeforeLock, using unlock time: {lastInputTime:HH:mm:ss}", "DBG");
+                    }
                 }
                 else
                 {
-                    // 임계값 이상 차이나면 unlock 시간을 사용 (보수적 접근)
-                    lastInputTime = unlockTime;
-                    ClientLogger.LogService($"Updated lastInputTime to unlock time: {lastInputTime:HH:mm:ss}", "DBG");
+                    // 실제 사용자 입력으로 보임 (임계값 이상 차이)
+                    lastInputTime = estimatedLastInput;
+                    ClientLogger.LogService($"Updated lastInputTime to actual input time: {lastInputTime:HH:mm:ss}", "DBG");
                 }
+
+                // 잠금 전 시간 초기화
+                lastInputBeforeLock = DateTime.MinValue;
 
                 isIdle = false;
                 hasShownPopup = false;
