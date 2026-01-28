@@ -3734,7 +3734,7 @@ namespace YEJI_AW_Client
 
                 await using var stream = await response.Content.ReadAsStreamAsync();
                 var mgr = await JsonSerializer.DeserializeAsync<ManagerInfoResponse>(stream, JsonOptions);
-                bool isManager = mgr?.Success == true && (mgr.Manager != null || (mgr.Permissions != null && mgr.Permissions.Count > 0));
+                bool isManager = mgr?.Success == true && mgr.Manager != null;
                 isManagerUser = isManager;
                 if (isManager)
                 {
