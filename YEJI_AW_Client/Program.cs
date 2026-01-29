@@ -38,6 +38,7 @@ namespace YEJI_AW_Client
                 return;
             }
 
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.ApplicationExit += (_, _) => TrayIconCleanup.Dispose();

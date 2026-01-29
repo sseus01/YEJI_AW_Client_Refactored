@@ -4513,9 +4513,29 @@ namespace YEJI_AW_Client
             if (e.Button == MouseButtons.Left && trayMenu != null)
             {
                 // 트레이 아이콘 근처에 메뉴를 표시
-                // ContextMenuStrip.Show를 사용하여 현재 커서 위치에 메뉴 표시
-                trayMenu.Show(Cursor.Position);
+                // ContextMenuStrip.Show를 사용하여 현재 커서 위치 기준으로 메뉴 표시
+                trayMenu.Show(GetTrayMenuLocation());
             }
+        }
+
+        private Point GetTrayMenuLocation()
+        {
+            var cursorPosition = Cursor.Position;
+            var screen = Screen.FromPoint(cursorPosition);
+            var workingArea = screen.WorkingArea;
+            var menuSize = trayMenu?.Size ?? Size.Empty;
+            if (menuSize.IsEmpty && trayMenu != null)
+            {
+                menuSize = trayMenu.GetPreferredSize(Size.Empty);
+            }
+
+            int x = Math.Min(cursorPosition.X, workingArea.Right - menuSize.Width);
+            int y = Math.Min(cursorPosition.Y, workingArea.Bottom - menuSize.Height);
+
+            x = Math.Max(workingArea.Left, x);
+            y = Math.Max(workingArea.Top, y);
+
+            return new Point(x, y);
         }
 
         private void RestoreNotifyIcon()
