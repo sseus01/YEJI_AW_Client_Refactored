@@ -50,6 +50,7 @@ namespace YEJI_AW_Client
         private const int UpdateRetryBaseDelaySeconds = 30;    // 재시도 기본 지연 (초, exponential backoff)
         private const int InstallerTimeoutMs = 5 * 60 * 1000;  // 설치 프로세스 최대 대기 시간 (5분)
         private const int LogFlushDelayMs = 100;               // 로그 플러시 대기 시간 (밀리초)
+        private const int InstallerInitDelayMs = 500;           // 인스톨러 초기화 대기 시간 (밀리초)
         private const string ApplicationName = "YEJI-On"; // 애플리케이션 이름
 
         // PC 종료 알림 관련 상수
@@ -1231,6 +1232,11 @@ namespace YEJI_AW_Client
                 }
 
                 ClientLogger.LogUpdate($"INSTALLER LAUNCHED: PID={installerProcess.Id}, ProcessName={installerProcess.ProcessName}");
+
+                // 인스톨러 프로세스가 초기화될 시간 제공
+                // 일부 시스템에서 앱이 너무 빨리 종료되면 인스톨러가 제대로 시작하지 못할 수 있음
+                await Task.Delay(InstallerInitDelayMs);
+
                 ClientLogger.LogUpdate($"Installation will proceed in background. Current application will now exit.");
                 ClientLogger.LogUpdate($"After installation, new version should auto-start via Inno Setup script.");
                 ClientLogger.LogUpdate($"To troubleshoot installation issues, check: {logPath}");
@@ -1268,9 +1274,32 @@ namespace YEJI_AW_Client
                   "설치 파일 실행 중 오류가 발생했습니다.\n\n시스템 관리자에게 문의하세요.",
                   ToolTipIcon.Error,
                   timeoutMs: 10000);
+
+                // 다운로드된 임시 인스톨러 파일 삭제
+                if (File.Exists(tempFilePath))
+                {
+                    try
+                    {
+                        File.Delete(tempFilePath);
+                        ClientLogger.LogUpdate($"Cleaned up temporary installer file: {tempFilePath}", "DBG");
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        ClientLogger.LogUpdate($"Failed to cleanup temp file: {tempFilePath}", "WRN", cleanupEx);
+                    }
+                }
+
+                // Pending update marker 삭제
                 if (File.Exists(pendingUpdateMarkerFile))
                 {
-                    File.Delete(pendingUpdateMarkerFile);
+                    try
+                    {
+                        File.Delete(pendingUpdateMarkerFile);
+                    }
+                    catch (Exception markerEx)
+                    {
+                        ClientLogger.LogUpdate($"Failed to delete pending update marker", "WRN", markerEx);
+                    }
                 }
                 isUpdatingClient = false;
             }
