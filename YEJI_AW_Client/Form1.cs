@@ -2851,6 +2851,7 @@ namespace YEJI_AW_Client
                     DateTime actualIdleStart = preservedLastInput < sessionLockStartTime ? preservedLastInput : sessionLockStartTime;
 
                     ClientLogger.LogAgent($"Idle interval detected during session lock/unlock. Last input before lock: {preservedLastInput:HH:mm:ss}, Lock: {sessionLockStartTime:HH:mm:ss}, Unlock: {unlockTime:HH:mm:ss}, Actual idle start: {actualIdleStart:HH:mm:ss}.", "DBG");
+                    await HandleIdleIntervalAsync(actualIdleStart, unlockTime);
                 }
                 else
                 {
