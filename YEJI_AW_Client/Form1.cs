@@ -3119,9 +3119,34 @@ namespace YEJI_AW_Client
             // Watcher가 120초 타임아웃으로 앱을 재시작하는 것을 방지
             heartbeatWriter?.ForceUpdate();
 
+            string idleEventId = Guid.NewGuid().ToString();
+            var idleEvent = new IdleEventData
+            {
+                Id = idleEventId,
+                EmployeeId = employeeId,
+                EmployeeName = employeeName,
+                ComputerName = computerName,
+                ComputerIP = computerIP,
+                IdleStartTime = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                IdleEndTime = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                ReasonCategory = "자리비움",
+                ReasonDetail = "사유 미입력",
+                ReasonCode = "Z00",
+                ReasonLevel1 = "자리비움",
+                ReasonLevel2 = "미입력",
+                ReasonLevel3 = "미입력"
+            };
+
             try
             {
                 ClientLogger.LogAgent($"Showing idle reason popup for {start:HH:mm:ss}-{end:HH:mm:ss}.", "DBG");
+
+                bool initialSendSuccess = await SendIdleEventAsync(idleEvent);
+                if (!initialSendSuccess)
+                {
+                    ClientLogger.LogAgent($"Idle default event saved locally due to server failure ({start:HH:mm}-{end:HH:mm}).", "Err");
+                }
+
                 using IdleReasonForm form = new IdleReasonForm(start, end, ServerBaseUrl);
                 var result = form.ShowDialog(this);
 
@@ -3153,22 +3178,12 @@ namespace YEJI_AW_Client
                         reasonDetail = "세부 사유 미입력";
                     }
 
-                    var idleEvent = new IdleEventData
-                    {
-                        Id = Guid.NewGuid().ToString(),
-                        EmployeeId = employeeId,
-                        EmployeeName = employeeName,
-                        ComputerName = computerName,
-                        ComputerIP = computerIP,
-                        IdleStartTime = start.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                        IdleEndTime = end.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                        ReasonCategory = form.SelectedLevel1 ?? "",
-                        ReasonDetail = reasonDetail,
-                        ReasonCode = form.SelectedReasonCode ?? "",
-                        ReasonLevel1 = form.SelectedLevel1 ?? "",
-                        ReasonLevel2 = form.SelectedLevel2 ?? "",
-                        ReasonLevel3 = form.SelectedLevel3 ?? ""
-                    };
+                    idleEvent.ReasonCategory = form.SelectedLevel1 ?? "";
+                    idleEvent.ReasonDetail = reasonDetail;
+                    idleEvent.ReasonCode = form.SelectedReasonCode ?? "";
+                    idleEvent.ReasonLevel1 = form.SelectedLevel1 ?? "";
+                    idleEvent.ReasonLevel2 = form.SelectedLevel2 ?? "";
+                    idleEvent.ReasonLevel3 = form.SelectedLevel3 ?? "";
 
                     ClientLogger.LogAgent($"Idle reason captured ({idleEvent.ReasonDetail}) {start:HH:mm}-{end:HH:mm}.", "DBG");
                     bool success = await SendIdleEventAsync(idleEvent);
