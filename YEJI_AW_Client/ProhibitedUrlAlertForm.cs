@@ -20,7 +20,8 @@ namespace YEJI_AW_Client
             ShowInTaskbar = false;
             TopMost = true;
             BackColor = Color.FromArgb(240, 243, 249);
-            WindowState = FormWindowState.Maximized;
+
+            Bounds = ResolveAlertBounds(this.browserWindowHandle);
 
             dialogPanel = new Panel
             {
@@ -142,6 +143,23 @@ namespace YEJI_AW_Client
             AcceptButton = closeButton;
             Load += (_, _) => CenterDialogPanel();
             Resize += (_, _) => CenterDialogPanel();
+        }
+
+        private static Rectangle ResolveAlertBounds(IntPtr browserHandle)
+        {
+            if (browserHandle != IntPtr.Zero)
+            {
+                try
+                {
+                    return Screen.FromHandle(browserHandle).Bounds;
+                }
+                catch
+                {
+                    // 브라우저 핸들이 유효하지 않으면 기본 모니터로 폴백
+                }
+            }
+
+            return Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen;
         }
 
         private void CenterDialogPanel()
