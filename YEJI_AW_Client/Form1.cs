@@ -56,6 +56,7 @@ namespace YEJI_AW_Client
         // PC 종료 알림 관련 상수
         private const int OvertimeAlertMinutesBeforeEnd = 5;    // 연장근무 종료 몇 분 전에 알림 표시
         private const int AlertTimeChangeThresholdSeconds = 1;   // 알림 시각 변경 감지 임계값 (초)
+        private const int StandardShutdownCountdownMinutes = 3;    // 일반/후속 알림 시 강제 종료까지 카운트다운(분)
 
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
@@ -1784,8 +1785,8 @@ namespace YEJI_AW_Client
         private async Task ShowPcOffAlertAsync(DateTime now, DateTime offTime, bool triggeredAfterBoot, bool isFollowUpAlert, bool isOvertimeAlert = false)
         {
             // 연장근무 알림인 경우: offTime이 종료 시각이므로 그 시각에 PC 종료
-            // 일반 업무 종료/일시해제 후속 알림인 경우: 1분 후 PC 종료
-            ScheduleShutdown(isOvertimeAlert ? offTime : GetCurrentDateTime().AddMinutes(1));
+            // 일반 업무 종료/일시해제 후속 알림인 경우: 3분 후 PC 종료
+            ScheduleShutdown(isOvertimeAlert ? offTime : GetCurrentDateTime().AddMinutes(StandardShutdownCountdownMinutes));
 
             if (!pcOffCountInitializedForDay)
             {
@@ -1892,7 +1893,7 @@ namespace YEJI_AW_Client
                 if (remainingTempDisableCount <= 0)
                 {
                     extendButton.Visible = false;
-                    pcOffStatusLabel!.Text = "1분 후 PC가 강제종료됩니다.";
+                    pcOffStatusLabel!.Text = $"{StandardShutdownCountdownMinutes}분 후 PC가 강제종료됩니다.";
                     return;
                 }
 
@@ -1920,9 +1921,14 @@ namespace YEJI_AW_Client
 
             container.Controls.Add(messagePanel, 0, 0);
             container.Controls.Add(buttonPanel, 0, 1);
-            pcOffAlertForm.Controls.Add(container);
-            pcOffAlertForm.AcceptButton = closeButton;
+            pcOffAlertForm.Controls.Add(container);            
+            // 엔터 입력 시 실수로 확인이 눌리지 않도록, 일시해제신청 가능 시 해당 버튼을 기본 동작으로 지정
+            pcOffAlertForm.AcceptButton = extendButton.Visible ? extendButton : closeButton;
             pcOffAlertForm.CancelButton = closeButton;
+            if (extendButton.Visible)
+            {
+                pcOffAlertForm.ActiveControl = extendButton;
+            }
 
             pcOffAlertForm.FormClosed += (s, e) =>
             {
@@ -2604,13 +2610,20 @@ namespace YEJI_AW_Client
                     {
                         if (isIdle && !hasShownPopup)
                         {
-                            hasShownPopup = true;
                             DateTime idleEndTime = currentInputTime;
-                            ClientLogger.LogAgent($"Idle detected during work hours {idleStartTime:HH:mm:ss}-{idleEndTime:HH:mm:ss}.", "DBG");
-                            await HandleIdleIntervalAsync(idleStartTime, idleEndTime);                          
+                            hasShownPopup = true;
+                            // 현재 감지된 구간을 즉시 확정하고 상태를 먼저 리셋해야
+                            // 사용자가 사유창을 오래 열어두는 동안 발생한 다음 자리비움 구간도
+                            // 별도로 감지/처리할 수 있다.
                             isIdle = false;
                             idleStartedDuringWork = false;
+                            lastInputTime = currentInputTime;
+                            ClientLogger.LogAgent($"Idle detected during work hours {idleStartTime:HH:mm:ss}-{idleEndTime:HH:mm:ss}.", "DBG");
+                            await HandleIdleIntervalAsync(idleStartTime, idleEndTime);
+                            hasShownPopup = false;
+                            return;
                         }
+
                         lastInputTime = currentInputTime;
                     }
                     else
