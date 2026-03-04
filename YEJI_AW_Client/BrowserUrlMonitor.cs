@@ -18,6 +18,7 @@ namespace YEJI_AW_Client
     {
         // UI Automation 호출 타임아웃 (밀리초) - Chrome 구버전 호환성 문제 방지
         private const int UiAutomationTimeoutMs = 1000;
+        private const int EmailExtractionTimeoutMs = 2000;
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
 
@@ -273,7 +274,7 @@ namespace YEJI_AW_Client
 
                 using var cts = new CancellationTokenSource();
                 var task = Task.Run(() => ExtractEmailsFromUiAutomation(hwnd), cts.Token);
-                if (task.Wait(UiAutomationTimeoutMs))
+                if (task.Wait(EmailExtractionTimeoutMs))
                 {
                     return task.Result;
                 }
@@ -298,21 +299,27 @@ namespace YEJI_AW_Client
                 if (root == null)
                     return new List<string>();
 
-                var editCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit);
-                var textCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text);
-                var documentCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Document);
-                var condition = new OrCondition(editCondition, textCondition, documentCondition);
-
-                var elements = root.FindAll(TreeScope.Subtree, condition);
-                int maxScan = Math.Min(elements.Count, 350);
+                // 메일 수신자 토큰(UI chip)이 Text/Edit가 아닌 경우가 많아 전체 트리에서 Name/Value를 폭넓게 스캔
+                var elements = root.FindAll(TreeScope.Subtree, Condition.TrueCondition);
+                int maxScan = Math.Min(elements.Count, 1200);
                 for (int i = 0; i < maxScan; i++)
                 {
                     var element = elements[i];
-                    TryAddEmailsFromText(element.Current.Name, extracted);
 
-                    if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) && pattern is ValuePattern valuePattern)
+                    TryAddEmailsFromText(element.Current.Name, extracted);
+                    TryAddEmailsFromText(element.Current.HelpText, extracted);
+                    TryAddEmailsFromText(element.Current.ItemStatus, extracted);
+
+                    if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePatternObj) && valuePatternObj is ValuePattern valuePattern)
                     {
                         TryAddEmailsFromText(valuePattern.Current.Value, extracted);
+                    }
+
+                    if (element.TryGetCurrentPattern(LegacyIAccessiblePattern.Pattern, out var legacyObj) && legacyObj is LegacyIAccessiblePattern legacy)
+                    {
+                        TryAddEmailsFromText(legacy.Current.Name, extracted);
+                        TryAddEmailsFromText(legacy.Current.Value, extracted);
+                        TryAddEmailsFromText(legacy.Current.Description, extracted);
                     }
                 }
             }

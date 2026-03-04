@@ -232,9 +232,12 @@ namespace YEJI_AW_Client
         private string? lastAlertedEmailSignature;
         private DateTime lastAlertedEmailAt = DateTime.MinValue;
         private DateTime lastMailComposeCheckAt = DateTime.MinValue;
+        private DateTime lastProhibitedEmailSyncAt = DateTime.MinValue;
+        private bool isFetchingProhibitedEmails;
         private static readonly TimeSpan prohibitedAlertCooldown = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan prohibitedEmailAlertCooldown = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan mailComposeCheckInterval = TimeSpan.FromSeconds(3);
+        private static readonly TimeSpan prohibitedEmailSyncInterval = TimeSpan.FromMinutes(1);
         private Dictionary<string, string> lastKnownOvertimeStatuses = new();
 
         // 브라우저 모니터링 활성화 여부 (서버 설정에서 가져옴, 기본값: true)
@@ -733,6 +736,13 @@ namespace YEJI_AW_Client
 
         private async Task FetchProhibitedEmailsAsync()
         {
+            if (isFetchingProhibitedEmails)
+            {
+                return;
+            }
+
+            isFetchingProhibitedEmails = true;
+
             try
             {
                 var cache = LoadProhibitedEmailsCache() ?? new ProhibitedEmailsCache();
@@ -819,6 +829,7 @@ namespace YEJI_AW_Client
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToList();
 
+                    lastProhibitedEmailSyncAt = DateTime.Now;
                     ClientLogger.LogAgent($"[EMAIL] Synced prohibited emails: {apiResponse.Count} changes, total {prohibitedEmails.Count} emails in cache.", "DBG");
                     break;
                 }
@@ -836,8 +847,13 @@ namespace YEJI_AW_Client
                         .Where(e => !string.IsNullOrWhiteSpace(e))
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToList();
+                    lastProhibitedEmailSyncAt = DateTime.Now;
                     ClientLogger.LogAgent($"[EMAIL] Loaded {prohibitedEmails.Count} prohibited emails from local cache.", "DBG");
                 }
+            }
+            finally
+            {
+                isFetchingProhibitedEmails = false;
             }
         }
 
@@ -881,12 +897,23 @@ namespace YEJI_AW_Client
 
         private void CheckMailComposeRecipients(string currentUrl)
         {
-            if (string.IsNullOrWhiteSpace(currentUrl) || prohibitedEmails.Count == 0)
+            if (string.IsNullOrWhiteSpace(currentUrl))
             {
                 return;
             }
 
             if (!IsMailComposePage(currentUrl))
+            {
+                return;
+            }
+
+            // 메일 작성 화면에서는 이메일 금지목록을 빠르게 재동기화
+            if (!isFetchingProhibitedEmails && DateTime.Now - lastProhibitedEmailSyncAt >= prohibitedEmailSyncInterval)
+            {
+                _ = FetchProhibitedEmailsAsync();
+            }
+
+            if (prohibitedEmails.Count == 0)
             {
                 return;
             }
