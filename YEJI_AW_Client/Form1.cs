@@ -1,24 +1,23 @@
 ﻿#nullable enable
 
-using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.NetworkInformation;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Drawing.Imaging;
+using Microsoft.Win32;
 using Timer = System.Windows.Forms.Timer;
 
 namespace YEJI_AW_Client
@@ -221,12 +220,9 @@ namespace YEJI_AW_Client
         private Timer? urlMonitorTimer;
         private List<string> prohibitedUrls = new();
         private List<BanUrlRow> prohibitedUrlRows = new();
-        private List<string> prohibitedEmailRules = new();
         private string? previousUrl; // 이전 URL을 추적하여 변경 감지
         private string? lastAlertedUrl;
-        private string? lastAlertedEmail;
-        private DateTime lastUrlAlertedAt = DateTime.MinValue;
-        private DateTime lastEmailAlertedAt = DateTime.MinValue;
+        private DateTime lastAlertedAt = DateTime.MinValue;
         private static readonly TimeSpan prohibitedAlertCooldown = TimeSpan.FromSeconds(15);
         private Dictionary<string, string> lastKnownOvertimeStatuses = new();
 
@@ -626,8 +622,6 @@ namespace YEJI_AW_Client
                                     {
                                         // 기존 항목 업데이트
                                         existing.CompanyName = row.CompanyName;
-                                        existing.Email = row.Email;
-                                        existing.Emails = row.Emails ?? new List<string>();
                                         existing.UpdatedAt = row.UpdatedAt;
                                         existing.Deleted = false;
                                     }
@@ -660,12 +654,11 @@ namespace YEJI_AW_Client
                     // 캐시 저장
                     SaveProhibitedUrlsCache(cache);
 
-                    // 메모리에 URL/이메일 목록 적용
+                    // 메모리에 URL 목록 적용
                     prohibitedUrls = ExtractUrlsFromCache(cache);
                     prohibitedUrlRows = new List<BanUrlRow>(cache.Urls);
-                    prohibitedEmailRules = ExtractEmailRulesFromRows(cache.Urls);
 
-                    ClientLogger.LogAgent($"Synced prohibited URLs: {apiResponse.Count} changes, total {prohibitedUrls.Count} URLs, {prohibitedEmailRules.Count} email rules in cache.", "DBG");
+                    ClientLogger.LogAgent($"Synced prohibited URLs: {apiResponse.Count} changes, total {prohibitedUrls.Count} URLs in cache.", "DBG");
                 }
             }
             catch (Exception ex)
@@ -678,8 +671,7 @@ namespace YEJI_AW_Client
                 {
                     prohibitedUrls = ExtractUrlsFromCache(cache);
                     prohibitedUrlRows = new List<BanUrlRow>(cache.Urls);
-                    prohibitedEmailRules = ExtractEmailRulesFromRows(cache.Urls);
-                    ClientLogger.LogAgent($"Loaded {prohibitedUrls.Count} prohibited URLs and {prohibitedEmailRules.Count} email rules from local cache.", "DBG");
+                    ClientLogger.LogAgent($"Loaded {prohibitedUrls.Count} prohibited URLs from local cache.", "DBG");
                 }
             }
         }
@@ -687,32 +679,6 @@ namespace YEJI_AW_Client
         private static List<string> ExtractUrlsFromCache(ProhibitedUrlsCache cache)
         {
             return cache.Urls.Select(u => u.Url).ToList();
-        }
-
-        private static List<string> ExtractEmailRulesFromRows(List<BanUrlRow> rows)
-        {
-            var rules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var row in rows)
-            {
-                if (!string.IsNullOrWhiteSpace(row.Email))
-                {
-                    rules.Add(row.Email.Trim().ToLowerInvariant());
-                }
-
-                if (row.Emails != null)
-                {
-                    foreach (var email in row.Emails)
-                    {
-                        if (!string.IsNullOrWhiteSpace(email))
-                        {
-                            rules.Add(email.Trim().ToLowerInvariant());
-                        }
-                    }
-                }
-            }
-
-            return rules.ToList();
         }
 
         private ProhibitedUrlsCache? LoadProhibitedUrlsCache()
@@ -825,14 +791,8 @@ namespace YEJI_AW_Client
 
             // 영업금지 URL 목록 적용
             prohibitedUrls = info.ProhibitedUrls ?? new List<string>();
-            prohibitedUrlRows = prohibitedUrls
-                .Where(u => !string.IsNullOrWhiteSpace(u))
-                .Select(u => new BanUrlRow { Url = u })
-                .ToList();
-
-            // 이메일 규칙은 ban-urls 동기화 응답(email/emails)으로만 적용
-            prohibitedEmailRules = new List<string>();
-            ClientLogger.LogAgent($"Loaded {prohibitedUrls.Count} prohibited URLs from configuration. Email rules are loaded from ban-urls sync.", "DBG");
+            prohibitedUrlRows = new List<BanUrlRow>();
+            ClientLogger.LogAgent($"Loaded {prohibitedUrls.Count} prohibited URLs from configuration.", "DBG");
 
             // 브라우저 모니터링 활성화 여부 적용
             enableBrowserMonitoring = info.EnableBrowserMonitoring;
@@ -3672,12 +3632,16 @@ namespace YEJI_AW_Client
                 // 브라우저 모니터링이 비활성화된 경우 체크하지 않음
                 if (!enableBrowserMonitoring)
                     return;
-                
+
+                // 금지 URL 목록이 없으면 체크하지 않음
+                if (prohibitedUrls == null || prohibitedUrls.Count == 0)
+                    return;
+
                 // 현재 활성화된 브라우저의 URL 가져오기
                 string? currentUrl = BrowserUrlMonitor.GetCurrentBrowserUrl();
 
                 if (string.IsNullOrWhiteSpace(currentUrl))
-                {
+                {                   
                     return;
                 }
 
@@ -3685,140 +3649,28 @@ namespace YEJI_AW_Client
                 bool urlChanged = previousUrl != currentUrl;
                 previousUrl = currentUrl;
 
-                // URL 차단 체크
-                if (prohibitedUrls != null && prohibitedUrls.Count > 0 && urlChanged && BrowserUrlMonitor.IsProhibitedUrl(currentUrl, prohibitedUrls))
+                // URL이 변경되었고 금지된 URL인 경우에만 알림 표시 (반복 알림 없음)
+                if (urlChanged && BrowserUrlMonitor.IsProhibitedUrl(currentUrl, prohibitedUrls))
                 {
                     string normalizedUrl = NormalizeUrlForDisplay(currentUrl);
-                    if (!IsAlertSuppressed(normalizedUrl))
+                    if (IsAlertSuppressed(normalizedUrl))
                     {
-                        lastAlertedUrl = normalizedUrl;
-                        lastUrlAlertedAt = DateTime.Now;
-                        ShowProhibitedUrlAlert(currentUrl);
-
-                        // 로그 기록 (전체 URL 경로 포함)
-                        ClientLogger.LogAgent($"Prohibited URL accessed: {currentUrl}", "WARN");
+                        return;
                     }
-                }
 
-                CheckProhibitedEmailRecipients(currentUrl);
+                    lastAlertedUrl = normalizedUrl;
+                    lastAlertedAt = DateTime.Now;
+                    ShowProhibitedUrlAlert(currentUrl);
+
+                    // 로그 기록 (전체 URL 경로 포함)
+                    ClientLogger.LogAgent($"Prohibited URL accessed: {currentUrl}", "WARN");
+                }
             }
             catch (Exception ex)
             {
                 // URL 체크 실패는 조용히 무시 (중요하지 않은 기능)
                 ClientLogger.LogAgent($"URL monitoring error: {ex.Message}", "DBG");
             }
-        }
-
-        private void CheckProhibitedEmailRecipients(string currentUrl)
-        {
-            if (prohibitedEmailRules == null || prohibitedEmailRules.Count == 0)
-            {
-                return;
-            }
-
-            if (!IsMailplugComposeUrl(currentUrl))
-            {
-                return;
-            }
-
-            List<string> enteredEmails = BrowserUrlMonitor.GetEmailCandidatesFromForegroundBrowser();
-            if (enteredEmails.Count == 0)
-            {
-                return;
-            }
-
-            string? blockedEmail = enteredEmails.FirstOrDefault(IsProhibitedEmailAddress);
-            if (string.IsNullOrWhiteSpace(blockedEmail))
-            {
-                return;
-            }
-
-            if (IsEmailAlertSuppressed(blockedEmail))
-            {
-                return;
-            }
-
-            lastAlertedEmail = blockedEmail;
-            lastEmailAlertedAt = DateTime.Now;
-            ShowProhibitedEmailAlert(blockedEmail);
-            ClientLogger.LogAgent($"Prohibited recipient detected on Mailplug compose page: {blockedEmail}", "WARN");
-        }
-
-        private static bool IsMailplugComposeUrl(string url)
-        {
-            if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || uri == null)
-            {
-                return false;
-            }
-
-            return uri.Host.Equals("gw.mailplug.com", StringComparison.OrdinalIgnoreCase) &&
-                   uri.AbsolutePath.StartsWith("/mail/write", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private bool IsProhibitedEmailAddress(string enteredEmail)
-        {
-            string normalized = enteredEmail.Trim().ToLowerInvariant();
-            int atIndex = normalized.LastIndexOf("@");
-            if (atIndex <= 0 || atIndex == normalized.Length - 1)
-            {
-                return false;
-            }
-
-            string emailDomain = normalized[(atIndex + 1)..];
-
-            foreach (var rule in prohibitedEmailRules)
-            {
-                string normalizedRule = rule.Trim().ToLowerInvariant();
-                if (string.IsNullOrWhiteSpace(normalizedRule))
-                {
-                    continue;
-                }
-
-                if (normalizedRule.StartsWith("*@", StringComparison.Ordinal))
-                {
-                    string blockedDomain = normalizedRule.Substring(2);
-                    if (emailDomain.Equals(blockedDomain, StringComparison.OrdinalIgnoreCase) ||
-                        emailDomain.EndsWith("." + blockedDomain, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-
-                    continue;
-                }
-
-                if (normalizedRule.Contains("@"))
-                {
-                    if (normalized.Equals(normalizedRule, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-
-                    continue;
-                }
-
-                if (emailDomain.Equals(normalizedRule, StringComparison.OrdinalIgnoreCase) ||
-                    emailDomain.EndsWith("." + normalizedRule, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool IsEmailAlertSuppressed(string email)
-        {
-            if (string.IsNullOrWhiteSpace(lastAlertedEmail))
-            {
-                return false;
-            }
-
-            if (!string.Equals(lastAlertedEmail, email, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            return DateTime.Now - lastEmailAlertedAt < prohibitedAlertCooldown;
         }
 
         private void ShowProhibitedUrlAlert(string url)
@@ -3842,27 +3694,6 @@ namespace YEJI_AW_Client
             catch (Exception ex)
             {
                 ClientLogger.LogAgent($"Failed to show prohibited URL alert: {ex.Message}", "Err");
-            }
-        }
-
-        private void ShowProhibitedEmailAlert(string blockedEmail)
-        {
-            try
-            {
-                notifyIcon.BalloonTipTitle = "영업금지 메일 알림";
-                notifyIcon.BalloonTipText = $"발신 금지 이메일이 포함되었습니다: {blockedEmail}";
-                notifyIcon.BalloonTipIcon = ToolTipIcon.Warning;
-                notifyIcon.ShowBalloonTip(5000);
-
-                MessageBox.Show(this,
-                    $"받는 사람/참조/숨은참조에 발신 금지 이메일이 포함되어 있습니다.\n\n차단 대상: {blockedEmail}\n\n해당 메일은 발송하지 마세요.",
-                    "영업금지 메일 알림",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-            }
-            catch (Exception ex)
-            {
-                ClientLogger.LogAgent($"Failed to show prohibited email alert: {ex.Message}", "Err");
             }
         }
 
@@ -3906,7 +3737,7 @@ namespace YEJI_AW_Client
                 return false;
             }
 
-            return DateTime.Now - lastUrlAlertedAt < prohibitedAlertCooldown;
+            return DateTime.Now - lastAlertedAt < prohibitedAlertCooldown;
         }
 
         private static string NormalizeUrlForDisplay(string url)
@@ -4980,12 +4811,6 @@ namespace YEJI_AW_Client
 
         [JsonPropertyName("company_name")]
         public string CompanyName { get; set; } = "";
-
-        [JsonPropertyName("email")]
-        public string Email { get; set; } = "";
-
-        [JsonPropertyName("emails")]
-        public List<string> Emails { get; set; } = new List<string>();
 
         [JsonPropertyName("updated_at")]
         public string UpdatedAt { get; set; } = "";
