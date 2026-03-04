@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Automation;
@@ -69,6 +70,7 @@ namespace YEJI_AW_Client
         private static readonly object timeoutTrackingLock = new();
         private const int MaxConsecutiveTimeouts = 5;  // 연속 5회 타임아웃 시 일시 중단
         private const int SuspensionMinutes = 5;        // 5분간 중단
+        private static readonly Regex EmailRegex = new Regex(@"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         /// <summary>
         /// 현재 활성화된 브라우저 창에서 URL을 추출합니다.
@@ -245,6 +247,95 @@ namespace YEJI_AW_Client
             {
                 ClientLogger.LogAgent($"Browser URL extraction error for {browserName}: {ex.Message}", "WRN");
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// 현재 활성화된 브라우저 화면의 UI Automation 텍스트에서 이메일 주소를 추출합니다.
+        /// 메일 작성 화면의 받는사람/참조/숨은참조 검사용으로 사용합니다.
+        /// </summary>
+        public static List<string> GetCurrentBrowserEmails()
+        {
+            try
+            {
+                IntPtr hwnd = GetForegroundWindow();
+                if (hwnd == IntPtr.Zero)
+                    return new List<string>();
+
+                GetWindowThreadProcessId(hwnd, out uint processId);
+                if (processId == 0)
+                    return new List<string>();
+
+                using var process = Process.GetProcessById((int)processId);
+                string processName = process.ProcessName.ToLowerInvariant();
+                if (!IsSupportedBrowser(processName))
+                    return new List<string>();
+
+                using var cts = new CancellationTokenSource();
+                var task = Task.Run(() => ExtractEmailsFromUiAutomation(hwnd), cts.Token);
+                if (task.Wait(UiAutomationTimeoutMs))
+                {
+                    return task.Result;
+                }
+
+                cts.Cancel();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return new List<string>();
+        }
+
+        private static List<string> ExtractEmailsFromUiAutomation(IntPtr hwnd)
+        {
+            var extracted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                var root = AutomationElement.FromHandle(hwnd);
+                if (root == null)
+                    return new List<string>();
+
+                var editCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit);
+                var textCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text);
+                var documentCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Document);
+                var condition = new OrCondition(editCondition, textCondition, documentCondition);
+
+                var elements = root.FindAll(TreeScope.Subtree, condition);
+                int maxScan = Math.Min(elements.Count, 350);
+                for (int i = 0; i < maxScan; i++)
+                {
+                    var element = elements[i];
+                    TryAddEmailsFromText(element.Current.Name, extracted);
+
+                    if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) && pattern is ValuePattern valuePattern)
+                    {
+                        TryAddEmailsFromText(valuePattern.Current.Value, extracted);
+                    }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return extracted.ToList();
+        }
+
+        private static void TryAddEmailsFromText(string? text, HashSet<string> output)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            foreach (Match match in EmailRegex.Matches(text))
+            {
+                string email = match.Value.Trim().ToLowerInvariant();
+                if (!string.IsNullOrWhiteSpace(email))
+                {
+                    output.Add(email);
+                }
             }
         }
 

@@ -115,6 +115,15 @@ namespace YEJI_AW_Client
                 Anchor = AnchorStyles.Right,
                 DialogResult = DialogResult.OK
             };
+            closeButton.Click += (_, _) =>
+            {
+                if (this.browserWindowHandle != IntPtr.Zero)
+                {
+                    BrowserUrlMonitor.TryCloseBrowserWindow(this.browserWindowHandle);
+                }
+
+                Close();
+            };
 
             var buttonPanel = new FlowLayoutPanel
             {

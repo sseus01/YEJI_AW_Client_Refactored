@@ -107,6 +107,10 @@ namespace YEJI_AW_Client
         private readonly string prohibitedUrlsCacheFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "prohibited_urls_cache.json");
 
+        // 영업금지 이메일 캐시 파일
+        private readonly string prohibitedEmailsCacheFile =
+            Path.Combine(@"C:\ProgramData\YEJI_AW", "prohibited_emails_cache.json");
+
         // 클라이언트 상태 전송 실패 기록용
         private readonly string clientStatusLogFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "client_status.log");
@@ -220,10 +224,17 @@ namespace YEJI_AW_Client
         private Timer? urlMonitorTimer;
         private List<string> prohibitedUrls = new();
         private List<BanUrlRow> prohibitedUrlRows = new();
+        private List<string> prohibitedEmails = new();
+        private List<BanEmailRow> prohibitedEmailRows = new();
         private string? previousUrl; // 이전 URL을 추적하여 변경 감지
         private string? lastAlertedUrl;
         private DateTime lastAlertedAt = DateTime.MinValue;
+        private string? lastAlertedEmailSignature;
+        private DateTime lastAlertedEmailAt = DateTime.MinValue;
+        private DateTime lastMailComposeCheckAt = DateTime.MinValue;
         private static readonly TimeSpan prohibitedAlertCooldown = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan prohibitedEmailAlertCooldown = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan mailComposeCheckInterval = TimeSpan.FromSeconds(3);
         private Dictionary<string, string> lastKnownOvertimeStatuses = new();
 
         // 브라우저 모니터링 활성화 여부 (서버 설정에서 가져옴, 기본값: true)
@@ -380,6 +391,7 @@ namespace YEJI_AW_Client
             {
                 await FetchWorkTimeFromServerAsync();
                 await FetchProhibitedUrlsAsync();
+                await FetchProhibitedEmailsAsync();
             };
             configTimer.Start();
 
@@ -719,6 +731,282 @@ namespace YEJI_AW_Client
             }
         }
 
+        private async Task FetchProhibitedEmailsAsync()
+        {
+            try
+            {
+                var cache = LoadProhibitedEmailsCache() ?? new ProhibitedEmailsCache();
+                string? sinceParam = cache.LastSyncTime;
+                bool hasRetriedWithoutSince = false;
+
+                while (true)
+                {
+                    string url = $"{ServerBaseUrl}/api/client/ban-emails?limit=50000";
+                    if (!string.IsNullOrWhiteSpace(sinceParam))
+                    {
+                        url += $"&since={Uri.EscapeDataString(sinceParam)}";
+                    }
+
+                    using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                    response.EnsureSuccessStatusCode();
+
+                    await using var stream = await response.Content.ReadAsStreamAsync();
+                    var apiResponse = await JsonSerializer.DeserializeAsync<BanEmailsResponse>(stream, JsonOptions);
+
+                    if (apiResponse == null || !apiResponse.Success)
+                    {
+                        break;
+                    }
+
+                    if (apiResponse.ResetRequired && !hasRetriedWithoutSince)
+                    {
+                        cache.Emails.Clear();
+                        cache.LastSyncTime = null;
+                        sinceParam = null;
+                        hasRetriedWithoutSince = true;
+                        ClientLogger.LogAgent("[EMAIL] reset_required received. Clearing cache and retrying full sync.", "DBG");
+                        continue;
+                    }
+
+                    var emailDict = cache.Emails.ToDictionary(e => NormalizeEmail(e.Email), e => e, StringComparer.OrdinalIgnoreCase);
+
+                    if (apiResponse.Rows != null)
+                    {
+                        foreach (var row in apiResponse.Rows)
+                        {
+                            string normalizedEmail = NormalizeEmail(row.Email);
+                            if (string.IsNullOrWhiteSpace(normalizedEmail))
+                            {
+                                continue;
+                            }
+
+                            if (row.Deleted)
+                            {
+                                if (emailDict.TryGetValue(normalizedEmail, out var existing))
+                                {
+                                    cache.Emails.Remove(existing);
+                                    emailDict.Remove(normalizedEmail);
+                                }
+                            }
+                            else
+                            {
+                                row.Email = normalizedEmail;
+                                if (emailDict.TryGetValue(normalizedEmail, out var existing))
+                                {
+                                    existing.CompanyName = row.CompanyName;
+                                    existing.UpdatedAt = row.UpdatedAt;
+                                    existing.Deleted = false;
+                                    existing.DeletedAt = row.DeletedAt;
+                                }
+                                else
+                                {
+                                    cache.Emails.Add(row);
+                                    emailDict[normalizedEmail] = row;
+                                }
+                            }
+                        }
+                    }
+
+                    cache.LastSyncTime = !string.IsNullOrWhiteSpace(apiResponse.NextSince)
+                        ? apiResponse.NextSince
+                        : apiResponse.ServerTime;
+
+                    SaveProhibitedEmailsCache(cache);
+                    prohibitedEmailRows = new List<BanEmailRow>(cache.Emails);
+                    prohibitedEmails = cache.Emails
+                        .Select(e => NormalizeEmail(e.Email))
+                        .Where(e => !string.IsNullOrWhiteSpace(e))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    ClientLogger.LogAgent($"[EMAIL] Synced prohibited emails: {apiResponse.Count} changes, total {prohibitedEmails.Count} emails in cache.", "DBG");
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"[EMAIL] Failed to sync prohibited emails: {ex.Message}", "DBG");
+
+                var cache = LoadProhibitedEmailsCache();
+                if (cache != null && cache.Emails.Count > 0)
+                {
+                    prohibitedEmailRows = new List<BanEmailRow>(cache.Emails);
+                    prohibitedEmails = cache.Emails
+                        .Select(e => NormalizeEmail(e.Email))
+                        .Where(e => !string.IsNullOrWhiteSpace(e))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    ClientLogger.LogAgent($"[EMAIL] Loaded {prohibitedEmails.Count} prohibited emails from local cache.", "DBG");
+                }
+            }
+        }
+
+        private ProhibitedEmailsCache? LoadProhibitedEmailsCache()
+        {
+            try
+            {
+                if (!File.Exists(prohibitedEmailsCacheFile))
+                {
+                    return null;
+                }
+
+                string json = File.ReadAllText(prohibitedEmailsCacheFile, Encoding.UTF8);
+                return JsonSerializer.Deserialize<ProhibitedEmailsCache>(json, JsonOptions);
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"[EMAIL] Failed to load prohibited emails cache: {ex.Message}", "DBG");
+                return null;
+            }
+        }
+
+        private void SaveProhibitedEmailsCache(ProhibitedEmailsCache cache)
+        {
+            try
+            {
+                string? folder = Path.GetDirectoryName(prohibitedEmailsCacheFile);
+                if (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                string json = JsonSerializer.Serialize(cache, JsonOptions);
+                File.WriteAllText(prohibitedEmailsCacheFile, json, Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"[EMAIL] Failed to save prohibited emails cache: {ex.Message}", "Err");
+            }
+        }
+
+        private void CheckMailComposeRecipients(string currentUrl)
+        {
+            if (string.IsNullOrWhiteSpace(currentUrl) || prohibitedEmails.Count == 0)
+            {
+                return;
+            }
+
+            if (!IsMailComposePage(currentUrl))
+            {
+                return;
+            }
+
+            if (DateTime.Now - lastMailComposeCheckAt < mailComposeCheckInterval)
+            {
+                return;
+            }
+
+            lastMailComposeCheckAt = DateTime.Now;
+
+            var foundEmails = BrowserUrlMonitor.GetCurrentBrowserEmails();
+            if (foundEmails.Count == 0)
+            {
+                return;
+            }
+
+            var matchedRows = new List<BanEmailRow>();
+            foreach (string foundEmail in foundEmails)
+            {
+                string normalized = NormalizeEmail(foundEmail);
+                if (string.IsNullOrWhiteSpace(normalized))
+                {
+                    continue;
+                }
+
+                if (!prohibitedEmails.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var row = prohibitedEmailRows.FirstOrDefault(r =>
+                    string.Equals(NormalizeEmail(r.Email), normalized, StringComparison.OrdinalIgnoreCase));
+                if (row != null && !matchedRows.Any(m => string.Equals(m.Email, row.Email, StringComparison.OrdinalIgnoreCase)))
+                {
+                    matchedRows.Add(row);
+                }
+            }
+
+            if (matchedRows.Count == 0)
+            {
+                return;
+            }
+
+            string signature = string.Join(";", matchedRows.Select(m => NormalizeEmail(m.Email)).OrderBy(x => x));
+            if (IsEmailAlertSuppressed(signature))
+            {
+                return;
+            }
+
+            lastAlertedEmailSignature = signature;
+            lastAlertedEmailAt = DateTime.Now;
+            ShowProhibitedEmailAlert(matchedRows);
+        }
+
+        private static bool IsMailComposePage(string url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            {
+                return false;
+            }
+
+            // 사내 웹메일 1: 메일플러그 작성 화면
+            if (string.Equals(uri.Host, "gw.mailplug.com", StringComparison.OrdinalIgnoreCase) &&
+                uri.AbsolutePath.StartsWith("/mail/write", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // 사내 웹메일 2: 네이버웍스 메일 작성 화면
+            if (string.Equals(uri.Host, "mail.worksmobile.com", StringComparison.OrdinalIgnoreCase) &&
+                uri.AbsolutePath.StartsWith("/w", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string NormalizeEmail(string? email)
+        {
+            return string.IsNullOrWhiteSpace(email) ? string.Empty : email.Trim().ToLowerInvariant();
+        }
+
+        private bool IsEmailAlertSuppressed(string signature)
+        {
+            if (string.IsNullOrWhiteSpace(signature) || string.IsNullOrWhiteSpace(lastAlertedEmailSignature))
+            {
+                return false;
+            }
+
+            if (!string.Equals(signature, lastAlertedEmailSignature, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return DateTime.Now - lastAlertedEmailAt < prohibitedEmailAlertCooldown;
+        }
+
+        private void ShowProhibitedEmailAlert(List<BanEmailRow> matchedRows)
+        {
+            try
+            {
+                notifyIcon.BalloonTipTitle = "영업금지 이메일 알림";
+                notifyIcon.BalloonTipText = $"영업금지 이메일 {matchedRows.Count}건이 입력되어 있습니다.";
+                notifyIcon.BalloonTipIcon = ToolTipIcon.Warning;
+                notifyIcon.ShowBalloonTip(5000);
+
+                using var alertForm = new ProhibitedEmailAlertForm(matchedRows);
+                alertForm.ShowDialog(this);
+
+                string logEmails = string.Join(", ", matchedRows.Select(m => NormalizeEmail(m.Email)));
+                ClientLogger.LogAgent($"Prohibited email detected in mail compose: {logEmails}", "WARN");
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Failed to show prohibited email alert: {ex.Message}", "Err");
+            }
+        }
+
         private async Task RunStartupSequenceAsync()
         {
             if (startupSequenceRunning)
@@ -735,6 +1023,7 @@ namespace YEJI_AW_Client
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("ResendPendingIdleEvents", ResendPendingIdleEventsAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("FetchWorkTimeFromServer", FetchWorkTimeFromServerAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("FetchProhibitedUrls", FetchProhibitedUrlsAsync);
+                startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("FetchProhibitedEmails", FetchProhibitedEmailsAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("CheckClientUpdate", () => CheckClientUpdateAsync());
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("RegisterOrUpdateClient", RegisterOrUpdateClientAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("CheckAfterHoursOnStartup", CheckAfterHoursOnStartupAsync);
@@ -3632,11 +3921,7 @@ namespace YEJI_AW_Client
                 // 브라우저 모니터링이 비활성화된 경우 체크하지 않음
                 if (!enableBrowserMonitoring)
                     return;
-
-                // 금지 URL 목록이 없으면 체크하지 않음
-                if (prohibitedUrls == null || prohibitedUrls.Count == 0)
-                    return;
-
+                               
                 // 현재 활성화된 브라우저의 URL 가져오기
                 string? currentUrl = BrowserUrlMonitor.GetCurrentBrowserUrl();
 
@@ -3649,8 +3934,11 @@ namespace YEJI_AW_Client
                 bool urlChanged = previousUrl != currentUrl;
                 previousUrl = currentUrl;
 
+                CheckMailComposeRecipients(currentUrl);
+
                 // URL이 변경되었고 금지된 URL인 경우에만 알림 표시 (반복 알림 없음)
-                if (urlChanged && BrowserUrlMonitor.IsProhibitedUrl(currentUrl, prohibitedUrls))
+                if (prohibitedUrls != null && prohibitedUrls.Count > 0 &&
+                    urlChanged && BrowserUrlMonitor.IsProhibitedUrl(currentUrl, prohibitedUrls))
                 {
                     string normalizedUrl = NormalizeUrlForDisplay(currentUrl);
                     if (IsAlertSuppressed(normalizedUrl))
@@ -4819,11 +5107,56 @@ namespace YEJI_AW_Client
         public bool Deleted { get; set; } = false;
     }
 
+    public class BanEmailsResponse
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+
+        [JsonPropertyName("server_time")]
+        public string ServerTime { get; set; } = "";
+
+        [JsonPropertyName("next_since")]
+        public string? NextSince { get; set; }
+
+        [JsonPropertyName("count")]
+        public int Count { get; set; }
+
+        [JsonPropertyName("rows")]
+        public List<BanEmailRow> Rows { get; set; } = new List<BanEmailRow>();
+
+        [JsonPropertyName("reset_required")]
+        public bool ResetRequired { get; set; }
+    }
+
+    public class BanEmailRow
+    {
+        [JsonPropertyName("email")]
+        public string Email { get; set; } = "";
+
+        [JsonPropertyName("company_name")]
+        public string CompanyName { get; set; } = "";
+
+        [JsonPropertyName("updated_at")]
+        public string UpdatedAt { get; set; } = "";
+
+        [JsonPropertyName("deleted")]
+        public bool Deleted { get; set; }
+
+        [JsonPropertyName("deleted_at")]
+        public string? DeletedAt { get; set; }
+    }
+
     // 로컬 캐시 구조
     public class ProhibitedUrlsCache
     {
         public string? LastSyncTime { get; set; }
         public List<BanUrlRow> Urls { get; set; } = new List<BanUrlRow>();
+    }
+
+    public class ProhibitedEmailsCache
+    {
+        public string? LastSyncTime { get; set; }
+        public List<BanEmailRow> Emails { get; set; } = new List<BanEmailRow>();
     }
 
     public class PcEventData
