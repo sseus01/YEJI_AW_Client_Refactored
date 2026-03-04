@@ -976,16 +976,33 @@ namespace YEJI_AW_Client
                 return false;
             }
 
+            string host = uri.Host.ToLowerInvariant();
+            string absolutePath = uri.AbsolutePath.ToLowerInvariant();
+            string query = uri.Query.ToLowerInvariant();
+            string fragment = uri.Fragment.ToLowerInvariant();
+            string pathAndQuery = uri.PathAndQuery.ToLowerInvariant();
+            string fullUrl = url.ToLowerInvariant();
+
             // 사내 웹메일 1: 메일플러그 작성 화면
-            if (string.Equals(uri.Host, "gw.mailplug.com", StringComparison.OrdinalIgnoreCase) &&
-                uri.AbsolutePath.StartsWith("/mail/write", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(host, "gw.mailplug.com", StringComparison.OrdinalIgnoreCase) &&
+               (absolutePath.StartsWith("/mail/write", StringComparison.OrdinalIgnoreCase) ||
+                pathAndQuery.Contains("/mail/write") ||
+                fragment.Contains("mail/write")))
             {
                 return true;
             }
 
             // 사내 웹메일 2: 네이버웍스 메일 작성 화면
-            if (string.Equals(uri.Host, "mail.worksmobile.com", StringComparison.OrdinalIgnoreCase) &&
-                uri.AbsolutePath.StartsWith("/w", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(host, "mail.worksmobile.com", StringComparison.OrdinalIgnoreCase) &&
+               (absolutePath.StartsWith("/w", StringComparison.OrdinalIgnoreCase) ||
+                absolutePath.Contains("/mail/write") ||
+                pathAndQuery.Contains("compose") ||
+                pathAndQuery.Contains("write") ||
+                query.Contains("compose") ||
+                fragment.Contains("compose") ||
+                fragment.Contains("mail/write") ||
+                fullUrl.Contains("mail.worksmobile.com/w") ||
+                fullUrl.Contains("mail.worksmobile.com/mail/write")))
             {
                 return true;
             }
@@ -1419,7 +1436,6 @@ namespace YEJI_AW_Client
             ClientLogger.LogUpdate($"Final download path: {tempFilePath}", "DBG");
 
             // 재시도 로직: 실패 시 exponential backoff
-            bool downloadSuccess = false;
             for (int attempt = 1; attempt <= MaxUpdateDownloadRetries; attempt++)
             {
                 try
@@ -1436,7 +1452,6 @@ namespace YEJI_AW_Client
                     await using var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
                     await response.Content.CopyToAsync(fileStream);
                     
-                    downloadSuccess = true;
                     ClientLogger.LogUpdate($"Download completed successfully. File saved to: {tempFilePath}", "DBG");
                     break; // 성공 시 루프 탈출
                 }

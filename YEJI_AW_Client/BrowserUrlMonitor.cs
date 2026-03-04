@@ -315,12 +315,8 @@ namespace YEJI_AW_Client
                         TryAddEmailsFromText(valuePattern.Current.Value, extracted);
                     }
 
-                    if (element.TryGetCurrentPattern(LegacyIAccessiblePattern.Pattern, out var legacyObj) && legacyObj is LegacyIAccessiblePattern legacy)
-                    {
-                        TryAddEmailsFromText(legacy.Current.Name, extracted);
-                        TryAddEmailsFromText(legacy.Current.Value, extracted);
-                        TryAddEmailsFromText(legacy.Current.Description, extracted);
-                    }
+                    // .NET/Windows 버전에 따라 LegacyIAccessiblePattern 타입이 제공되지 않을 수 있어
+                    // Name/HelpText/ItemStatus/ValuePattern 중심으로 안전하게 추출합니다.
                 }
             }
             catch
