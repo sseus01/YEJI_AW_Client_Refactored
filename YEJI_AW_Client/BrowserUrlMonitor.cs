@@ -71,6 +71,8 @@ namespace YEJI_AW_Client
         private static readonly object timeoutTrackingLock = new();
         private const int MaxConsecutiveTimeouts = 5;  // 연속 5회 타임아웃 시 일시 중단
         private const int SuspensionMinutes = 5;        // 5분간 중단
+        private static readonly bool EmailDebugLoggingEnabled =
+            string.Equals(Environment.GetEnvironmentVariable("YEJI_EMAIL_DEBUG"), "1", StringComparison.OrdinalIgnoreCase);
         private static readonly Regex EmailRegex = new Regex(@"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         /// <summary>
@@ -276,14 +278,25 @@ namespace YEJI_AW_Client
                 var task = Task.Run(() => ExtractEmailsFromUiAutomation(hwnd), cts.Token);
                 if (task.Wait(EmailExtractionTimeoutMs))
                 {
+                    if (EmailDebugLoggingEnabled)
+                    {
+                        ClientLogger.LogAgent($"[EMAIL][DEBUG] Browser email extraction completed: {task.Result.Count} recipients found.", "DBG");
+                    }
                     return task.Result;
                 }
 
                 cts.Cancel();
+                if (EmailDebugLoggingEnabled)
+                {
+                    ClientLogger.LogAgent("[EMAIL][DEBUG] Browser email extraction timed out.", "DBG");
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore
+                if (EmailDebugLoggingEnabled)
+                {
+                    ClientLogger.LogAgent($"[EMAIL][DEBUG] Browser email extraction failed: {ex.Message}", "DBG");
+                }
             }
 
             return new List<string>();

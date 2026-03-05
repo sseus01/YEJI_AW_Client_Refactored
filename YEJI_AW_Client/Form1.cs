@@ -129,6 +129,8 @@ namespace YEJI_AW_Client
 
         private const string ServerBaseUrl = "http://175.106.99.157:3000";
         private const int UserInfoRetryDelayMs = 60 * 1000;
+        private static readonly bool EmailDebugLoggingEnabled =
+            string.Equals(Environment.GetEnvironmentVariable("YEJI_EMAIL_DEBUG"), "1", StringComparison.OrdinalIgnoreCase);
 
         private static string GetCurrentVersion()
         {
@@ -899,11 +901,13 @@ namespace YEJI_AW_Client
         {
             if (string.IsNullOrWhiteSpace(currentUrl))
             {
+                LogEmailDebug("Skip recipient check: current URL is empty.");
                 return;
             }
 
             if (!IsMailComposePage(currentUrl))
             {
+                LogEmailDebug($"Skip recipient check: not a compose page. url={currentUrl}");
                 return;
             }
 
@@ -915,11 +919,13 @@ namespace YEJI_AW_Client
 
             if (prohibitedEmails.Count == 0)
             {
+                LogEmailDebug("Skip recipient check: prohibited email cache is empty.");
                 return;
             }
 
             if (DateTime.Now - lastMailComposeCheckAt < mailComposeCheckInterval)
             {
+                LogEmailDebug("Skip recipient check: waiting for next check interval.");
                 return;
             }
 
@@ -928,8 +934,11 @@ namespace YEJI_AW_Client
             var foundEmails = BrowserUrlMonitor.GetCurrentBrowserEmails();
             if (foundEmails.Count == 0)
             {
+                LogEmailDebug("No recipient emails extracted from current compose view.");
                 return;
             }
+
+            LogEmailDebug($"Extracted recipients: {string.Join(", ", foundEmails.Select(NormalizeEmail).Where(x => !string.IsNullOrWhiteSpace(x)))}");
 
             var matchedRows = new List<BanEmailRow>();
             foreach (string foundEmail in foundEmails)
@@ -955,18 +964,30 @@ namespace YEJI_AW_Client
 
             if (matchedRows.Count == 0)
             {
+                LogEmailDebug("No prohibited recipients matched in extracted emails.");
                 return;
             }
 
             string signature = string.Join(";", matchedRows.Select(m => NormalizeEmail(m.Email)).OrderBy(x => x));
             if (IsEmailAlertSuppressed(signature))
             {
+                LogEmailDebug("Matched prohibited recipients, but alert is suppressed by cooldown.");
                 return;
             }
 
             lastAlertedEmailSignature = signature;
             lastAlertedEmailAt = DateTime.Now;
             ShowProhibitedEmailAlert(matchedRows);
+        }
+
+        private static void LogEmailDebug(string message)
+        {
+            if (!EmailDebugLoggingEnabled)
+            {
+                return;
+            }
+
+            ClientLogger.LogAgent($"[EMAIL][DEBUG] {message}", "DBG");
         }
 
         private static bool IsMailComposePage(string url)
