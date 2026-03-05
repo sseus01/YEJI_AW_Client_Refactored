@@ -1110,10 +1110,9 @@ namespace YEJI_AW_Client
                 notifyIcon.ShowBalloonTip(5000);
 
                 IntPtr browserWindowHandle = BrowserUrlMonitor.GetForegroundBrowserWindowHandle();
-                using var alertForm = new ProhibitedEmailAlertForm(matchedRows);
+                using var alertForm = new ProhibitedEmailAlertForm(matchedRows, browserWindowHandle);
                 alertForm.TopMost = true;
-                PositionFormOnBrowserScreen(alertForm, browserWindowHandle);
-                alertForm.ShowDialog(this);
+                alertForm.ShowDialog();
 
                 string logEmails = string.Join(", ", matchedRows.Select(m => NormalizeEmail(m.Email)));
                 ClientLogger.LogAgent($"Prohibited email detected in mail compose: {logEmails}", "WARN");
@@ -1123,38 +1122,6 @@ namespace YEJI_AW_Client
                 ClientLogger.LogAgent($"Failed to show prohibited email alert: {ex.Message}", "Err");
             }
         }
-
-        private void PositionFormOnBrowserScreen(Form form, IntPtr browserWindowHandle)
-        {
-            if (form == null)
-            {
-                return;
-            }
-
-            Screen targetScreen;
-            if (browserWindowHandle != IntPtr.Zero)
-            {
-                try
-                {
-                    targetScreen = Screen.FromHandle(browserWindowHandle);
-                }
-                catch
-                {
-                    targetScreen = Screen.FromControl(this);
-                }
-            }
-            else
-            {
-                targetScreen = Screen.FromControl(this);
-            }
-
-            Rectangle area = targetScreen.WorkingArea;
-            form.StartPosition = FormStartPosition.Manual;
-            form.Location = new Point(
-                area.Left + Math.Max(0, (area.Width - form.Width) / 2),
-                area.Top + Math.Max(0, (area.Height - form.Height) / 2));
-        }
-
 
         private async Task RunStartupSequenceAsync()
         {

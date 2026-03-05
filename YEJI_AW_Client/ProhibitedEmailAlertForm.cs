@@ -8,10 +8,10 @@ namespace YEJI_AW_Client
 {
     public class ProhibitedEmailAlertForm : Form
     {
-        public ProhibitedEmailAlertForm(List<BanEmailRow> matchedRows)
+        public ProhibitedEmailAlertForm(List<BanEmailRow> matchedRows, IntPtr browserWindowHandle)
         {
             Text = "영업 금지 안내";
-            StartPosition = FormStartPosition.CenterScreen;
+            StartPosition = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -84,11 +84,36 @@ namespace YEJI_AW_Client
 
             Shown += (_, _) =>
             {
+                CenterOnTargetScreen(browserWindowHandle);
                 BringToFront();
                 Activate();
             };
 
             AcceptButton = closeButton;
+        }
+        private void CenterOnTargetScreen(IntPtr browserWindowHandle)
+        {
+            Screen targetScreen;
+            if (browserWindowHandle != IntPtr.Zero)
+            {
+                try
+                {
+                    targetScreen = Screen.FromHandle(browserWindowHandle);
+                }
+                catch
+                {
+                    targetScreen = Screen.FromPoint(Cursor.Position);
+                }
+            }
+            else
+            {
+                targetScreen = Screen.FromPoint(Cursor.Position);
+            }
+
+            Rectangle area = targetScreen.WorkingArea;
+            Location = new Point(
+                area.Left + Math.Max(0, (area.Width - Width) / 2),
+                area.Top + Math.Max(0, (area.Height - Height) / 2));
         }
     }
 }
