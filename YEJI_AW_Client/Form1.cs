@@ -14,6 +14,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Drawing.Imaging;
@@ -24,6 +25,8 @@ namespace YEJI_AW_Client
 {
     public partial class Form1 : Form
     {
+        private static readonly Regex UrlTokenRegex = new(@"(?:(?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s]*)?)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         private ContextMenuStrip? trayMenu;
 
         // idleTimer 는 Form1.Designer.cs 에 있다고 가정 (디자이너 타이머)
@@ -992,7 +995,7 @@ namespace YEJI_AW_Client
 
         private static bool IsMailComposePage(string url)
         {
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            if (!TryCreateAbsoluteUri(url, out var uri))
             {
                 return false;
             }
@@ -1002,7 +1005,7 @@ namespace YEJI_AW_Client
             string query = uri.Query.ToLowerInvariant();
             string fragment = uri.Fragment.ToLowerInvariant();
             string pathAndQuery = uri.PathAndQuery.ToLowerInvariant();
-            string fullUrl = url.ToLowerInvariant();
+            string fullUrl = uri.AbsoluteUri.ToLowerInvariant();
 
             // 사내 웹메일 1: 메일플러그 작성 화면
             if (string.Equals(host, "gw.mailplug.com", StringComparison.OrdinalIgnoreCase) &&
@@ -1026,6 +1029,52 @@ namespace YEJI_AW_Client
                 fullUrl.Contains("mail.worksmobile.com/mail/write")))
             {
                 return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryCreateAbsoluteUri(string? rawUrl, out Uri uri)
+        {
+            uri = null!;
+            if (string.IsNullOrWhiteSpace(rawUrl))
+            {
+                return false;
+            }
+
+            string trimmed = rawUrl.Trim();
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out uri))
+            {
+                return true;
+            }
+
+            // 일부 브라우저 UI Automation 값은 스킴 없이 "gw.mailplug.com/mail/write" 형태로 반환됨
+            // 스킴을 보정해 메일 작성 URL 판별이 누락되지 않도록 처리
+            if (!trimmed.Contains("://", StringComparison.Ordinal))
+            {
+                if (Uri.TryCreate($"https://{trimmed}", UriKind.Absolute, out uri))
+                {
+                    return true;
+                }
+            }
+
+            // 일부 환경에서는 브라우저 창 제목 문자열(예: "메일 - https://mail.worksmobile.com/w/")이 들어올 수 있어
+            // 문자열 내 URL 토큰만 추출해 재시도합니다.
+            var match = UrlTokenRegex.Match(trimmed);
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            string candidate = match.Value.Trim().TrimEnd('.', ',', ';', ')', ']', '"', '\'');
+            if (Uri.TryCreate(candidate, UriKind.Absolute, out uri))
+            {
+                return true;
+            }
+
+            if (!candidate.Contains("://", StringComparison.Ordinal))
+            {
+                return Uri.TryCreate($"https://{candidate}", UriKind.Absolute, out uri);
             }
 
             return false;
@@ -1061,6 +1110,7 @@ namespace YEJI_AW_Client
                 notifyIcon.ShowBalloonTip(5000);
 
                 using var alertForm = new ProhibitedEmailAlertForm(matchedRows);
+                alertForm.TopMost = true;
                 alertForm.ShowDialog(this);
 
                 string logEmails = string.Join(", ", matchedRows.Select(m => NormalizeEmail(m.Email)));

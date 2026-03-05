@@ -15,6 +15,8 @@ namespace YEJI_AW_Client
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
+            TopMost = true;
+            ShowInTaskbar = false;
             Size = new Size(560, 420);
             BackColor = Color.White;
 
@@ -79,6 +81,12 @@ namespace YEJI_AW_Client
             Controls.Add(buttonPanel);
             Controls.Add(descriptionLabel);
             Controls.Add(titleLabel);
+
+            Shown += (_, _) =>
+            {
+                BringToFront();
+                Activate();
+            };
 
             AcceptButton = closeButton;
         }
