@@ -1114,6 +1114,14 @@ namespace YEJI_AW_Client
                 alertForm.TopMost = true;
                 alertForm.ShowDialog();
 
+                if (alertForm.DeleteRequested)
+                {
+                    int removedCount = BrowserUrlMonitor.RemoveRecipientEmailsFromCurrentBrowser(
+                        matchedRows.Select(m => NormalizeEmail(m.Email)).Where(x => !string.IsNullOrWhiteSpace(x)),
+                        browserWindowHandle);
+                    ClientLogger.LogAgent($"Prohibited email removal requested: removed {removedCount}/{matchedRows.Count} recipients.", "INF");
+                }
+
                 string logEmails = string.Join(", ", matchedRows.Select(m => NormalizeEmail(m.Email)));
                 ClientLogger.LogAgent($"Prohibited email detected in mail compose: {logEmails}", "WARN");
             }
