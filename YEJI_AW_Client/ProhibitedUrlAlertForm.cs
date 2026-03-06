@@ -8,6 +8,7 @@ namespace YEJI_AW_Client
     {
         private readonly Panel dialogPanel;
         private readonly IntPtr browserWindowHandle;
+        private bool closeCurrentTabRequested;
 
         public ProhibitedUrlAlertForm(string companyName, string fullUrl, IntPtr browserWindowHandle)
         {
@@ -117,8 +118,7 @@ namespace YEJI_AW_Client
             };
             closeButton.Click += (_, _) =>
             {
-                BrowserUrlMonitor.TryCloseCurrentBrowserTab(this.browserWindowHandle);
-
+                closeCurrentTabRequested = true;
                 Close();
             };
 
@@ -149,6 +149,13 @@ namespace YEJI_AW_Client
             AcceptButton = closeButton;
             Load += (_, _) => CenterDialogPanel();
             Resize += (_, _) => CenterDialogPanel();
+            FormClosed += (_, _) =>
+            {
+                if (closeCurrentTabRequested)
+                {
+                    BrowserUrlMonitor.TryCloseCurrentBrowserTab(this.browserWindowHandle);
+                }
+            };
         }
 
         private static Rectangle ResolveAlertBounds(IntPtr browserHandle)
