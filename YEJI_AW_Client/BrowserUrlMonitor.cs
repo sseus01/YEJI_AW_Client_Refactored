@@ -29,7 +29,19 @@ namespace YEJI_AW_Client
         private static extern IntPtr GetForegroundWindow();
 
         [DllImport("user32.dll")]
-        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);        
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
+
+        [DllImport("user32.dll")]
+        private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("user32.dll")]
+        private static extern bool BringWindowToTop(IntPtr hWnd);
 
         [DllImport("user32.dll")]
         private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -228,14 +240,13 @@ namespace YEJI_AW_Client
             bool focused = false;
             for (int i = 0; i < TabOperationFocusRetryCount; i++)
             {
-                SetForegroundWindow(hwnd);
-                Thread.Sleep(TabOperationForegroundDelayMs);
-
-                if (GetForegroundWindow() == hwnd)
+                if (TryFocusWindow(hwnd))
                 {
                     focused = true;
                     break;
                 }
+
+                Thread.Sleep(TabOperationForegroundDelayMs);
             }
 
             if (!focused)
@@ -257,6 +268,55 @@ namespace YEJI_AW_Client
             }
 
             return false;
+        }
+
+        private static bool TryFocusWindow(IntPtr hwnd)
+        {
+            IntPtr currentForeground = GetForegroundWindow();
+            if (currentForeground == hwnd)
+            {
+                return true;
+            }
+
+            uint currentThreadId = GetCurrentThreadId();
+            uint foregroundThreadId = currentForeground == IntPtr.Zero
+                ? 0
+                : GetWindowThreadProcessId(currentForeground, IntPtr.Zero);
+            uint targetThreadId = GetWindowThreadProcessId(hwnd, IntPtr.Zero);
+
+            bool attachedToForeground = false;
+            bool attachedToTarget = false;
+
+            try
+            {
+                if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId)
+                {
+                    attachedToForeground = AttachThreadInput(currentThreadId, foregroundThreadId, true);
+                }
+
+                if (targetThreadId != 0 && targetThreadId != currentThreadId)
+                {
+                    attachedToTarget = AttachThreadInput(currentThreadId, targetThreadId, true);
+                }
+
+                BringWindowToTop(hwnd);
+                SetForegroundWindow(hwnd);
+            }
+            finally
+            {
+                if (attachedToTarget)
+                {
+                    AttachThreadInput(currentThreadId, targetThreadId, false);
+                }
+
+                if (attachedToForeground)
+                {
+                    AttachThreadInput(currentThreadId, foregroundThreadId, false);
+                }
+            }
+
+            Thread.Sleep(TabOperationForegroundDelayMs);
+            return GetForegroundWindow() == hwnd;
         }
 
         private static bool SendCtrlW()

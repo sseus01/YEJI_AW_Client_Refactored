@@ -160,25 +160,31 @@ namespace YEJI_AW_Client
             AcceptButton = closeButton;
             Load += (_, _) => CenterDialogPanel();
             Resize += (_, _) => CenterDialogPanel();
-            FormClosed += (_, _) =>
+            FormClosed += async (_, _) =>
             {
                 if (closeCurrentTabRequested)
                 {
                     // 폼이 완전히 닫히고 브라우저 창이 포커스를 되찾은 뒤에
                     // 탭 닫기를 실행해야 SendInput 키 입력이 올바른 창으로 전달된다.
-                    IntPtr handle = this.browserWindowHandle;
-                    System.Threading.Tasks.Task.Run(async () =>
+                    return;
+                }
+
+                // 폼이 완전히 닫히고 브라우저 창이 포커스를 되찾은 뒤에
+                // 탭 닫기를 실행해야 SendInput 키 입력이 올바른 창으로 전달된다.
+                IntPtr handle = this.browserWindowHandle;
+                await System.Threading.Tasks.Task.Delay(BrowserFocusDelayMs);
+
+                try
+                {
+                    bool closed = BrowserUrlMonitor.TryCloseCurrentBrowserTab(handle);
+                    if (!closed)
                     {
-                        await System.Threading.Tasks.Task.Delay(BrowserFocusDelayMs);
-                        try
-                        {
-                            BrowserUrlMonitor.TryCloseCurrentBrowserTab(handle);
-                        }
-                        catch (Exception ex)
-                        {
-                            ClientLogger.LogAgent($"Failed to close browser tab: {ex.Message}", "WRN");
-                        }
-                    });
+                        ClientLogger.LogAgent("Failed to close current browser tab after prohibited URL alert closed.", "WRN");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ClientLogger.LogAgent($"Failed to close browser tab: {ex.Message}", "WRN");
                 }
             };
         }
