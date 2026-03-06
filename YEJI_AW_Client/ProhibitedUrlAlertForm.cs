@@ -6,6 +6,9 @@ namespace YEJI_AW_Client
 {
     public sealed class ProhibitedUrlAlertForm : Form
     {
+        // 폼이 닫힌 뒤 OS가 브라우저 창에 포커스를 돌려줄 때까지 대기하는 시간(밀리초)
+        private const int BrowserFocusDelayMs = 200;
+
         private readonly Panel dialogPanel;
         private readonly IntPtr browserWindowHandle;
         private bool closeCurrentTabRequested;
@@ -153,7 +156,21 @@ namespace YEJI_AW_Client
             {
                 if (closeCurrentTabRequested)
                 {
-                    BrowserUrlMonitor.TryCloseCurrentBrowserTab(this.browserWindowHandle);
+                    // 폼이 완전히 닫히고 브라우저 창이 포커스를 되찾은 뒤에
+                    // 탭 닫기를 실행해야 SendInput 키 입력이 올바른 창으로 전달된다.
+                    IntPtr handle = this.browserWindowHandle;
+                    System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        await System.Threading.Tasks.Task.Delay(BrowserFocusDelayMs);
+                        try
+                        {
+                            BrowserUrlMonitor.TryCloseCurrentBrowserTab(handle);
+                        }
+                        catch (Exception ex)
+                        {
+                            ClientLogger.LogAgent($"Failed to close browser tab: {ex.Message}", "WRN");
+                        }
+                    });
                 }
             };
         }
