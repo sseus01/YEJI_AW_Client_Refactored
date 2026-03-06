@@ -21,7 +21,9 @@ namespace YEJI_AW_Client
         private const int EmailExtractionTimeoutMs = 2000;
 
         // SetForegroundWindow 후 브라우저가 포커스를 받을 때까지 대기하는 시간 (밀리초)
-        private const int TabOperationForegroundDelayMs = 50;
+        private const int TabOperationForegroundDelayMs = 80;
+        private const int TabOperationFocusRetryCount = 5;
+        private const int TabOperationSendRetryCount = 2;
 
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
@@ -220,14 +222,45 @@ namespace YEJI_AW_Client
             if (hwnd == IntPtr.Zero)
                 return false;
 
-            // AllowSetForegroundWindow(ASFW_ANY)가 이미 UI 스레드에서 호출되었으므로            
+            // AllowSetForegroundWindow(ASFW_ANY)가 이미 UI 스레드에서 호출되었으므로
             // 백그라운드 스레드에서도 SetForegroundWindow가 정상 동작한다.
-            SetForegroundWindow(hwnd);
-            Thread.Sleep(TabOperationForegroundDelayMs);
+            // 브라우저가 실제 포그라운드를 되찾을 때까지 여러 번 재시도해 안정성을 높인다.
+            bool focused = false;
+            for (int i = 0; i < TabOperationFocusRetryCount; i++)
+            {
+                SetForegroundWindow(hwnd);
+                Thread.Sleep(TabOperationForegroundDelayMs);
+
+                if (GetForegroundWindow() == hwnd)
+                {
+                    focused = true;
+                    break;
+                }
+            }
+
+            if (!focused)
+            {
+                ClientLogger.LogAgent("Failed to focus browser window before Ctrl+W tab close.", "WRN");
+            }
 
             // 영업금지 URL 팝업이 표시되는 동안 사용자가 탭을 전환할 수 없으므로
             // 팝업이 닫힌 시점에도 영업금지 URL 탭이 활성 탭이다.
             // Ctrl+W로 현재 활성 탭(영업금지 URL 탭)만 닫는다.
+            for (int i = 0; i < TabOperationSendRetryCount; i++)
+            {
+                if (SendCtrlW())
+                {
+                    return true;
+                }
+
+                Thread.Sleep(TabOperationForegroundDelayMs);
+            }
+
+            return false;
+        }
+
+        private static bool SendCtrlW()
+        {
             var closeTab = new[]
             {
                 new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL } } },
