@@ -31,6 +31,9 @@ namespace YEJI_AW_Client
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
@@ -57,6 +60,32 @@ namespace YEJI_AW_Client
         private const int VK_CONTROL = 0x11;
         private const int VK_LEFT = 0x25;
         private const int VK_W = 0x57;
+        private const uint INPUT_KEYBOARD = 1;
+        private const uint KEYEVENTF_KEYUP = 0x0002;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct INPUT
+        {
+            public uint type;
+            public InputUnion U;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        private struct InputUnion
+        {
+            [FieldOffset(0)]
+            public KEYBDINPUT ki;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct KEYBDINPUT
+        {
+            public ushort wVk;
+            public ushort wScan;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
 
         private static readonly HashSet<string> SupportedBrowsers = new()
         {
@@ -188,11 +217,19 @@ namespace YEJI_AW_Client
                 return false;
 
             SetForegroundWindow(hwnd);
-            PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_CONTROL), IntPtr.Zero);
-            PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_W), IntPtr.Zero);
-            PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_W), IntPtr.Zero);
-            PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_CONTROL), IntPtr.Zero);
-            return true;
+
+            Thread.Sleep(30);
+
+            var inputs = new[]
+            {
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL } } },
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_W } } },
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_W, dwFlags = KEYEVENTF_KEYUP } } },
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } }
+            };
+
+            uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+            return sent == inputs.Length;
         }
 
         public static bool TrySendBrowserBack(IntPtr hwnd)

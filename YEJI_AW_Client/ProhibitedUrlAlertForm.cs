@@ -110,7 +110,7 @@ namespace YEJI_AW_Client
 
             var closeButton = new Button
             {
-                Text = "닫기",
+                Text = "닫기1",
                 AutoSize = true,
                 Anchor = AnchorStyles.Right,
                 DialogResult = DialogResult.OK
