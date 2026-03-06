@@ -20,21 +20,14 @@ namespace YEJI_AW_Client
         private const int UiAutomationTimeoutMs = 1000;
         private const int EmailExtractionTimeoutMs = 2000;
 
-        // 탭 조작 딜레이 (밀리초) - 브라우저가 키 입력을 처리할 시간을 확보하기 위한 대기시간
-        private const int TabOperationForegroundDelayMs = 50;   // SetForegroundWindow 후 브라우저가 포커스를 받을 때까지 대기
-        private const int TabOpenDelayMs = 200;                 // 새 탭(Ctrl+T)이 열리고 렌더링될 때까지 대기
-        private const int TabSwitchDelayMs = 100;               // 탭 전환(Ctrl+Shift+Tab) 후 포커스가 안정화될 때까지 대기
+        // SetForegroundWindow 후 브라우저가 포커스를 받을 때까지 대기하는 시간 (밀리초)
+        private const int TabOperationForegroundDelayMs = 50;
+
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
 
         [DllImport("user32.dll")]
-        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-
-        [DllImport("kernel32.dll")]
-        private static extern uint GetCurrentThreadId();
-
-        [DllImport("user32.dll")]
-        private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);        
 
         [DllImport("user32.dll")]
         private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -68,11 +61,8 @@ namespace YEJI_AW_Client
         private const uint WM_SYSKEYDOWN = 0x0104;
         private const uint WM_SYSKEYUP = 0x0105;
         private const int VK_MENU = 0x12;
-        private const int VK_CONTROL = 0x11;
-        private const int VK_SHIFT = 0x10;
-        private const int VK_LEFT = 0x25;
-        private const int VK_TAB = 0x09;
-        private const int VK_T = 0x54;
+        private const int VK_CONTROL = 0x11;        
+        private const int VK_LEFT = 0x25;       
         private const int VK_W = 0x57;
         private const uint INPUT_KEYBOARD = 1;
         private const uint KEYEVENTF_KEYUP = 0x0002;
@@ -230,56 +220,14 @@ namespace YEJI_AW_Client
             if (hwnd == IntPtr.Zero)
                 return false;
 
-            // AttachThreadInput을 사용해 현재 스레드를 포그라운드 스레드에 연결한다.
-            // 이를 통해 백그라운드 스레드에서도 SetForegroundWindow가 정상 동작한다.
-            // AllowSetForegroundWindow(ASFW_ANY)가 이미 UI 스레드에서 호출되었으므로
-            // AttachThreadInput 실패 시에도 SetForegroundWindow가 동작할 수 있다.
-            IntPtr fgWindow = GetForegroundWindow();
-            uint fgThreadId = GetWindowThreadProcessId(fgWindow, out _);
-            uint currentThreadId = GetCurrentThreadId();
-            bool needsAttach = fgThreadId != 0 && fgThreadId != currentThreadId;
-            bool attached = needsAttach && AttachThreadInput(currentThreadId, fgThreadId, true);
+            // AllowSetForegroundWindow(ASFW_ANY)가 이미 UI 스레드에서 호출되었으므로            
+            // 백그라운드 스레드에서도 SetForegroundWindow가 정상 동작한다.
+            SetForegroundWindow(hwnd);
+            Thread.Sleep(TabOperationForegroundDelayMs);
 
-            try
-            {
-                SetForegroundWindow(hwnd);
-                Thread.Sleep(TabOperationForegroundDelayMs);
-            }
-            finally
-            {
-                if (attached)
-                    AttachThreadInput(currentThreadId, fgThreadId, false);
-            }
-
-            // 새 빈 탭을 열어 탭이 2개 이상이 되도록 한다 (Ctrl+T).
-            // 이렇게 하면 마지막 탭을 닫을 때 전체 창이 닫히거나
-            // 일부 브라우저(Whale 등)에서 확인 다이얼로그가 뜨는 것을 방지한다.
-            var openNewTab = new[]
-            {
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_T } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_T, dwFlags = KEYEVENTF_KEYUP } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } }
-            };
-            SendInput((uint)openNewTab.Length, openNewTab, Marshal.SizeOf(typeof(INPUT)));
-            Thread.Sleep(TabOpenDelayMs);
- 
-            // 새 탭이 열리면서 포커스가 이동하므로 Ctrl+Shift+Tab 으로
-            // 바로 이전 탭(영업금지 URL 탭)으로 돌아간다.
-            var switchBack = new[]
-            {
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_SHIFT } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_TAB } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_TAB, dwFlags = KEYEVENTF_KEYUP } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_SHIFT, dwFlags = KEYEVENTF_KEYUP } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } }
-            };
-            SendInput((uint)switchBack.Length, switchBack, Marshal.SizeOf(typeof(INPUT)));
-            Thread.Sleep(TabSwitchDelayMs);
-
-            // 현재 탭(영업금지 URL 탭)만 닫는다 (Ctrl+W).
-            // 새 탭이 남아 있으므로 창 전체가 닫히지 않는다.
+            // 영업금지 URL 팝업이 표시되는 동안 사용자가 탭을 전환할 수 없으므로
+            // 팝업이 닫힌 시점에도 영업금지 URL 탭이 활성 탭이다.
+            // Ctrl+W로 현재 활성 탭(영업금지 URL 탭)만 닫는다.
             var closeTab = new[]
             {
                 new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL } } },
