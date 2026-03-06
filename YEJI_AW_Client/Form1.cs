@@ -231,19 +231,22 @@ namespace YEJI_AW_Client
         private List<BanUrlRow> prohibitedUrlRows = new();
         private List<string> prohibitedEmails = new();
         private List<BanEmailRow> prohibitedEmailRows = new();
-        private string? previousUrl; // 이전 URL을 추적하여 변경 감지
         private HashSet<string> banItemExceptionKeys = new(StringComparer.OrdinalIgnoreCase);
+        private string? previousUrl; // 이전 URL을 추적하여 변경 감지        
         private string? lastAlertedUrl;
         private DateTime lastAlertedAt = DateTime.MinValue;
         private string? lastAlertedEmailSignature;
         private DateTime lastAlertedEmailAt = DateTime.MinValue;
         private DateTime lastMailComposeCheckAt = DateTime.MinValue;
         private DateTime lastProhibitedEmailSyncAt = DateTime.MinValue;
+        private DateTime lastBanItemExceptionSyncAt = DateTime.MinValue;
         private bool isFetchingProhibitedEmails;
+        private bool isFetchingBanItemExceptions;
         private static readonly TimeSpan prohibitedAlertCooldown = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan prohibitedEmailAlertCooldown = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan mailComposeCheckInterval = TimeSpan.FromSeconds(3);
         private static readonly TimeSpan prohibitedEmailSyncInterval = TimeSpan.FromMinutes(1);
+        private static readonly TimeSpan banItemExceptionSyncInterval = TimeSpan.FromMinutes(1);
         private Dictionary<string, string> lastKnownOvertimeStatuses = new();
 
         // 브라우저 모니터링 활성화 여부 (서버 설정에서 가져옴, 기본값: true)
@@ -698,16 +701,39 @@ namespace YEJI_AW_Client
             }
         }
 
-        private async Task FetchBanItemExceptionsAsync()
+        private void EnsureBanItemExceptionsFresh()
         {
-            if (string.IsNullOrWhiteSpace(employeeId))
+            if (isFetchingBanItemExceptions)
             {
-                banItemExceptionKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 return;
             }
 
+            if (DateTime.Now - lastBanItemExceptionSyncAt < banItemExceptionSyncInterval)
+            {
+                return;
+            }
+
+            _ = FetchBanItemExceptionsAsync();
+        }
+
+        private async Task FetchBanItemExceptionsAsync()
+        {
+            if (isFetchingBanItemExceptions)
+            {
+                return;
+            }
+
+            isFetchingBanItemExceptions = true;
+
             try
             {
+                if (string.IsNullOrWhiteSpace(employeeId))
+                {
+                    banItemExceptionKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    lastBanItemExceptionSyncAt = DateTime.Now;
+                    return;
+                }
+
                 string url = $"{ServerBaseUrl}/api/client/ban-item-exceptions?employeeId={Uri.EscapeDataString(employeeId)}";
                 using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
                 response.EnsureSuccessStatusCode();
@@ -759,11 +785,16 @@ namespace YEJI_AW_Client
                 }
 
                 banItemExceptionKeys = parsed;
+                lastBanItemExceptionSyncAt = DateTime.Now;
                 ClientLogger.LogAgent($"Synced ban-item exceptions: {banItemExceptionKeys.Count} items.", "DBG");
             }
             catch (Exception ex)
             {
                 ClientLogger.LogAgent($"Failed to sync ban-item exceptions: {ex.Message}", "DBG");
+            }
+            finally
+            {
+                isFetchingBanItemExceptions = false;
             }
         }
 
@@ -1055,6 +1086,8 @@ namespace YEJI_AW_Client
                 LogEmailDebug($"Skip recipient check: not a compose page. url={currentUrl}");
                 return;
             }
+
+            EnsureBanItemExceptionsFresh();
 
             // 메일 작성 화면에서는 이메일 금지목록을 빠르게 재동기화
             if (!isFetchingProhibitedEmails && DateTime.Now - lastProhibitedEmailSyncAt >= prohibitedEmailSyncInterval)
@@ -4197,6 +4230,7 @@ namespace YEJI_AW_Client
                 bool urlChanged = previousUrl != currentUrl;
                 previousUrl = currentUrl;
 
+                EnsureBanItemExceptionsFresh();
                 CheckMailComposeRecipients(currentUrl);
 
                 // URL이 변경되었고 금지된 URL인 경우에만 알림 표시 (반복 알림 없음)
