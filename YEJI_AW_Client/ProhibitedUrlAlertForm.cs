@@ -13,6 +13,11 @@ namespace YEJI_AW_Client
         private readonly IntPtr browserWindowHandle;
         private bool closeCurrentTabRequested;
 
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool AllowSetForegroundWindow(int dwProcessId);
+
+        private const int ASFW_ANY = -1;
+
         public ProhibitedUrlAlertForm(string companyName, string fullUrl, IntPtr browserWindowHandle)
         {
             this.browserWindowHandle = browserWindowHandle;
@@ -114,7 +119,7 @@ namespace YEJI_AW_Client
 
             var closeButton = new Button
             {
-                Text = "닫기1",
+                Text = "닫기",
                 AutoSize = true,
                 Anchor = AnchorStyles.Right,
                 DialogResult = DialogResult.OK
@@ -122,6 +127,9 @@ namespace YEJI_AW_Client
             closeButton.Click += (_, _) =>
             {
                 closeCurrentTabRequested = true;
+                // 포그라운드 잠금(foreground lock)이 해제되기 전에
+                // 백그라운드 스레드가 SetForegroundWindow를 사용할 수 있도록 허용한다.
+                AllowSetForegroundWindow(ASFW_ANY);
                 Close();
             };
 

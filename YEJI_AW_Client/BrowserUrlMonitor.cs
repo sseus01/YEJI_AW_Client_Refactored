@@ -30,6 +30,12 @@ namespace YEJI_AW_Client
         [DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
         [DllImport("user32.dll")]
         private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
@@ -224,8 +230,26 @@ namespace YEJI_AW_Client
             if (hwnd == IntPtr.Zero)
                 return false;
 
-            SetForegroundWindow(hwnd);
-            Thread.Sleep(TabOperationForegroundDelayMs);
+            // AttachThreadInput을 사용해 현재 스레드를 포그라운드 스레드에 연결한다.
+            // 이를 통해 백그라운드 스레드에서도 SetForegroundWindow가 정상 동작한다.
+            // AllowSetForegroundWindow(ASFW_ANY)가 이미 UI 스레드에서 호출되었으므로
+            // AttachThreadInput 실패 시에도 SetForegroundWindow가 동작할 수 있다.
+            IntPtr fgWindow = GetForegroundWindow();
+            uint fgThreadId = GetWindowThreadProcessId(fgWindow, out _);
+            uint currentThreadId = GetCurrentThreadId();
+            bool needsAttach = fgThreadId != 0 && fgThreadId != currentThreadId;
+            bool attached = needsAttach && AttachThreadInput(currentThreadId, fgThreadId, true);
+
+            try
+            {
+                SetForegroundWindow(hwnd);
+                Thread.Sleep(TabOperationForegroundDelayMs);
+            }
+            finally
+            {
+                if (attached)
+                    AttachThreadInput(currentThreadId, fgThreadId, false);
+            }
 
             // 새 빈 탭을 열어 탭이 2개 이상이 되도록 한다 (Ctrl+T).
             // 이렇게 하면 마지막 탭을 닫을 때 전체 창이 닫히거나
@@ -239,7 +263,7 @@ namespace YEJI_AW_Client
             };
             SendInput((uint)openNewTab.Length, openNewTab, Marshal.SizeOf(typeof(INPUT)));
             Thread.Sleep(TabOpenDelayMs);
-         
+ 
             // 새 탭이 열리면서 포커스가 이동하므로 Ctrl+Shift+Tab 으로
             // 바로 이전 탭(영업금지 URL 탭)으로 돌아간다.
             var switchBack = new[]

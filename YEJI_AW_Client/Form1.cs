@@ -232,6 +232,7 @@ namespace YEJI_AW_Client
         private List<string> prohibitedEmails = new();
         private List<BanEmailRow> prohibitedEmailRows = new();
         private string? previousUrl; // 이전 URL을 추적하여 변경 감지
+        private HashSet<string> banItemExceptionKeys = new(StringComparer.OrdinalIgnoreCase);
         private string? lastAlertedUrl;
         private DateTime lastAlertedAt = DateTime.MinValue;
         private string? lastAlertedEmailSignature;
@@ -398,6 +399,7 @@ namespace YEJI_AW_Client
             configTimer.Tick += async (s, e) =>
             {
                 await FetchWorkTimeFromServerAsync();
+                await FetchBanItemExceptionsAsync();
                 await FetchProhibitedUrlsAsync();
                 await FetchProhibitedEmailsAsync();
             };
@@ -696,6 +698,146 @@ namespace YEJI_AW_Client
             }
         }
 
+        private async Task FetchBanItemExceptionsAsync()
+        {
+            if (string.IsNullOrWhiteSpace(employeeId))
+            {
+                banItemExceptionKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                return;
+            }
+
+            try
+            {
+                string url = $"{ServerBaseUrl}/api/client/ban-item-exceptions?employeeId={Uri.EscapeDataString(employeeId)}";
+                using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                using var document = await JsonDocument.ParseAsync(stream);
+
+                JsonElement rowsElement = document.RootElement;
+                if (rowsElement.ValueKind == JsonValueKind.Object)
+                {
+                    if (rowsElement.TryGetProperty("rows", out var rows))
+                    {
+                        rowsElement = rows;
+                    }
+                    else if (rowsElement.TryGetProperty("data", out var data))
+                    {
+                        if (data.ValueKind == JsonValueKind.Array)
+                        {
+                            rowsElement = data;
+                        }
+                        else if (data.ValueKind == JsonValueKind.Object && data.TryGetProperty("rows", out var dataRows))
+                        {
+                            rowsElement = dataRows;
+                        }
+                    }
+                }
+
+                var parsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (rowsElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var row in rowsElement.EnumerateArray())
+                    {
+                        string type = GetJsonString(row, "type", "ban_type", "itemType");
+                        string value = GetJsonString(row, "value", "itemValue", "url", "email");
+                        if (string.IsNullOrWhiteSpace(type) || string.IsNullOrWhiteSpace(value))
+                        {
+                            continue;
+                        }
+
+                        string normalizedType = NormalizeBanItemType(type);
+                        string normalizedValue = NormalizeBanItemValue(normalizedType, value);
+                        if (string.IsNullOrWhiteSpace(normalizedValue))
+                        {
+                            continue;
+                        }
+
+                        parsed.Add(BuildBanExceptionKey(normalizedType, normalizedValue));
+                    }
+                }
+
+                banItemExceptionKeys = parsed;
+                ClientLogger.LogAgent($"Synced ban-item exceptions: {banItemExceptionKeys.Count} items.", "DBG");
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Failed to sync ban-item exceptions: {ex.Message}", "DBG");
+            }
+        }
+
+        private static string GetJsonString(JsonElement row, params string[] names)
+        {
+            if (row.ValueKind != JsonValueKind.Object)
+            {
+                return string.Empty;
+            }
+
+            foreach (string name in names)
+            {
+                if (row.TryGetProperty(name, out var valueElement) && valueElement.ValueKind == JsonValueKind.String)
+                {
+                    return valueElement.GetString() ?? string.Empty;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string NormalizeBanItemType(string? type)
+        {
+            if (string.IsNullOrWhiteSpace(type))
+            {
+                return string.Empty;
+            }
+
+            string normalized = type.Trim().ToLowerInvariant();
+            if (normalized is "mail" or "e-mail")
+            {
+                return "email";
+            }
+
+            if (normalized is "site" or "domain")
+            {
+                return "url";
+            }
+
+            return normalized;
+        }
+
+        private static string NormalizeBanItemValue(string type, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            if (string.Equals(type, "email", StringComparison.OrdinalIgnoreCase))
+            {
+                return NormalizeEmail(value);
+            }
+
+            return value.Trim().ToLowerInvariant();
+        }
+
+        private static string BuildBanExceptionKey(string type, string value)
+        {
+            return $"{type}|{value}";
+        }
+
+        private bool IsBanItemException(string type, string? value)
+        {
+            string normalizedType = NormalizeBanItemType(type);
+            string normalizedValue = NormalizeBanItemValue(normalizedType, value);
+            if (string.IsNullOrWhiteSpace(normalizedType) || string.IsNullOrWhiteSpace(normalizedValue))
+            {
+                return false;
+            }
+
+            return banItemExceptionKeys.Contains(BuildBanExceptionKey(normalizedType, normalizedValue));
+        }
+
         private static List<string> ExtractUrlsFromCache(ProhibitedUrlsCache cache)
         {
             return cache.Urls.Select(u => u.Url).ToList();
@@ -959,6 +1101,12 @@ namespace YEJI_AW_Client
 
                 var row = prohibitedEmailRows.FirstOrDefault(r =>
                     string.Equals(NormalizeEmail(r.Email), normalized, StringComparison.OrdinalIgnoreCase));
+                if (row != null && IsBanItemException("email", row.Email))
+                {
+                    LogEmailDebug($"Exception matched for recipient: {normalized}");
+                    continue;
+                }
+
                 if (row != null && !matchedRows.Any(m => string.Equals(m.Email, row.Email, StringComparison.OrdinalIgnoreCase)))
                 {
                     matchedRows.Add(row);
@@ -1138,6 +1286,7 @@ namespace YEJI_AW_Client
             {
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("ResendPendingIdleEvents", ResendPendingIdleEventsAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("FetchWorkTimeFromServer", FetchWorkTimeFromServerAsync);
+                startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("FetchBanItemExceptions", FetchBanItemExceptionsAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("FetchProhibitedUrls", FetchProhibitedUrlsAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("FetchProhibitedEmails", FetchProhibitedEmailsAsync);
                 startupSequenceNeedsRetry |= !await ExecuteStartupStepAsync("CheckClientUpdate", () => CheckClientUpdateAsync());
@@ -4051,9 +4200,14 @@ namespace YEJI_AW_Client
                 CheckMailComposeRecipients(currentUrl);
 
                 // URL이 변경되었고 금지된 URL인 경우에만 알림 표시 (반복 알림 없음)
-                if (prohibitedUrls != null && prohibitedUrls.Count > 0 &&
-                    urlChanged && BrowserUrlMonitor.IsProhibitedUrl(currentUrl, prohibitedUrls))
+                if (prohibitedUrls != null && prohibitedUrls.Count > 0 && urlChanged)
                 {
+                    BanUrlRow? matchedRow = FindMatchedProhibitedUrlRow(currentUrl);
+                    if (matchedRow == null || IsBanItemException("url", matchedRow.Url))
+                    {
+                        return;
+                    }
+
                     string normalizedUrl = NormalizeUrlForDisplay(currentUrl);
                     if (IsAlertSuppressed(normalizedUrl))
                     {
@@ -4062,7 +4216,7 @@ namespace YEJI_AW_Client
 
                     lastAlertedUrl = normalizedUrl;
                     lastAlertedAt = DateTime.Now;
-                    ShowProhibitedUrlAlert(currentUrl);
+                    ShowProhibitedUrlAlert(currentUrl, matchedRow.CompanyName ?? string.Empty);
 
                     // 로그 기록 (전체 URL 경로 포함)
                     ClientLogger.LogAgent($"Prohibited URL accessed: {currentUrl}", "WARN");
@@ -4075,35 +4229,11 @@ namespace YEJI_AW_Client
             }
         }
 
-        private void ShowProhibitedUrlAlert(string url)
+        private BanUrlRow? FindMatchedProhibitedUrlRow(string url)
         {
-            try
+            if (string.IsNullOrWhiteSpace(url) || prohibitedUrlRows == null || prohibitedUrlRows.Count == 0)
             {
-                string title = "영업금지 사이트 알림";
-                string fullUrl = NormalizeUrlForDisplay(url);
-
-                // 트레이 아이콘 풍선 알림 표시
-                notifyIcon.BalloonTipTitle = title;
-                notifyIcon.BalloonTipText = $"영업금지 URL: {fullUrl}";
-                notifyIcon.BalloonTipIcon = ToolTipIcon.Warning;
-                notifyIcon.ShowBalloonTip(5000);
-
-                string companyName = ResolveCompanyName(url);
-                IntPtr browserWindowHandle = BrowserUrlMonitor.GetForegroundBrowserWindowHandle();
-                using var alertForm = new ProhibitedUrlAlertForm(companyName, fullUrl, browserWindowHandle);
-                alertForm.ShowDialog(this);
-            }
-            catch (Exception ex)
-            {
-                ClientLogger.LogAgent($"Failed to show prohibited URL alert: {ex.Message}", "Err");
-            }
-        }
-
-        private string ResolveCompanyName(string url)
-        {
-            if (prohibitedUrlRows == null || prohibitedUrlRows.Count == 0)
-            {
-                return string.Empty;
+                return null;
             }
 
             foreach (var row in prohibitedUrlRows)
@@ -4115,13 +4245,36 @@ namespace YEJI_AW_Client
 
                 if (BrowserUrlMonitor.IsProhibitedUrl(url, new List<string> { row.Url }))
                 {
-                    return row.CompanyName ?? string.Empty;
+                    return row;
                 }
             }
 
-            return string.Empty;
+            return null;
         }
 
+        private void ShowProhibitedUrlAlert(string url, string companyName)
+        {
+            try
+            {
+                string title = "영업금지 사이트 알림";
+                string fullUrl = NormalizeUrlForDisplay(url);
+
+                // 트레이 아이콘 풍선 알림 표시
+                notifyIcon.BalloonTipTitle = title;
+                notifyIcon.BalloonTipText = $"영업금지 URL: {fullUrl}";
+                notifyIcon.BalloonTipIcon = ToolTipIcon.Warning;
+                notifyIcon.ShowBalloonTip(5000);
+                               
+                IntPtr browserWindowHandle = BrowserUrlMonitor.GetForegroundBrowserWindowHandle();
+                using var alertForm = new ProhibitedUrlAlertForm(companyName, fullUrl, browserWindowHandle);
+                alertForm.ShowDialog(this);
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Failed to show prohibited URL alert: {ex.Message}", "Err");
+            }
+        }
+        
         private bool IsAlertSuppressed(string normalizedUrl)
         {
             if (string.IsNullOrWhiteSpace(normalizedUrl))
