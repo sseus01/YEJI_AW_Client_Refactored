@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -54,7 +54,9 @@ namespace YEJI_AW_Client
         private const uint WM_SYSKEYDOWN = 0x0104;
         private const uint WM_SYSKEYUP = 0x0105;
         private const int VK_MENU = 0x12;
+        private const int VK_CONTROL = 0x11;
         private const int VK_LEFT = 0x25;
+        private const int VK_W = 0x57;
 
         private static readonly HashSet<string> SupportedBrowsers = new()
         {
@@ -178,6 +180,19 @@ namespace YEJI_AW_Client
                 return false;
 
             return PostMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        public static bool TryCloseCurrentBrowserTab(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+                return false;
+
+            SetForegroundWindow(hwnd);
+            PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_CONTROL), IntPtr.Zero);
+            PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_W), IntPtr.Zero);
+            PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_W), IntPtr.Zero);
+            PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_CONTROL), IntPtr.Zero);
+            return true;
         }
 
         public static bool TrySendBrowserBack(IntPtr hwnd)

@@ -117,10 +117,7 @@ namespace YEJI_AW_Client
             };
             closeButton.Click += (_, _) =>
             {
-                if (this.browserWindowHandle != IntPtr.Zero)
-                {
-                    BrowserUrlMonitor.TryCloseBrowserWindow(this.browserWindowHandle);
-                }
+                BrowserUrlMonitor.TryCloseCurrentBrowserTab(this.browserWindowHandle);
 
                 Close();
             };
