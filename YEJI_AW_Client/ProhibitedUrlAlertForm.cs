@@ -118,7 +118,12 @@ namespace YEJI_AW_Client
             };
             closeButton.Click += (_, _) =>
             {
-                closeCurrentTabRequested = true;
+                bool tabClosed = BrowserUrlMonitor.TryCloseCurrentBrowserTab(this.browserWindowHandle);
+                if (!tabClosed)
+                {
+                    BrowserUrlMonitor.TryCloseBrowserWindow(this.browserWindowHandle);
+                }
+
                 Close();
             };
 
