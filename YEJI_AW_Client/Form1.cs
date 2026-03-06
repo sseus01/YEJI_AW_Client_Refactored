@@ -187,7 +187,7 @@ namespace YEJI_AW_Client
         private readonly TimeSpan employeeOvertimeCheckInterval = TimeSpan.FromSeconds(60);
         private DateTime pcOffKeyDate;
         private DateTime? scheduledShutdownTime;
-        
+
         private PcOffSettings pcOffSettings = new();
         private int remainingTempDisableCount;
         private DateTime lastPcOffSettingsFetchTime;
@@ -443,7 +443,7 @@ namespace YEJI_AW_Client
             {
                 this.Hide();
                 this.ShowInTaskbar = false;
-                ShowUpdateCompletionNotificationIfNeeded();               
+                ShowUpdateCompletionNotificationIfNeeded();
                 heartbeatTimer.Start();
                 updateCheckTimer.Start();
                 employeeOvertimeStatusTimer.Start();
@@ -1114,14 +1114,6 @@ namespace YEJI_AW_Client
                 alertForm.TopMost = true;
                 alertForm.ShowDialog();
 
-                if (alertForm.DeleteRequested)
-                {
-                    int removedCount = BrowserUrlMonitor.RemoveRecipientEmailsFromCurrentBrowser(
-                        matchedRows.Select(m => NormalizeEmail(m.Email)).Where(x => !string.IsNullOrWhiteSpace(x)),
-                        browserWindowHandle);
-                    ClientLogger.LogAgent($"Prohibited email removal requested: removed {removedCount}/{matchedRows.Count} recipients.", "INF");
-                }
-
                 string logEmails = string.Join(", ", matchedRows.Select(m => NormalizeEmail(m.Email)));
                 ClientLogger.LogAgent($"Prohibited email detected in mail compose: {logEmails}", "WARN");
             }
@@ -1480,7 +1472,7 @@ namespace YEJI_AW_Client
             {
                 ClientLogger.LogUpdate("Bypassing download delay for urgent/forced update.", "DBG");
             }
-                        
+
             string downloadUrl = latestRelease.DownloadUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
                 ? latestRelease.DownloadUrl
                 : ServerBaseUrl + latestRelease.DownloadUrl;
@@ -1531,7 +1523,7 @@ namespace YEJI_AW_Client
 
                     await using var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
                     await response.Content.CopyToAsync(fileStream);
-                    
+
                     ClientLogger.LogUpdate($"Download completed successfully. File saved to: {tempFilePath}", "DBG");
                     break; // 성공 시 루프 탈출
                 }
@@ -1716,7 +1708,7 @@ namespace YEJI_AW_Client
                 isUpdatingClient = false;
             }
         }
-        
+
         private static string SanitizeFileName(string fileName)
         {
             if (string.IsNullOrWhiteSpace(fileName))
@@ -1780,7 +1772,7 @@ namespace YEJI_AW_Client
                 _ => $"알 수 없는 오류가 발생했습니다 (코드: {exitCode})."
             };
         }
-        
+
         private void CreatePendingUpdateMarker(string targetVersion)
         {
             try
@@ -2132,7 +2124,7 @@ namespace YEJI_AW_Client
 
                         return true;
                     }
-                                        
+
                     var start = baseDate.Add(fromTime);
                     var end = baseDate.Add(toTime);
                     if (end < start)
@@ -2206,7 +2198,7 @@ namespace YEJI_AW_Client
             }
 
             shutdownCountdownLabel = null;
-            pcOffStatusLabel = null;            
+            pcOffStatusLabel = null;
 
             pcOffAlertForm?.Close();
             pcOffAlertForm?.Dispose();
@@ -2322,7 +2314,7 @@ namespace YEJI_AW_Client
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
 
-                pcOffAlertForm?.Close();               
+                pcOffAlertForm?.Close();
             };
 
             closeButton.Click += (s, e) => pcOffAlertForm?.Close();
@@ -2332,7 +2324,7 @@ namespace YEJI_AW_Client
 
             container.Controls.Add(messagePanel, 0, 0);
             container.Controls.Add(buttonPanel, 0, 1);
-            pcOffAlertForm.Controls.Add(container);            
+            pcOffAlertForm.Controls.Add(container);
             // 엔터 입력 시 실수로 확인이 눌리지 않도록, 일시해제신청 가능 시 해당 버튼을 기본 동작으로 지정
             pcOffAlertForm.AcceptButton = extendButton.Visible ? extendButton : closeButton;
             pcOffAlertForm.CancelButton = closeButton;
@@ -2580,7 +2572,7 @@ namespace YEJI_AW_Client
                 Cursor = Cursors.Hand,
                 Image = popupImage
             };
-                      
+
             // 더블클릭으로 닫기
             pictureBox.DoubleClick += (s, e) => popupForm.Close();
 
@@ -2650,7 +2642,7 @@ namespace YEJI_AW_Client
             {
                 hasShownPcOffAlert = false;
                 pcOffAlertTargetTime = null;
-                scheduledShutdownTime = null;                
+                scheduledShutdownTime = null;
                 shutdownCountdownTimer.Stop();
                 CloseShutdownCountdownTray();
                 pcOffKeyDate = currentDate;
@@ -3010,10 +3002,10 @@ namespace YEJI_AW_Client
                 }
                 wasInLunchBreak = isLunchBreak;
 
-                bool isWorkingTime = IsWorkingTime(nowTime);                
+                bool isWorkingTime = IsWorkingTime(nowTime);
 
                 bool isAfterWork = nowTime > workEndTime;
-                
+
                 // 1) 근무시간: 기존 팝업 방식
                 if (!isAfterWork && isWorkingTime)
                 {
@@ -3219,7 +3211,7 @@ namespace YEJI_AW_Client
                     lastInputTime = estimatedLastInput;
                     ClientLogger.LogService($"Updated lastInputTime to actual input time: {lastInputTime:HH:mm:ss}", "DBG");
                 }
-                           
+
                 RestoreNotifyIcon();
             }
         }
@@ -3446,7 +3438,7 @@ namespace YEJI_AW_Client
             {
                 idleIntervalSemaphore.Release();
                 ClientLogger.LogAgent($"HandleIdleIntervalAsync completed.", "DBG");
-            }           
+            }
         }
 
         private List<(DateTime Start, DateTime End)> SplitIdleInterval(DateTime start, DateTime end)
@@ -3994,7 +3986,7 @@ namespace YEJI_AW_Client
             {
                 return;
             }
-                       
+
             try
             {
                 // /api/client/heartbeat로 변경
@@ -4043,12 +4035,12 @@ namespace YEJI_AW_Client
                 // 브라우저 모니터링이 비활성화된 경우 체크하지 않음
                 if (!enableBrowserMonitoring)
                     return;
-                               
+
                 // 현재 활성화된 브라우저의 URL 가져오기
                 string? currentUrl = BrowserUrlMonitor.GetCurrentBrowserUrl();
 
                 if (string.IsNullOrWhiteSpace(currentUrl))
-                {                   
+                {
                     return;
                 }
 

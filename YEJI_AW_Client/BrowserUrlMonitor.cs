@@ -1,14 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Automation;
-using System.Windows.Forms;
 
 namespace YEJI_AW_Client
 {
@@ -32,15 +30,6 @@ namespace YEJI_AW_Client
 
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-        [DllImport("user32.dll")]
-        private static extern bool SetCursorPos(int X, int Y);
-
-        [DllImport("user32.dll")]
-        private static extern bool GetCursorPos(out POINT lpPoint);
-
-        [DllImport("user32.dll")]
-        private static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
@@ -66,8 +55,6 @@ namespace YEJI_AW_Client
         private const uint WM_SYSKEYUP = 0x0105;
         private const int VK_MENU = 0x12;
         private const int VK_LEFT = 0x25;
-        private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-        private const uint MOUSEEVENTF_LEFTUP = 0x0004;
 
         private static readonly HashSet<string> SupportedBrowsers = new()
         {
@@ -87,13 +74,6 @@ namespace YEJI_AW_Client
         private static readonly bool EmailDebugLoggingEnabled =
             string.Equals(Environment.GetEnvironmentVariable("YEJI_EMAIL_DEBUG"), "1", StringComparison.OrdinalIgnoreCase);
         private static readonly Regex EmailRegex = new Regex(@"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct POINT
-        {
-            public int X;
-            public int Y;
-        }
 
         /// <summary>
         /// 현재 활성화된 브라우저 창에서 URL을 추출합니다.
@@ -322,338 +302,6 @@ namespace YEJI_AW_Client
             return new List<string>();
         }
 
-        public static int RemoveRecipientEmailsFromCurrentBrowser(IEnumerable<string> recipientEmails, IntPtr browserWindowHandle)
-        {
-            var targets = recipientEmails
-                .Select(x => x?.Trim().ToLowerInvariant())
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (targets.Count == 0 || browserWindowHandle == IntPtr.Zero)
-            {
-                return 0;
-            }
-
-            try
-            {
-                GetWindowThreadProcessId(browserWindowHandle, out uint processId);
-                if (processId == 0)
-                    return 0;
-
-                using var process = Process.GetProcessById((int)processId);
-                string processName = process.ProcessName.ToLowerInvariant();
-                if (!IsSupportedBrowser(processName))
-                    return 0;
-
-                SetForegroundWindow(browserWindowHandle);
-                Thread.Sleep(180);
-
-                return RemoveRecipientsFromUiAutomation(browserWindowHandle, targets);
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        private static int RemoveRecipientsFromUiAutomation(IntPtr hwnd, IReadOnlyCollection<string> targets)
-        {
-            int removedCount = 0;
-            var removedEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            try
-            {
-                var root = AutomationElement.FromHandle(hwnd);
-                if (root == null)
-                    return 0;
-
-                var elements = root.FindAll(TreeScope.Subtree, System.Windows.Automation.Condition.TrueCondition);
-                int maxScan = Math.Min(elements.Count, 1800);
-                for (int i = 0; i < maxScan; i++)
-                {
-                    var element = elements[i];
-                    if (TryMatchRecipientElement(element, targets, out string matchedEmail) && !removedEmails.Contains(matchedEmail))
-                    {
-                        if (TryClickDeleteButton(element, matchedEmail) || TryDeleteWithKeyboard(element))
-                        {
-                            removedEmails.Add(matchedEmail);
-                            removedCount++;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // ignore
-            }
-
-            return Math.Min(removedCount, targets.Count);
-        }
-
-        private static bool TryMatchRecipientElement(AutomationElement element, IReadOnlyCollection<string> targets, out string matchedEmail)
-        {
-            matchedEmail = string.Empty;
-
-            string[] candidates =
-            {
-                element.Current.Name ?? string.Empty,
-                element.Current.HelpText ?? string.Empty,
-                element.Current.ItemStatus ?? string.Empty
-            };
-
-            foreach (string target in targets)
-            {
-                foreach (string candidate in candidates)
-                {
-                    if (candidate.IndexOf(target, StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        matchedEmail = target;
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        private static bool TryClickDeleteButton(AutomationElement element, string matchedEmail)
-        {
-            try
-            {
-                var buttonCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button);
-                var nearButtons = element.FindAll(TreeScope.Subtree, buttonCondition);
-                foreach (AutomationElement button in nearButtons)
-                {
-                    string buttonName = button.Current.Name ?? string.Empty;
-                    string automationId = button.Current.AutomationId ?? string.Empty;
-                    string className = button.Current.ClassName ?? string.Empty;
-
-                    bool hasDeleteHint =
-                        automationId.IndexOf("delete", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        automationId.IndexOf("remove", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        automationId.IndexOf("close", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        className.IndexOf("delete", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        className.IndexOf("remove", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        className.IndexOf("close", StringComparison.OrdinalIgnoreCase) >= 0;
-
-                    var buttonRect = button.Current.BoundingRectangle;
-                    var elementRect = element.Current.BoundingRectangle;
-                    bool looksLikeTinyRemoveButton =
-                        buttonRect.Width > 0 &&
-                        buttonRect.Width <= 24 &&
-                        buttonRect.Height > 0 &&
-                        buttonRect.Height <= 24 &&
-                        buttonRect.Left >= elementRect.Left &&
-                        buttonRect.Right <= elementRect.Right + 2 &&
-                        buttonRect.Top >= elementRect.Top - 2 &&
-                        buttonRect.Bottom <= elementRect.Bottom + 2 &&
-                        buttonRect.Left >= elementRect.Left + (elementRect.Width / 2);
-
-                    bool isDeleteButton =
-                        buttonName.IndexOf("삭제", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        buttonName.IndexOf("remove", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        buttonName.IndexOf("지우기", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        buttonName.IndexOf("close", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        buttonName.IndexOf(matchedEmail, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        hasDeleteHint ||
-                        looksLikeTinyRemoveButton;
-
-                    if (!isDeleteButton)
-                    {
-                        continue;
-                    }
-
-                    if (button.TryGetCurrentPattern(InvokePattern.Pattern, out var invokeObj) && invokeObj is InvokePattern invoke)
-                    {
-                        invoke.Invoke();
-                        Thread.Sleep(80);
-                        return true;
-                    }
-
-                    if (TryClickElementByBoundingRect(button, clickOnRightEdge: false))
-                    {
-                        return true;
-                    }
-                }
-
-                if (TryClickDeleteGlyphNearRecipient(element))
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-                // ignore
-            }
-
-            return false;
-        }
-
-        private static bool TryClickDeleteGlyphNearRecipient(AutomationElement recipientElement)
-        {
-            try
-            {
-                var recipientRect = recipientElement.Current.BoundingRectangle;
-                if (recipientRect.Width <= 1 || recipientRect.Height <= 1)
-                {
-                    return false;
-                }
-
-                var candidateScopes = new List<AutomationElement> { recipientElement };
-                var parent = TreeWalker.ControlViewWalker.GetParent(recipientElement);
-                if (parent != null)
-                {
-                    candidateScopes.Add(parent);
-
-                    var grandParent = TreeWalker.ControlViewWalker.GetParent(parent);
-                    if (grandParent != null)
-                    {
-                        candidateScopes.Add(grandParent);
-                    }
-                }
-
-                foreach (var scope in candidateScopes)
-                {
-                    var descendants = scope.FindAll(TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition);
-                    for (int i = 0; i < descendants.Count; i++)
-                    {
-                        var candidate = descendants[i];
-                        var r = candidate.Current.BoundingRectangle;
-                        if (r.Width <= 0 || r.Height <= 0 || r.Width > 24 || r.Height > 24)
-                        {
-                            continue;
-                        }
-
-                        bool insideRecipient =
-                            r.Left >= recipientRect.Left - 2 &&
-                            r.Right <= recipientRect.Right + 2 &&
-                            r.Top >= recipientRect.Top - 2 &&
-                            r.Bottom <= recipientRect.Bottom + 2;
-
-                        bool nearRightSide = r.Left >= recipientRect.Left + (recipientRect.Width / 2);
-                        if (!insideRecipient || !nearRightSide)
-                        {
-                            continue;
-                        }
-
-                        string name = (candidate.Current.Name ?? string.Empty).Trim();
-                        string aid = candidate.Current.AutomationId ?? string.Empty;
-                        string cls = candidate.Current.ClassName ?? string.Empty;
-
-                        bool isCloseGlyph =
-                            name == "×" ||
-                            name == "x" ||
-                            name == "X" ||
-                            name.IndexOf("close", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            aid.IndexOf("close", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            aid.IndexOf("remove", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            cls.IndexOf("close", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            cls.IndexOf("remove", StringComparison.OrdinalIgnoreCase) >= 0;
-
-                        if (!isCloseGlyph)
-                        {
-                            continue;
-                        }
-
-                        if (candidate.TryGetCurrentPattern(InvokePattern.Pattern, out var invokeObj) && invokeObj is InvokePattern invoke)
-                        {
-                            invoke.Invoke();
-                            Thread.Sleep(80);
-                            return true;
-                        }
-
-                        if (TryClickElementByBoundingRect(candidate, clickOnRightEdge: false))
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // ignore
-            }
-
-            return false;
-        }
-
-        private static bool TryDeleteWithKeyboard(AutomationElement element)
-        {
-            try
-            {
-                if (TryClickElementByBoundingRect(element, clickOnRightEdge: true, rightEdgeInset: 3))
-                {
-                    Thread.Sleep(50);
-                }
-
-                element.SetFocus();
-                Thread.Sleep(40);
-                SendKeys.SendWait("{BACKSPACE}");
-                Thread.Sleep(60);
-                SendKeys.SendWait("{DELETE}");
-                Thread.Sleep(60);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static bool TryClickElementByBoundingRect(AutomationElement element, bool clickOnRightEdge = true, int rightEdgeInset = 10)
-        {
-            bool hasOriginalCursorPos = false;
-            POINT originalPos = default;
-
-            try
-            {
-                var rect = element.Current.BoundingRectangle;
-                if (rect.Width <= 1 || rect.Height <= 1)
-                {
-                    return false;
-                }
-
-                int clickX;
-                if (clickOnRightEdge)
-                {
-                    int inset = Math.Max(1, Math.Min(rightEdgeInset, (int)Math.Floor(rect.Width / 2)));
-                    clickX = (int)Math.Round(rect.Right - inset);
-                }
-                else
-                {
-                    clickX = (int)Math.Round(rect.Left + (rect.Width / 2));
-                }
-
-                int clickY = (int)Math.Round(rect.Top + (rect.Height / 2));
-
-                if (!GetCursorPos(out originalPos))
-                {
-                    return false;
-                }
-                hasOriginalCursorPos = true;
-
-                SetCursorPos(clickX, clickY);
-                Thread.Sleep(30);
-                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
-                Thread.Sleep(20);
-                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
-                Thread.Sleep(70);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-            finally
-            {
-                if (hasOriginalCursorPos)
-                {
-                    SetCursorPos(originalPos.X, originalPos.Y);
-                }
-            }
-        }
-
         private static List<string> ExtractEmailsFromUiAutomation(IntPtr hwnd)
         {
             var extracted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -665,7 +313,7 @@ namespace YEJI_AW_Client
                     return new List<string>();
 
                 // 메일 수신자 토큰(UI chip)이 Text/Edit가 아닌 경우가 많아 전체 트리에서 Name/Value를 폭넓게 스캔
-                var elements = root.FindAll(TreeScope.Subtree, System.Windows.Automation.Condition.TrueCondition);
+                var elements = root.FindAll(TreeScope.Subtree, Condition.TrueCondition);
                 int maxScan = Math.Min(elements.Count, 1200);
                 for (int i = 0; i < maxScan; i++)
                 {
