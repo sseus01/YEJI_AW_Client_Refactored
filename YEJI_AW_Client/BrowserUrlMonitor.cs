@@ -334,30 +334,66 @@ namespace YEJI_AW_Client
 
         private static bool SendCtrlW()
         {
-            var closeTab = new[]
-            {
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_W } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_W, dwFlags = KEYEVENTF_KEYUP } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } }
-            };
-
-            uint sent = SendInput((uint)closeTab.Length, closeTab, Marshal.SizeOf(typeof(INPUT)));
-            return sent == closeTab.Length;
+            return SendCtrlModifiedKey(VK_W);
         }
 
         private static bool SendCtrlF4()
         {
-            var closeTab = new[]
+            return SendCtrlModifiedKey(VK_F4);
+        }
+
+        private static bool SendCtrlModifiedKey(int key)
+        {
+            int inputSize = Marshal.SizeOf(typeof(INPUT));
+
+            // 일부 환경에서 Ctrl Down과 타겟 키 Down이 너무 붙어 전송되면
+            // Ctrl 인식이 누락되어 단일 문자 입력(예: 'w')으로 처리되는 경우가 있어
+            // 입력을 단계별로 보내고 짧은 지연을 둬 조합키 인식 안정성을 높인다.
+            var ctrlDown = new[]
             {
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_F4 } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_F4, dwFlags = KEYEVENTF_KEYUP } } },
-                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } }
+                new INPUT
+                {
+                    type = INPUT_KEYBOARD,
+                    U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL, dwFlags = KEYEVENTF_EXTENDEDKEY } }
+                }
             };
 
-            uint sent = SendInput((uint)closeTab.Length, closeTab, Marshal.SizeOf(typeof(INPUT)));
-            return sent == closeTab.Length;
+            var keyDown = new[]
+            {
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)key } } }
+            };
+
+            var keyUp = new[]
+            {
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)key, dwFlags = KEYEVENTF_KEYUP } } }
+            };
+
+            var ctrlUp = new[]
+            {
+                new INPUT
+                {
+                    type = INPUT_KEYBOARD,
+                    U = new InputUnion
+                    {
+                        ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL, dwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP }
+                    }
+                }
+            };
+
+            if (SendInput(1, ctrlDown, inputSize) != 1)
+                return false;
+
+            Thread.Sleep(20);
+
+            if (SendInput(1, keyDown, inputSize) != 1)
+                return false;
+
+            if (SendInput(1, keyUp, inputSize) != 1)
+                return false;
+
+            Thread.Sleep(20);
+
+            return SendInput(1, ctrlUp, inputSize) == 1;
         }
 
         private static bool SendCtrlWViaPostMessage(IntPtr hwnd)
