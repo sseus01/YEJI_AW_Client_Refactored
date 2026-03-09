@@ -94,7 +94,24 @@ namespace YEJI_AW_Client
         private struct InputUnion
         {
             [FieldOffset(0)]
+            public MOUSEINPUT mi;
+
+            [FieldOffset(0)]
             public KEYBDINPUT ki;
+
+            [FieldOffset(0)]
+            public HARDWAREINPUT hi;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MOUSEINPUT
+        {
+            public int dx;
+            public int dy;
+            public uint mouseData;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -105,6 +122,14 @@ namespace YEJI_AW_Client
             public uint dwFlags;
             public uint time;
             public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct HARDWAREINPUT
+        {
+            public uint uMsg;
+            public ushort wParamL;
+            public ushort wParamH;
         }
 
         private static readonly HashSet<string> SupportedBrowsers = new()
