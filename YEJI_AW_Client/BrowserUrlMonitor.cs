@@ -234,7 +234,12 @@ namespace YEJI_AW_Client
         public static bool TryCloseCurrentBrowserTab(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero)
+            {
+                LogTabCloseDebug("TryCloseCurrentBrowserTab called with hwnd=0.");
                 return false;
+            }
+
+            LogTabCloseDebug($"TryCloseCurrentBrowserTab started. hwnd=0x{hwnd.ToInt64():X}");
 
             // AllowSetForegroundWindow(ASFW_ANY)가 이미 UI 스레드에서 호출되었으므로
             // 백그라운드 스레드에서도 SetForegroundWindow가 정상 동작한다.
@@ -242,9 +247,11 @@ namespace YEJI_AW_Client
             bool focused = false;
             for (int i = 0; i < TabOperationFocusRetryCount; i++)
             {
+                LogTabCloseDebug($"Focus attempt {i + 1}/{TabOperationFocusRetryCount}.");
                 if (TryFocusWindow(hwnd))
                 {
                     focused = true;
+                    LogTabCloseDebug("Window focus acquired.");
                     break;
                 }
 
@@ -253,6 +260,7 @@ namespace YEJI_AW_Client
 
             if (!focused)
             {
+                LogTabCloseDebug("Failed to focus browser window after retries.");
                 ClientLogger.LogAgent("Failed to focus browser window before Ctrl+W tab close.", "WRN");
             }
 
@@ -261,8 +269,10 @@ namespace YEJI_AW_Client
             // Ctrl+W로 현재 활성 탭(영업금지 URL 탭)만 닫는다.
             for (int i = 0; i < TabOperationSendRetryCount; i++)
             {
+                LogTabCloseDebug($"SendInput close attempt {i + 1}/{TabOperationSendRetryCount}.");
                 if (SendCtrlW() || SendCtrlF4())
                 {
+                    LogTabCloseDebug("SendInput close succeeded.");
                     return true;
                 }
 
@@ -273,20 +283,24 @@ namespace YEJI_AW_Client
             // 대상 창으로 키 메시지를 직접 전송하는 폴백 경로를 추가한다.
             for (int i = 0; i < TabOperationSendRetryCount; i++)
             {
+                LogTabCloseDebug($"PostMessage close attempt {i + 1}/{TabOperationSendRetryCount}.");
                 if (SendCtrlWViaPostMessage(hwnd) || SendCtrlF4ViaPostMessage(hwnd))
                 {
+                    LogTabCloseDebug("PostMessage close succeeded.");
                     return true;
                 }
 
                 Thread.Sleep(TabOperationForegroundDelayMs);
             }
 
+            LogTabCloseDebug("All tab-close attempts failed.");
             return false;
         }
 
         private static bool TryFocusWindow(IntPtr hwnd)
         {
             IntPtr currentForeground = GetForegroundWindow();
+            LogTabCloseDebug($"TryFocusWindow currentForeground=0x{currentForeground.ToInt64():X}, target=0x{hwnd.ToInt64():X}");
             if (currentForeground == hwnd)
             {
                 return true;
@@ -314,7 +328,8 @@ namespace YEJI_AW_Client
                 }
 
                 BringWindowToTop(hwnd);
-                SetForegroundWindow(hwnd);
+                bool setForegroundResult = SetForegroundWindow(hwnd);
+                LogTabCloseDebug($"SetForegroundWindow result={setForegroundResult}.");
             }
             finally
             {
@@ -330,7 +345,10 @@ namespace YEJI_AW_Client
             }
 
             Thread.Sleep(TabOperationForegroundDelayMs);
-            return GetForegroundWindow() == hwnd;
+            IntPtr afterForeground = GetForegroundWindow();
+            bool focused = afterForeground == hwnd;
+            LogTabCloseDebug($"TryFocusWindow result={focused}, foregroundAfter=0x{afterForeground.ToInt64():X}");
+            return focused;
         }
 
         private static bool SendCtrlW()
@@ -346,6 +364,7 @@ namespace YEJI_AW_Client
         private static bool SendCtrlModifiedKey(int key)
         {
             int inputSize = Marshal.SizeOf(typeof(INPUT));
+            LogTabCloseDebug($"SendCtrlModifiedKey started. key=0x{key:X}");
 
             // 일부 환경에서 Ctrl Down과 타겟 키 Down이 너무 붙어 전송되면
             // Ctrl 인식이 누락되어 단일 문자 입력(예: 'w')으로 처리되는 경우가 있어
@@ -382,35 +401,65 @@ namespace YEJI_AW_Client
             };
 
             if (SendInput(1, ctrlDown, inputSize) != 1)
+            {
+                LogTabCloseDebug($"SendInput ctrlDown failed. lastError={Marshal.GetLastWin32Error()}");
                 return false;
+            }
 
             Thread.Sleep(20);
 
             if (SendInput(1, keyDown, inputSize) != 1)
+            {
+                LogTabCloseDebug($"SendInput keyDown failed. lastError={Marshal.GetLastWin32Error()}");
                 return false;
+            }
 
             if (SendInput(1, keyUp, inputSize) != 1)
+            {
+                LogTabCloseDebug($"SendInput keyUp failed. lastError={Marshal.GetLastWin32Error()}");
                 return false;
+            }
 
             Thread.Sleep(20);
 
-            return SendInput(1, ctrlUp, inputSize) == 1;
+            bool ctrlUpResult = SendInput(1, ctrlUp, inputSize) == 1;
+            if (!ctrlUpResult)
+            {
+                LogTabCloseDebug($"SendInput ctrlUp failed. lastError={Marshal.GetLastWin32Error()}");
+            }
+            else
+            {
+                LogTabCloseDebug("SendCtrlModifiedKey finished successfully.");
+            }
+
+            return ctrlUpResult;
         }
 
         private static bool SendCtrlWViaPostMessage(IntPtr hwnd)
         {
-            return PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_CONTROL), IntPtr.Zero)
+            bool result = PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_CONTROL), IntPtr.Zero)
                 && PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_W), IntPtr.Zero)
                 && PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_W), IntPtr.Zero)
                 && PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_CONTROL), IntPtr.Zero);
+            LogTabCloseDebug($"SendCtrlWViaPostMessage result={result}.");
+            return result;
         }
 
         private static bool SendCtrlF4ViaPostMessage(IntPtr hwnd)
         {
-            return PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_CONTROL), IntPtr.Zero)
+            bool result = PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_CONTROL), IntPtr.Zero)
                 && PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_F4), IntPtr.Zero)
                 && PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_F4), IntPtr.Zero)
                 && PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_CONTROL), IntPtr.Zero);
+            LogTabCloseDebug($"SendCtrlF4ViaPostMessage result={result}.");
+            return result;
+        }
+
+        private static void LogTabCloseDebug(string message)
+        {
+#if DEBUG
+            ClientLogger.LogAgent($"[URL-ALERT][DEBUG] {message}", "DBG");
+#endif
         }
 
         public static bool TrySendBrowserBack(IntPtr hwnd)
