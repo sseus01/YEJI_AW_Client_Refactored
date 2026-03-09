@@ -17,7 +17,7 @@ namespace YEJI_AW_Client
     public class BrowserUrlMonitor
     {
         // UI Automation 호출 타임아웃 (밀리초) - Chrome 구버전 호환성 문제 방지
-        private const int UiAutomationTimeoutMs = 1000;
+        private const int UiAutomationTimeoutMs = 2500;
         private const int EmailExtractionTimeoutMs = 2000;
 
         // SetForegroundWindow 후 브라우저가 포커스를 받을 때까지 대기하는 시간 (밀리초)
@@ -724,6 +724,12 @@ namespace YEJI_AW_Client
                         }
                     }
 
+                    if (!removedCurrent)
+                    {
+                        // 일부 웹메일은 토큰 자체를 선택한 뒤 Backspace를 보내야 삭제된다.
+                        removedCurrent = TryFocusElementAndSendBackspace(element);
+                    }
+
                     if (removedCurrent)
                     {
                         removed++;
@@ -770,12 +776,19 @@ namespace YEJI_AW_Client
                 {
                     var button = buttons[i];
                     string buttonText = ((button.Current.Name ?? string.Empty) + " " + (button.Current.HelpText ?? string.Empty)).ToLowerInvariant();
+                    string automationId = (button.Current.AutomationId ?? string.Empty).ToLowerInvariant();
                     bool looksLikeDeleteButton =
                         buttonText.Contains("삭제") ||
-                        buttonText.Contains("지우") ||
+                        buttonText.Contains("지우기") ||
+                        buttonText.Contains("닫기") ||
                         buttonText.Contains("remove") ||
                         buttonText.Contains("delete") ||
-                        buttonText == "x";
+                        buttonText == "x" ||
+                        buttonText.Contains("×") ||
+                        buttonText.Contains("✕") ||
+                        automationId.Contains("remove") ||
+                        automationId.Contains("delete") ||
+                        automationId.Contains("close");
 
                     if (!looksLikeDeleteButton)
                         continue;
@@ -785,6 +798,33 @@ namespace YEJI_AW_Client
                         invokePattern.Invoke();
                         return true;
                     }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return false;
+        }
+
+        private static bool TryFocusElementAndSendBackspace(AutomationElement element)
+        {
+            try
+            {
+                if (!element.Current.IsOffscreen)
+                {
+                    try
+                    {
+                        element.SetFocus();
+                    }
+                    catch
+                    {
+                        // ignore focus error
+                    }
+
+                    Thread.Sleep(30);
+                    return SendSingleKey(VK_BACK) || SendSingleKey(VK_DELETE);
                 }
             }
             catch
