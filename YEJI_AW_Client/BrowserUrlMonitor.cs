@@ -613,7 +613,10 @@ namespace YEJI_AW_Client
         public static int TryRemoveEmailsFromCurrentCompose(IEnumerable<string> emails)
         {
             if (emails == null)
+            {
+                ClientLogger.LogAgent("[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose skipped: input emails is null.", "DBG");
                 return 0;
+            }
 
             var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string email in emails)
@@ -625,21 +628,36 @@ namespace YEJI_AW_Client
             }
 
             if (targets.Count == 0)
+            {
+                ClientLogger.LogAgent("[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose skipped: no valid target emails.", "DBG");
                 return 0;
+            }
+
+            ClientLogger.LogAgent($"[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose started. targetCount={targets.Count}, targets=[{string.Join(", ", targets)}]", "DBG");
 
             IntPtr hwnd = GetForegroundBrowserWindowHandle();
             if (hwnd == IntPtr.Zero)
+            {
+                ClientLogger.LogAgent("[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose failed: foreground browser handle is zero.", "DBG");
                 return 0;
+            }
+
+            ClientLogger.LogAgent($"[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose using hwnd=0x{hwnd.ToInt64():X}.", "DBG");
 
             try
             {
                 var root = AutomationElement.FromHandle(hwnd);
                 if (root == null)
+                {
+                    ClientLogger.LogAgent("[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose failed: automation root is null.", "DBG");
                     return 0;
+                }
 
                 int removed = 0;
+                int matchedElements = 0;
                 var elements = root.FindAll(TreeScope.Subtree, Condition.TrueCondition);
                 int maxScan = Math.Min(elements.Count, 2000);
+                ClientLogger.LogAgent($"[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose scanning elements. total={elements.Count}, maxScan={maxScan}", "DBG");
 
                 for (int i = 0; i < maxScan; i++)
                 {
@@ -663,6 +681,8 @@ namespace YEJI_AW_Client
                     if (!matched)
                         continue;
 
+                    matchedElements++;
+
                     bool removedCurrent = false;
                     if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invokeObj) && invokeObj is InvokePattern invokePattern)
                     {
@@ -682,10 +702,13 @@ namespace YEJI_AW_Client
                     }
                 }
 
+                ClientLogger.LogAgent($"[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose finished. matchedElements={matchedElements}, removed={removed}", "DBG");
+
                 return removed;
             }
-            catch
+            catch (Exception ex)
             {
+                ClientLogger.LogAgent($"[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose exception: {ex.Message}", "DBG");
                 return 0;
             }
         }

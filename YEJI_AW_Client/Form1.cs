@@ -1295,9 +1295,21 @@ namespace YEJI_AW_Client
                 alertForm.TopMost = true;
                 alertForm.ShowDialog();
 
+                LogEmailDebug($"Prohibited email alert closed. DeleteRequested={alertForm.DeleteRequested}, matchedCount={matchedRows.Count}");
+
                 if (alertForm.DeleteRequested)
                 {
-                    int removedCount = BrowserUrlMonitor.TryRemoveEmailsFromCurrentCompose(matchedRows.Select(m => m.Email));
+                    List<string> targetEmails = matchedRows
+                       .Select(m => NormalizeEmail(m.Email))
+                       .Where(x => !string.IsNullOrWhiteSpace(x))
+                       .Distinct(StringComparer.OrdinalIgnoreCase)
+                       .ToList();
+
+                    LogEmailDebug($"Attempting automatic recipient removal. targets=[{string.Join(", ", targetEmails)}]");
+
+                    int removedCount = BrowserUrlMonitor.TryRemoveEmailsFromCurrentCompose(targetEmails);
+                    LogEmailDebug($"Automatic recipient removal result: removedCount={removedCount}, requestedCount={targetEmails.Count}");
+
                     if (removedCount > 0)
                     {
                         notifyIcon.BalloonTipTitle = "메일주소 삭제 완료";
