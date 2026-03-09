@@ -80,6 +80,7 @@ namespace YEJI_AW_Client
         private const int VK_W = 0x57;
         private const int VK_F4 = 0x73;
         private const int VK_DELETE = 0x2E;
+        private const int VK_BACK = 0x08;
         private const uint INPUT_KEYBOARD = 1;
         private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         private const uint KEYEVENTF_KEYUP = 0x0002;
@@ -673,10 +674,7 @@ namespace YEJI_AW_Client
                 for (int i = 0; i < maxScan; i++)
                 {
                     var element = elements[i];
-                    string mergedText = string.Join(" ",
-                        element.Current.Name ?? string.Empty,
-                        element.Current.HelpText ?? string.Empty,
-                        element.Current.ItemStatus ?? string.Empty);
+                    string mergedText = GetElementSearchText(element); ;
 
                     string normalizedText = mergedText.ToLowerInvariant();
                     bool matched = false;
@@ -703,7 +701,27 @@ namespace YEJI_AW_Client
                     else if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selectionObj) && selectionObj is SelectionItemPattern selectionPattern)
                     {
                         selectionPattern.Select();
-                        removedCurrent = SendSingleKey(VK_DELETE);
+                        removedCurrent = SendSingleKey(VK_DELETE) || SendSingleKey(VK_BACK);
+                    }
+
+                    if (!removedCurrent)
+                    {
+                        // 일부 메일 UI는 수신자 토큰 내부의 "삭제(X)" 버튼만 클릭 가능한 경우가 있다.
+                        removedCurrent = TryInvokeDescendantDeleteButton(element);
+                    }
+
+                    if (!removedCurrent && element.Current.IsKeyboardFocusable)
+                    {
+                        try
+                        {
+                            element.SetFocus();
+                            Thread.Sleep(20);
+                            removedCurrent = SendSingleKey(VK_DELETE) || SendSingleKey(VK_BACK);
+                        }
+                        catch
+                        {
+                            // ignore and continue
+                        }
                     }
 
                     if (removedCurrent)
@@ -722,6 +740,59 @@ namespace YEJI_AW_Client
                 ClientLogger.LogAgent($"[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose exception: {ex.Message}", "DBG");
                 return 0;
             }
+        }
+
+        private static string GetElementSearchText(AutomationElement element)
+        {
+            var parts = new List<string>
+            {
+                element.Current.Name ?? string.Empty,
+                element.Current.HelpText ?? string.Empty,
+                element.Current.ItemStatus ?? string.Empty
+            };
+
+            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePatternObj) && valuePatternObj is ValuePattern valuePattern)
+            {
+                parts.Add(valuePattern.Current.Value ?? string.Empty);
+            }
+
+            return string.Join(" ", parts);
+        }
+
+        private static bool TryInvokeDescendantDeleteButton(AutomationElement element)
+        {
+            try
+            {
+                var buttonCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button);
+                var buttons = element.FindAll(TreeScope.Descendants, buttonCondition);
+
+                for (int i = 0; i < buttons.Count; i++)
+                {
+                    var button = buttons[i];
+                    string buttonText = ((button.Current.Name ?? string.Empty) + " " + (button.Current.HelpText ?? string.Empty)).ToLowerInvariant();
+                    bool looksLikeDeleteButton =
+                        buttonText.Contains("삭제") ||
+                        buttonText.Contains("지우") ||
+                        buttonText.Contains("remove") ||
+                        buttonText.Contains("delete") ||
+                        buttonText == "x";
+
+                    if (!looksLikeDeleteButton)
+                        continue;
+
+                    if (button.TryGetCurrentPattern(InvokePattern.Pattern, out var invokeObj) && invokeObj is InvokePattern invokePattern)
+                    {
+                        invokePattern.Invoke();
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return false;
         }
 
         private static bool SendSingleKey(int key)
