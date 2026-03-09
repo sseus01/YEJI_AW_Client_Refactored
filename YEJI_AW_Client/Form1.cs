@@ -1295,6 +1295,25 @@ namespace YEJI_AW_Client
                 alertForm.TopMost = true;
                 alertForm.ShowDialog();
 
+                if (alertForm.DeleteRequested)
+                {
+                    int removedCount = BrowserUrlMonitor.TryRemoveEmailsFromCurrentCompose(matchedRows.Select(m => m.Email));
+                    if (removedCount > 0)
+                    {
+                        notifyIcon.BalloonTipTitle = "메일주소 삭제 완료";
+                        notifyIcon.BalloonTipText = $"메일 작성창에서 {removedCount}개 주소를 삭제했습니다.";
+                        notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
+                        notifyIcon.ShowBalloonTip(3000);
+                    }
+                    else
+                    {
+                        notifyIcon.BalloonTipTitle = "메일주소 삭제 실패";
+                        notifyIcon.BalloonTipText = "자동 삭제에 실패했습니다. 메일 작성창에서 직접 삭제해 주세요.";
+                        notifyIcon.BalloonTipIcon = ToolTipIcon.Warning;
+                        notifyIcon.ShowBalloonTip(4000);
+                    }
+                }
+
                 string logEmails = string.Join(", ", matchedRows.Select(m => NormalizeEmail(m.Email)));
                 ClientLogger.LogAgent($"Prohibited email detected in mail compose: {logEmails}", "WARN");
             }

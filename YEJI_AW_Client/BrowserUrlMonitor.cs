@@ -79,6 +79,7 @@ namespace YEJI_AW_Client
         private const int VK_LEFT = 0x25;       
         private const int VK_W = 0x57;
         private const int VK_F4 = 0x73;
+        private const int VK_DELETE = 0x2E;
         private const uint INPUT_KEYBOARD = 1;
         private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         private const uint KEYEVENTF_KEYUP = 0x0002;
@@ -607,6 +608,106 @@ namespace YEJI_AW_Client
             }
 
             return new List<string>();
+        }
+
+        public static int TryRemoveEmailsFromCurrentCompose(IEnumerable<string> emails)
+        {
+            if (emails == null)
+                return 0;
+
+            var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string email in emails)
+            {
+                if (string.IsNullOrWhiteSpace(email))
+                    continue;
+
+                targets.Add(email.Trim().ToLowerInvariant());
+            }
+
+            if (targets.Count == 0)
+                return 0;
+
+            IntPtr hwnd = GetForegroundBrowserWindowHandle();
+            if (hwnd == IntPtr.Zero)
+                return 0;
+
+            try
+            {
+                var root = AutomationElement.FromHandle(hwnd);
+                if (root == null)
+                    return 0;
+
+                int removed = 0;
+                var elements = root.FindAll(TreeScope.Subtree, Condition.TrueCondition);
+                int maxScan = Math.Min(elements.Count, 2000);
+
+                for (int i = 0; i < maxScan; i++)
+                {
+                    var element = elements[i];
+                    string mergedText = string.Join(" ",
+                        element.Current.Name ?? string.Empty,
+                        element.Current.HelpText ?? string.Empty,
+                        element.Current.ItemStatus ?? string.Empty);
+
+                    string normalizedText = mergedText.ToLowerInvariant();
+                    bool matched = false;
+                    foreach (string target in targets)
+                    {
+                        if (normalizedText.Contains(target))
+                        {
+                            matched = true;
+                            break;
+                        }
+                    }
+
+                    if (!matched)
+                        continue;
+
+                    bool removedCurrent = false;
+                    if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invokeObj) && invokeObj is InvokePattern invokePattern)
+                    {
+                        invokePattern.Invoke();
+                        removedCurrent = true;
+                    }
+                    else if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selectionObj) && selectionObj is SelectionItemPattern selectionPattern)
+                    {
+                        selectionPattern.Select();
+                        removedCurrent = SendSingleKey(VK_DELETE);
+                    }
+
+                    if (removedCurrent)
+                    {
+                        removed++;
+                        Thread.Sleep(30);
+                    }
+                }
+
+                return removed;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static bool SendSingleKey(int key)
+        {
+            int inputSize = Marshal.SizeOf(typeof(INPUT));
+
+            var keyDown = new[]
+            {
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)key } } }
+            };
+
+            var keyUp = new[]
+            {
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)key, dwFlags = KEYEVENTF_KEYUP } } }
+            };
+
+            if (SendInput(1, keyDown, inputSize) != 1)
+                return false;
+
+            return SendInput(1, keyUp, inputSize) == 1;
         }
 
         private static List<string> ExtractEmailsFromUiAutomation(IntPtr hwnd)
