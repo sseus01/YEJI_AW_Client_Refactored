@@ -78,6 +78,7 @@ namespace YEJI_AW_Client
         private const int VK_CONTROL = 0x11;        
         private const int VK_LEFT = 0x25;       
         private const int VK_W = 0x57;
+        private const int VK_F4 = 0x73;
         private const uint INPUT_KEYBOARD = 1;
         private const uint KEYEVENTF_KEYUP = 0x0002;
 
@@ -173,6 +174,13 @@ namespace YEJI_AW_Client
                     GetBrowserVersion(processName); // 버전 정보 캐싱 및 로그 기록
                 }
 
+                // Whale 브라우저는 UI Automation 기반 URL 추출 타임아웃이 자주 발생하므로
+                // 창 제목 기반 추출을 우선 사용해 모니터링 지연과 경고 로그를 줄인다.
+                if (processName.Equals("whale", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ExtractUrlFromWindowTitle(hwnd, processName);
+                }
+
                 string? automationUrl = TryGetUrlFromUiAutomationWithTimeout(hwnd, processName);
                 if (!string.IsNullOrWhiteSpace(automationUrl))
                 {
@@ -259,7 +267,7 @@ namespace YEJI_AW_Client
             // Ctrl+W로 현재 활성 탭(영업금지 URL 탭)만 닫는다.
             for (int i = 0; i < TabOperationSendRetryCount; i++)
             {
-                if (SendCtrlW())
+                if (SendCtrlW() || SendCtrlF4())
                 {
                     return true;
                 }
@@ -326,6 +334,20 @@ namespace YEJI_AW_Client
                 new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL } } },
                 new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_W } } },
                 new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_W, dwFlags = KEYEVENTF_KEYUP } } },
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } }
+            };
+
+            uint sent = SendInput((uint)closeTab.Length, closeTab, Marshal.SizeOf(typeof(INPUT)));
+            return sent == closeTab.Length;
+        }
+
+        private static bool SendCtrlF4()
+        {
+            var closeTab = new[]
+            {
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL } } },
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_F4 } } },
+                new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_F4, dwFlags = KEYEVENTF_KEYUP } } },
                 new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } }
             };
 
