@@ -80,6 +80,7 @@ namespace YEJI_AW_Client
         private const int VK_W = 0x57;
         private const int VK_F4 = 0x73;
         private const uint INPUT_KEYBOARD = 1;
+        private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         private const uint KEYEVENTF_KEYUP = 0x0002;
 
         [StructLayout(LayoutKind.Sequential)]
