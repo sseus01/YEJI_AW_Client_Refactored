@@ -1307,7 +1307,7 @@ namespace YEJI_AW_Client
 
                     LogEmailDebug($"Attempting automatic recipient removal. targets=[{string.Join(", ", targetEmails)}]");
 
-                    int removedCount = BrowserUrlMonitor.TryRemoveEmailsFromCurrentCompose(targetEmails);
+                    int removedCount = BrowserUrlMonitor.TryRemoveEmailsFromCurrentCompose(targetEmails, browserWindowHandle);
                     LogEmailDebug($"Automatic recipient removal result: removedCount={removedCount}, requestedCount={targetEmails.Count}");
 
                     if (removedCount > 0)

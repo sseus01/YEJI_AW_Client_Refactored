@@ -610,7 +610,7 @@ namespace YEJI_AW_Client
             return new List<string>();
         }
 
-        public static int TryRemoveEmailsFromCurrentCompose(IEnumerable<string> emails)
+        public static int TryRemoveEmailsFromCurrentCompose(IEnumerable<string> emails, IntPtr browserWindowHandle = default)
         {
             if (emails == null)
             {
@@ -635,7 +635,18 @@ namespace YEJI_AW_Client
 
             ClientLogger.LogAgent($"[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose started. targetCount={targets.Count}, targets=[{string.Join(", ", targets)}]", "DBG");
 
-            IntPtr hwnd = GetForegroundBrowserWindowHandle();
+            IntPtr hwnd = browserWindowHandle != IntPtr.Zero
+                 ? browserWindowHandle
+                 : GetForegroundBrowserWindowHandle();
+
+            if (hwnd != IntPtr.Zero && browserWindowHandle != IntPtr.Zero)
+            {
+                // 경고창 닫힘 직후에는 Agent 창이 포그라운드를 차지하고 있어 브라우저 조작이 실패할 수 있다.
+                // 삭제 작업 직전에 대상 브라우저 창에 포커스를 맞춰 안정성을 높인다.
+                TryFocusWindow(hwnd);
+                Thread.Sleep(60);
+            }
+
             if (hwnd == IntPtr.Zero)
             {
                 ClientLogger.LogAgent("[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose failed: foreground browser handle is zero.", "DBG");
