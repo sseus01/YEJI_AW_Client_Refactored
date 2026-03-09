@@ -162,10 +162,8 @@ namespace YEJI_AW_Client
             Resize += (_, _) => CenterDialogPanel();
             FormClosed += async (_, _) =>
             {
-                if (closeCurrentTabRequested)
-                {
-                    // 폼이 완전히 닫히고 브라우저 창이 포커스를 되찾은 뒤에
-                    // 탭 닫기를 실행해야 SendInput 키 입력이 올바른 창으로 전달된다.
+                if (!closeCurrentTabRequested)
+                {                    
                     return;
                 }
 

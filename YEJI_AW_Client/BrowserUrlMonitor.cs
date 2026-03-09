@@ -172,14 +172,7 @@ namespace YEJI_AW_Client
                 if (processName.Equals("chrome", StringComparison.OrdinalIgnoreCase))
                 {
                     GetBrowserVersion(processName); // 버전 정보 캐싱 및 로그 기록
-                }
-
-                // Whale 브라우저는 UI Automation 기반 URL 추출 타임아웃이 자주 발생하므로
-                // 창 제목 기반 추출을 우선 사용해 모니터링 지연과 경고 로그를 줄인다.
-                if (processName.Equals("whale", StringComparison.OrdinalIgnoreCase))
-                {
-                    return ExtractUrlFromWindowTitle(hwnd, processName);
-                }
+                }             
 
                 string? automationUrl = TryGetUrlFromUiAutomationWithTimeout(hwnd, processName);
                 if (!string.IsNullOrWhiteSpace(automationUrl))
