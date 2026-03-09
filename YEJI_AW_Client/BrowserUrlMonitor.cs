@@ -268,6 +268,18 @@ namespace YEJI_AW_Client
                 Thread.Sleep(TabOperationForegroundDelayMs);
             }
 
+            // 일부 브라우저(예: whale)에서는 SendInput이 차단되거나 누락되는 경우가 있어
+            // 대상 창으로 키 메시지를 직접 전송하는 폴백 경로를 추가한다.
+            for (int i = 0; i < TabOperationSendRetryCount; i++)
+            {
+                if (SendCtrlWViaPostMessage(hwnd) || SendCtrlF4ViaPostMessage(hwnd))
+                {
+                    return true;
+                }
+
+                Thread.Sleep(TabOperationForegroundDelayMs);
+            }
+
             return false;
         }
 
@@ -346,6 +358,22 @@ namespace YEJI_AW_Client
 
             uint sent = SendInput((uint)closeTab.Length, closeTab, Marshal.SizeOf(typeof(INPUT)));
             return sent == closeTab.Length;
+        }
+
+        private static bool SendCtrlWViaPostMessage(IntPtr hwnd)
+        {
+            return PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_CONTROL), IntPtr.Zero)
+                && PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_W), IntPtr.Zero)
+                && PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_W), IntPtr.Zero)
+                && PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_CONTROL), IntPtr.Zero);
+        }
+
+        private static bool SendCtrlF4ViaPostMessage(IntPtr hwnd)
+        {
+            return PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_CONTROL), IntPtr.Zero)
+                && PostMessage(hwnd, WM_KEYDOWN, new IntPtr(VK_F4), IntPtr.Zero)
+                && PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_F4), IntPtr.Zero)
+                && PostMessage(hwnd, WM_KEYUP, new IntPtr(VK_CONTROL), IntPtr.Zero);
         }
 
         public static bool TrySendBrowserBack(IntPtr hwnd)
