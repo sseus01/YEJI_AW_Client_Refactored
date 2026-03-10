@@ -7,9 +7,7 @@ using System.Windows.Forms;
 namespace YEJI_AW_Client
 {
     public class ProhibitedEmailAlertForm : Form
-    {
-        public bool DeleteRequested { get; private set; }
-
+    {      
         public ProhibitedEmailAlertForm(List<BanEmailRow> matchedRows, IntPtr browserWindowHandle)
         {
             Text = "영업 금지 안내";
@@ -63,21 +61,7 @@ namespace YEJI_AW_Client
                 Height = 34,
                 DialogResult = DialogResult.OK
             };
-
-            var deleteButton = new Button
-            {
-                Text = "메일삭제",
-                Width = 100,
-                Height = 34
-            };
-
-            deleteButton.Click += (_, _) =>
-            {
-                DeleteRequested = true;
-                DialogResult = DialogResult.OK;
-                Close();
-            };
-
+            
             var buttonPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
@@ -86,13 +70,10 @@ namespace YEJI_AW_Client
             };
 
             closeButton.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
-            deleteButton.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             buttonPanel.Controls.Add(closeButton);
-            buttonPanel.Controls.Add(deleteButton);
             buttonPanel.Resize += (_, _) =>
             {
                 closeButton.Location = new Point(buttonPanel.ClientSize.Width - closeButton.Width, 10);
-                deleteButton.Location = new Point(closeButton.Left - deleteButton.Width - 8, 10);
             };
 
             Controls.Add(listBox);
