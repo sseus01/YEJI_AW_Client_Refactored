@@ -688,11 +688,13 @@ namespace YEJI_AW_Client
 
                     string normalizedText = mergedText.ToLowerInvariant();
                     bool matched = false;
+                    string matchedTarget = string.Empty;
                     foreach (string target in targets)
                     {
                         if (normalizedText.Contains(target))
                         {
                             matched = true;
+                            matchedTarget = target;
                             break;
                         }
                     }
@@ -706,25 +708,27 @@ namespace YEJI_AW_Client
                     if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invokeObj) && invokeObj is InvokePattern invokePattern)
                     {
                         invokePattern.Invoke();
-                        removedCurrent = true;
+                        removedCurrent = ConfirmRecipientRemoved(element, matchedTarget);
                     }
                     else if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selectionObj) && selectionObj is SelectionItemPattern selectionPattern)
                     {
                         selectionPattern.Select();
-                        removedCurrent = SendSingleKey(VK_DELETE) || SendSingleKey(VK_BACK);
+                        bool keySent = SendSingleKey(VK_DELETE) || SendSingleKey(VK_BACK);
+                        removedCurrent = keySent && ConfirmRecipientRemoved(element, matchedTarget);
                     }
 
                     if (!removedCurrent)
                     {
                         // 일부 메일 UI는 수신자 토큰 내부의 "삭제(X)" 버튼만 클릭 가능한 경우가 있다.
-                        removedCurrent = TryInvokeDescendantDeleteButton(element);
+                        removedCurrent = TryInvokeDescendantDeleteButton(element, matchedTarget);
                     }
 
                     if (!removedCurrent)
                     {
                         // 토큰 UI의 우측(X) 영역 클릭이 필요한 경우를 대비해 우측 끝을 직접 클릭 후 Backspace 전송.
-                        removedCurrent = TryClickElement(element, preferRightEdge: true) &&
-                                         (SendSingleKey(VK_BACK) || SendSingleKey(VK_DELETE));
+                        bool clicked = TryClickElement(element, preferRightEdge: true);
+                        bool keySent = clicked && (SendSingleKey(VK_BACK) || SendSingleKey(VK_DELETE));
+                        removedCurrent = keySent && ConfirmRecipientRemoved(element, matchedTarget);
                     }
 
                     if (!removedCurrent && element.Current.IsKeyboardFocusable)
@@ -733,7 +737,8 @@ namespace YEJI_AW_Client
                         {
                             element.SetFocus();
                             Thread.Sleep(20);
-                            removedCurrent = SendSingleKey(VK_DELETE) || SendSingleKey(VK_BACK);
+                            bool keySent = SendSingleKey(VK_DELETE) || SendSingleKey(VK_BACK);
+                            removedCurrent = keySent && ConfirmRecipientRemoved(element, matchedTarget);
                         }
                         catch
                         {
@@ -744,7 +749,7 @@ namespace YEJI_AW_Client
                     if (!removedCurrent)
                     {
                         // 일부 웹메일은 토큰 자체를 선택한 뒤 Backspace를 보내야 삭제된다.
-                        removedCurrent = TryFocusElementAndSendBackspace(element);
+                        removedCurrent = TryFocusElementAndSendBackspace(element, matchedTarget);
                     }
 
                     if (removedCurrent)
@@ -782,11 +787,13 @@ namespace YEJI_AW_Client
             return string.Join(" ", parts);
         }
 
-        private static bool TryInvokeDescendantDeleteButton(AutomationElement element)
+        private static bool TryInvokeDescendantDeleteButton(AutomationElement element, string targetEmail)
         {
             try
             {
-                var buttonCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button);
+                var buttonCondition = new OrCondition(
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Hyperlink));
                 var buttons = element.FindAll(TreeScope.Descendants, buttonCondition);
 
                 for (int i = 0; i < buttons.Count; i++)
@@ -794,6 +801,7 @@ namespace YEJI_AW_Client
                     var button = buttons[i];
                     string buttonText = ((button.Current.Name ?? string.Empty) + " " + (button.Current.HelpText ?? string.Empty)).ToLowerInvariant();
                     string automationId = (button.Current.AutomationId ?? string.Empty).ToLowerInvariant();
+                    string className = (button.Current.ClassName ?? string.Empty).ToLowerInvariant();
                     bool looksLikeDeleteButton =
                         buttonText.Contains("삭제") ||
                         buttonText.Contains("지우기") ||
@@ -805,7 +813,11 @@ namespace YEJI_AW_Client
                         buttonText.Contains("✕") ||
                         automationId.Contains("remove") ||
                         automationId.Contains("delete") ||
-                        automationId.Contains("close");
+                        automationId.Contains("close") ||
+                        className.Contains("btn_del") ||
+                        className.Contains("delete") ||
+                        className.Contains("remove") ||
+                        className.Contains("close");
 
                     if (!looksLikeDeleteButton)
                         continue;
@@ -813,7 +825,7 @@ namespace YEJI_AW_Client
                     if (button.TryGetCurrentPattern(InvokePattern.Pattern, out var invokeObj) && invokeObj is InvokePattern invokePattern)
                     {
                         invokePattern.Invoke();
-                        return true;
+                        return ConfirmRecipientRemoved(element, targetEmail);
                     }
 
                     if (button.Current.IsKeyboardFocusable)
@@ -824,7 +836,7 @@ namespace YEJI_AW_Client
                             Thread.Sleep(20);
                             if (SendSingleKey(VK_SPACE) || SendSingleKey(VK_RETURN))
                             {
-                                return true;
+                                return ConfirmRecipientRemoved(element, targetEmail);
                             }
                         }
                         catch
@@ -835,7 +847,7 @@ namespace YEJI_AW_Client
 
                     if (TryClickElement(button, preferRightEdge: false))
                     {
-                        return true;
+                        return ConfirmRecipientRemoved(element, targetEmail);
                     }
                 }
             }
@@ -882,7 +894,7 @@ namespace YEJI_AW_Client
             }
         }
 
-        private static bool TryFocusElementAndSendBackspace(AutomationElement element)
+        private static bool TryFocusElementAndSendBackspace(AutomationElement element, string targetEmail)
         {
             try
             {
@@ -898,7 +910,8 @@ namespace YEJI_AW_Client
                     }
 
                     Thread.Sleep(30);
-                    return SendSingleKey(VK_BACK) || SendSingleKey(VK_DELETE);
+                    bool keySent = SendSingleKey(VK_BACK) || SendSingleKey(VK_DELETE);
+                    return keySent && ConfirmRecipientRemoved(element, targetEmail);
                 }
             }
             catch
@@ -907,6 +920,31 @@ namespace YEJI_AW_Client
             }
 
             return false;
+        }
+
+        private static bool ConfirmRecipientRemoved(AutomationElement element, string targetEmail)
+        {
+            if (element == null || string.IsNullOrWhiteSpace(targetEmail))
+                return false;
+
+            Thread.Sleep(40);
+
+            try
+            {
+                _ = element.Current.ProcessId;
+            }
+            catch (ElementNotAvailableException)
+            {
+                return true;
+            }
+            catch
+            {
+                // ignore and continue below
+            }
+
+            string normalizedTarget = targetEmail.ToLowerInvariant();
+            string mergedText = GetElementSearchText(element).ToLowerInvariant();
+            return !mergedText.Contains(normalizedTarget);
         }
 
         private static bool SendSingleKey(int key)
