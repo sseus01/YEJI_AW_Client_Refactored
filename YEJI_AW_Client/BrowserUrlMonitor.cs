@@ -50,6 +50,12 @@ namespace YEJI_AW_Client
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
         [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetCursorPos(int X, int Y);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+        [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
@@ -81,9 +87,13 @@ namespace YEJI_AW_Client
         private const int VK_F4 = 0x73;
         private const int VK_DELETE = 0x2E;
         private const int VK_BACK = 0x08;
+        private const int VK_RETURN = 0x0D;
+        private const int VK_SPACE = 0x20;
         private const uint INPUT_KEYBOARD = 1;
         private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         private const uint KEYEVENTF_KEYUP = 0x0002;
+        private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+        private const uint MOUSEEVENTF_LEFTUP = 0x0004;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct INPUT
@@ -710,6 +720,13 @@ namespace YEJI_AW_Client
                         removedCurrent = TryInvokeDescendantDeleteButton(element);
                     }
 
+                    if (!removedCurrent)
+                    {
+                        // 토큰 UI의 우측(X) 영역 클릭이 필요한 경우를 대비해 우측 끝을 직접 클릭 후 Backspace 전송.
+                        removedCurrent = TryClickElement(element, preferRightEdge: true) &&
+                                         (SendSingleKey(VK_BACK) || SendSingleKey(VK_DELETE));
+                    }
+
                     if (!removedCurrent && element.Current.IsKeyboardFocusable)
                     {
                         try
@@ -798,6 +815,28 @@ namespace YEJI_AW_Client
                         invokePattern.Invoke();
                         return true;
                     }
+
+                    if (button.Current.IsKeyboardFocusable)
+                    {
+                        try
+                        {
+                            button.SetFocus();
+                            Thread.Sleep(20);
+                            if (SendSingleKey(VK_SPACE) || SendSingleKey(VK_RETURN))
+                            {
+                                return true;
+                            }
+                        }
+                        catch
+                        {
+                            // ignore and continue fallback
+                        }
+                    }
+
+                    if (TryClickElement(button, preferRightEdge: false))
+                    {
+                        return true;
+                    }
                 }
             }
             catch
@@ -806,6 +845,41 @@ namespace YEJI_AW_Client
             }
 
             return false;
+        }
+
+        private static bool TryClickElement(AutomationElement element, bool preferRightEdge)
+        {
+            try
+            {
+                var rect = element.Current.BoundingRectangle;
+                if (rect.IsEmpty || rect.Width < 1 || rect.Height < 1)
+                {
+                    return false;
+                }
+
+                double x = preferRightEdge
+                    ? rect.Right - Math.Max(3, Math.Min(18, rect.Width * 0.2))
+                    : rect.Left + rect.Width / 2.0;
+                double y = rect.Top + rect.Height / 2.0;
+
+                int clickX = (int)Math.Round(x);
+                int clickY = (int)Math.Round(y);
+
+                if (!SetCursorPos(clickX, clickY))
+                {
+                    return false;
+                }
+
+                Thread.Sleep(20);
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+                Thread.Sleep(20);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool TryFocusElementAndSendBackspace(AutomationElement element)
