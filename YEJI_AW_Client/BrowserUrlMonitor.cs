@@ -927,7 +927,8 @@ namespace YEJI_AW_Client
                     if (normalizedDomain.Equals(baseDomain, StringComparison.Ordinal) ||
                         normalizedDomain.EndsWith("." + baseDomain, StringComparison.Ordinal))
                         return true;
-                    return true;
+                    
+                    continue;
                 }
             }
 

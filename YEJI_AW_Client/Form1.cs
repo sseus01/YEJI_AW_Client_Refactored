@@ -849,7 +849,25 @@ namespace YEJI_AW_Client
                 return NormalizeEmail(value);
             }
 
-            return value.Trim().ToLowerInvariant();
+            string trimmed = value.Trim().ToLowerInvariant();
+            if (!string.Equals(type, "url", StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed;
+            }
+
+            string? domain = BrowserUrlMonitor.ExtractDomain(trimmed);
+            if (!string.IsNullOrWhiteSpace(domain))
+            {
+                string normalizedDomain = domain.Trim().ToLowerInvariant();
+                if (normalizedDomain.StartsWith("www.", StringComparison.Ordinal))
+                {
+                    normalizedDomain = normalizedDomain.Substring(4);
+                }
+
+                return normalizedDomain;
+            }
+
+            return trimmed;
         }
 
         private static string BuildBanExceptionKey(string type, string value)
@@ -866,7 +884,37 @@ namespace YEJI_AW_Client
                 return false;
             }
 
-            return banItemExceptionKeys.Contains(BuildBanExceptionKey(normalizedType, normalizedValue));
+            if (banItemExceptionKeys.Contains(BuildBanExceptionKey(normalizedType, normalizedValue)))
+            {
+                return true;
+            }
+
+            if (!string.Equals(normalizedType, "url", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string[] candidates =
+            {
+                normalizedValue,
+                value?.Trim().ToLowerInvariant() ?? string.Empty,
+                NormalizeUrlForDisplay(value ?? string.Empty).ToLowerInvariant()
+            };
+
+            foreach (string candidate in candidates)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    continue;
+                }
+
+                if (banItemExceptionKeys.Contains(BuildBanExceptionKey(normalizedType, candidate)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static List<string> ExtractUrlsFromCache(ProhibitedUrlsCache cache)
