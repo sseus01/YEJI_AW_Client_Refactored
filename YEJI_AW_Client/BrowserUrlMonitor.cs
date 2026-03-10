@@ -681,15 +681,20 @@ namespace YEJI_AW_Client
                 int maxScan = Math.Min(elements.Count, 2000);
                 ClientLogger.LogAgent($"[EMAIL][DEBUG] TryRemoveEmailsFromCurrentCompose scanning elements. total={elements.Count}, maxScan={maxScan}", "DBG");
 
+                var remainingTargets = new HashSet<string>(targets, StringComparer.OrdinalIgnoreCase);
+
                 for (int i = 0; i < maxScan; i++)
                 {
+                    if (remainingTargets.Count == 0)
+                        break;
+
                     var element = elements[i];
-                    string mergedText = GetElementSearchText(element); ;
+                    string mergedText = GetElementSearchText(element);
 
                     string normalizedText = mergedText.ToLowerInvariant();
                     bool matched = false;
                     string matchedTarget = string.Empty;
-                    foreach (string target in targets)
+                    foreach (string target in remainingTargets)
                     {
                         if (normalizedText.Contains(target))
                         {
@@ -755,6 +760,7 @@ namespace YEJI_AW_Client
                     if (removedCurrent)
                     {
                         removed++;
+                        remainingTargets.Remove(matchedTarget);
                         Thread.Sleep(30);
                     }
                 }
@@ -802,6 +808,9 @@ namespace YEJI_AW_Client
                     string buttonText = ((button.Current.Name ?? string.Empty) + " " + (button.Current.HelpText ?? string.Empty)).ToLowerInvariant();
                     string automationId = (button.Current.AutomationId ?? string.Empty).ToLowerInvariant();
                     string className = (button.Current.ClassName ?? string.Empty).ToLowerInvariant();
+                    var rect = button.Current.BoundingRectangle;
+                    bool looksLikeIconButton = !rect.IsEmpty && rect.Width > 0 && rect.Height > 0 && rect.Width <= 24 && rect.Height <= 24;
+
                     bool looksLikeDeleteButton =
                         buttonText.Contains("삭제") ||
                         buttonText.Contains("지우기") ||
@@ -817,7 +826,8 @@ namespace YEJI_AW_Client
                         className.Contains("btn_del") ||
                         className.Contains("delete") ||
                         className.Contains("remove") ||
-                        className.Contains("close");
+                        className.Contains("close") ||
+                        looksLikeIconButton;
 
                     if (!looksLikeDeleteButton)
                         continue;
@@ -887,6 +897,26 @@ namespace YEJI_AW_Client
                 mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
                 Thread.Sleep(20);
                 return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsLikelyRecipientChip(AutomationElement element)
+        {
+            try
+            {
+                var rect = element.Current.BoundingRectangle;
+                if (rect.IsEmpty)
+                    return false;
+
+                if (rect.Width < 24 || rect.Height < 14)
+                    return false;
+
+                // 토큰 크기보다 훨씬 큰 컨테이너(예: 전체 수신자 영역, 주소록 버튼 영역)는 우측 클릭 대상에서 제외
+                return rect.Width <= 520 && rect.Height <= 72;
             }
             catch
             {
