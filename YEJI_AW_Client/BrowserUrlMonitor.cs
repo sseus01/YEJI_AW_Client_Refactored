@@ -883,6 +883,192 @@ namespace YEJI_AW_Client
             return builder.Uri.ToString().ToLowerInvariant();
         }
 
+        private static string NormalizePathForMatch(string host, string path)
+        {
+            string normalizedPath = (path ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(normalizedPath))
+                return "/";
+
+            if (!normalizedPath.StartsWith("/", StringComparison.Ordinal))
+                normalizedPath = "/" + normalizedPath;
+
+            normalizedPath = normalizedPath.TrimEnd('/');
+            if (string.IsNullOrEmpty(normalizedPath))
+                normalizedPath = "/";
+
+            string normalizedHost = NormalizeDomain(host);
+            // ABLY 링크는 모바일/앱링크 도메인 사이에서 리다이렉트되며,
+            // /app/markets/{id} -> /markets/{id}로 경로가 바뀌는 케이스를 동일하게 본다.
+            if (normalizedHost.EndsWith("a-bly.com", StringComparison.Ordinal) &&
+                normalizedPath.StartsWith("/app/", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedPath = normalizedPath.Substring(4);
+                if (string.IsNullOrEmpty(normalizedPath))
+                    normalizedPath = "/";
+            }
+
+            // 네이버 지도는 동일 장소 링크가 /v5/search/... 와 /p/search/...로 바뀌는 경우가 있다.
+            if (normalizedHost.Equals("map.naver.com", StringComparison.Ordinal))
+            {
+                if (normalizedPath.StartsWith("/v5/search/", StringComparison.OrdinalIgnoreCase))
+                {
+                    normalizedPath = "/search/" + normalizedPath.Substring("/v5/search/".Length);
+                }
+                else if (normalizedPath.StartsWith("/p/search/", StringComparison.OrdinalIgnoreCase))
+                {
+                    normalizedPath = "/search/" + normalizedPath.Substring("/p/search/".Length);
+                }
+            }
+
+            return normalizedPath.ToLowerInvariant();
+        }
+
+        private static bool TryExtractNaverMapPlaceId(string normalizedPath, out string placeId)
+        {
+            placeId = string.Empty;
+            if (string.IsNullOrWhiteSpace(normalizedPath))
+                return false;
+
+            const string marker = "/place/";
+            int markerIndex = normalizedPath.IndexOf(marker, StringComparison.Ordinal);
+            if (markerIndex < 0)
+                return false;
+
+            int start = markerIndex + marker.Length;
+            if (start >= normalizedPath.Length)
+                return false;
+
+            int end = normalizedPath.IndexOf('/', start);
+            string candidate = end >= 0
+                ? normalizedPath.Substring(start, end - start)
+                : normalizedPath.Substring(start);
+
+            if (string.IsNullOrWhiteSpace(candidate))
+                return false;
+
+            placeId = candidate.Trim();
+            return true;
+        }
+
+        private static bool IsNaverPlaceFamilyHost(string host)
+        {
+            string normalized = NormalizeDomain(host);
+            return normalized is "map.naver.com" or "place.naver.com" or "m.place.naver.com" or "store.naver.com" or "m.store.naver.com";
+        }
+
+        private static bool IsEquivalentNaverPlaceHost(string hostA, string hostB)
+        {
+            return IsNaverPlaceFamilyHost(hostA) && IsNaverPlaceFamilyHost(hostB);
+        }
+
+        private static bool TryGetNumericId(string value, out string id)
+        {
+            id = string.Empty;
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            string trimmed = value.Trim();
+            for (int i = 0; i < trimmed.Length; i++)
+            {
+                if (!char.IsDigit(trimmed[i]))
+                    return false;
+            }
+
+            id = trimmed;
+            return true;
+        }
+
+        private static bool TryExtractQueryValue(string query, string key, out string value)
+        {
+            value = string.Empty;
+            var queryMap = ParseQueryToMap(query);
+            if (!queryMap.TryGetValue(key, out List<string>? values) || values.Count == 0)
+                return false;
+
+            value = values[0];
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
+        private static bool TryExtractNaverPlaceId(Uri uri, string normalizedPath, out string placeId)
+        {
+            placeId = string.Empty;
+            if (!IsNaverPlaceFamilyHost(uri.Host))
+                return false;
+
+            if (TryExtractNaverMapPlaceId(normalizedPath, out string fromPath) &&
+                TryGetNumericId(fromPath, out placeId))
+                return true;
+
+            if (TryExtractQueryValue(uri.Query, "id", out string idFromQuery) &&
+                TryGetNumericId(idFromQuery, out placeId))
+                return true;
+
+            if (TryExtractQueryValue(uri.Query, "code", out string codeFromQuery) &&
+                TryGetNumericId(codeFromQuery, out placeId))
+                return true;
+
+            return false;
+        }
+
+        private static Dictionary<string, List<string>> ParseQueryToMap(string query)
+        {
+            var map = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(query))
+                return map;
+
+            string trimmed = query.StartsWith("?", StringComparison.Ordinal) ? query.Substring(1) : query;
+            if (string.IsNullOrWhiteSpace(trimmed))
+                return map;
+
+            string[] parts = trimmed.Split('&', StringSplitOptions.RemoveEmptyEntries);
+            foreach (string part in parts)
+            {
+                string[] pair = part.Split('=', 2);
+                string key = Uri.UnescapeDataString(pair[0] ?? string.Empty).Trim().ToLowerInvariant();
+                if (string.IsNullOrEmpty(key))
+                    continue;
+
+                string value = pair.Length > 1
+                    ? Uri.UnescapeDataString(pair[1] ?? string.Empty).Trim().ToLowerInvariant()
+                    : string.Empty;
+
+                if (!map.TryGetValue(key, out List<string>? values))
+                {
+                    values = new List<string>();
+                    map[key] = values;
+                }
+
+                values.Add(value);
+            }
+
+            return map;
+        }
+
+        private static bool IsQuerySubset(string currentQuery, string prohibitedQuery)
+        {
+            var prohibitedMap = ParseQueryToMap(prohibitedQuery);
+            if (prohibitedMap.Count == 0)
+                return false;
+
+            var currentMap = ParseQueryToMap(currentQuery);
+            if (currentMap.Count == 0)
+                return false;
+
+            foreach (var prohibitedEntry in prohibitedMap)
+            {
+                if (!currentMap.TryGetValue(prohibitedEntry.Key, out List<string>? currentValues))
+                    return false;
+
+                foreach (string prohibitedValue in prohibitedEntry.Value)
+                {
+                    if (!currentValues.Contains(prohibitedValue))
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
         /// <summary>
         /// URL이 금지된 URL 목록에 포함되는지 확인합니다.
         /// 도메인뿐만 아니라 서브도메인 및 하부 경로까지 체크합니다.
@@ -910,6 +1096,7 @@ namespace YEJI_AW_Client
                 string prohibitedLower = prohibited.ToLowerInvariant().Trim();
                 string prohibitedNormalizedDomain = NormalizeDomain(ExtractDomain(prohibitedLower));
                 bool prohibitedHasPath = false;
+                bool prohibitedContainsQueryMark = prohibitedLower.Contains("?", StringComparison.Ordinal);
                 string prohibitedNormalizedUrl = prohibitedLower;
 
                 if (TryCreateUri(prohibitedLower, out Uri? prohibitedUri) && prohibitedUri != null)
@@ -924,26 +1111,64 @@ namespace YEJI_AW_Client
                 // 예: abc.abc.com/blog 형태의 금지 URL
                 if (prohibitedHasPath)
                 {
-                    // 금지 URL이 경로를 포함하는 경우
-                    if (urlLower.Contains(prohibitedLower) ||
-                        normalizedUrlLower.Contains(prohibitedNormalizedUrl))
-                        return true;
+                    // 금지 URL에 쿼리 구분자(?)가 없는 경우에만 단순 포함 매칭을 허용한다.
+                    // search? 형태의 패턴이 들어왔을 때 검색 URL 전체가 과차단되는 것을 방지한다.
+                    if (!prohibitedContainsQueryMark)
+                    {
+                        if (urlLower.Contains(prohibitedLower) ||
+                            normalizedUrlLower.Contains(prohibitedNormalizedUrl))
+                            return true;
+                    }
 
                     // 스킴/호스트가 일부 다른 경우(예: m.smartstore.naver.com)도
                     // 동일/하위 도메인 + 경로 일치면 차단
                     if (TryCreateUri(normalizedUrlLower, out Uri? currentUri) && currentUri != null &&
                         TryCreateUri(prohibitedNormalizedUrl, out Uri? prohibitedPathUri) && prohibitedPathUri != null)
                     {
-                        if (IsSameOrSubdomain(currentUri.Host, prohibitedPathUri.Host))
+                        bool isSameHostScope = IsSameOrSubdomain(currentUri.Host, prohibitedPathUri.Host) ||
+                           IsEquivalentNaverPlaceHost(currentUri.Host, prohibitedPathUri.Host);
+                        if (isSameHostScope)
                         {
-                            string currentPath = currentUri.AbsolutePath.TrimEnd('/').ToLowerInvariant();
-                            string prohibitedPath = prohibitedPathUri.AbsolutePath.TrimEnd('/').ToLowerInvariant();
+                            string currentPath = NormalizePathForMatch(currentUri.Host, currentUri.AbsolutePath);
+                            string prohibitedPath = NormalizePathForMatch(prohibitedPathUri.Host, prohibitedPathUri.AbsolutePath);
+
+                            // 네이버 지도/플레이스/스토어는 호스트/경로/쿼리가 서로 변환될 수 있으므로
+                            // place id가 동일하면 같은 페이지로 본다.
+                            if (TryExtractNaverPlaceId(currentUri, currentPath, out string currentNaverPlaceId) &&
+                                TryExtractNaverPlaceId(prohibitedPathUri, prohibitedPath, out string prohibitedNaverPlaceId) &&
+                                currentNaverPlaceId.Equals(prohibitedNaverPlaceId, StringComparison.Ordinal))
+                            {
+                                return true;
+                            }
+
+                            bool prohibitedHasQuery = !string.IsNullOrWhiteSpace(prohibitedPathUri.Query);
+                            bool queryMatches;
+                            if (prohibitedContainsQueryMark)
+                            {
+                                // '?'만 있고 파라미터가 없는 패턴은 의도 불명확/과차단 위험이 높으므로 매칭하지 않는다.
+                                queryMatches = prohibitedHasQuery && IsQuerySubset(currentUri.Query, prohibitedPathUri.Query);
+
+                                // 네이버 지도 place 링크는 동일 장소여도 쿼리값(c, timestamp 등)이 자주 바뀌므로
+                                // place id가 동일하면 쿼리 불일치를 허용한다.
+                                if (!queryMatches &&
+                                    TryExtractNaverPlaceId(currentUri, currentPath, out string currentPlaceId) &&
+                                    TryExtractNaverPlaceId(prohibitedPathUri, prohibitedPath, out string prohibitedPlaceId) &&
+                                    currentPlaceId.Equals(prohibitedPlaceId, StringComparison.Ordinal))
+                                {
+                                    queryMatches = true;
+                                }
+                            }
+                            else
+                            {
+                                queryMatches = true;
+                            }
 
                             if (string.IsNullOrEmpty(prohibitedPath) || prohibitedPath == "/")
                                 return true;
 
-                            if (currentPath.Equals(prohibitedPath, StringComparison.Ordinal) ||
-                                currentPath.StartsWith(prohibitedPath + "/", StringComparison.Ordinal))
+                            if (queryMatches &&
+                               (currentPath.Equals(prohibitedPath, StringComparison.Ordinal) ||
+                                currentPath.StartsWith(prohibitedPath + "/", StringComparison.Ordinal)))
                                 return true;
                         }
                     }
