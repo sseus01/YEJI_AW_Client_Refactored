@@ -782,6 +782,17 @@ namespace YEJI_AW_Client
                     return extractedUrl;
             }
 
+            // URL 스킴(http/https)이 없는 형태라도 도메인/경로가 제목에 노출되면 추출
+            // 예: m.smartstore.naver.com/imugcup?NaPm=... - Whale
+            const string urlLikePattern = @"\b(?:www\.)?[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+(?:/[^\s|]*)?(?:\?[^\s|]*)?";
+            Match match = Regex.Match(title, urlLikePattern, RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                string token = match.Value.Trim().TrimEnd('.', ',', ';', ':', ')', ']', '}');
+                if (!string.IsNullOrWhiteSpace(token))
+                    return token;
+            }
+
             // URL이 제목에 명시적으로 없는 경우, 제목 자체를 반환
             // (일부 경우 도메인만 표시되기도 함)
             return title;
@@ -831,6 +842,18 @@ namespace YEJI_AW_Client
                 normalized = normalized.Substring(4);
 
             return normalized;
+        }
+
+        private static bool IsSameOrSubdomain(string host, string baseHost)
+        {
+            if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(baseHost))
+                return false;
+
+            string normalizedHost = NormalizeDomain(host);
+            string normalizedBase = NormalizeDomain(baseHost);
+
+            return normalizedHost.Equals(normalizedBase, StringComparison.Ordinal) ||
+                   normalizedHost.EndsWith("." + normalizedBase, StringComparison.Ordinal);
         }
 
         private static bool TryCreateUri(string url, out Uri? uri)
@@ -905,6 +928,25 @@ namespace YEJI_AW_Client
                     if (urlLower.Contains(prohibitedLower) ||
                         normalizedUrlLower.Contains(prohibitedNormalizedUrl))
                         return true;
+
+                    // 스킴/호스트가 일부 다른 경우(예: m.smartstore.naver.com)도
+                    // 동일/하위 도메인 + 경로 일치면 차단
+                    if (TryCreateUri(normalizedUrlLower, out Uri? currentUri) && currentUri != null &&
+                        TryCreateUri(prohibitedNormalizedUrl, out Uri? prohibitedPathUri) && prohibitedPathUri != null)
+                    {
+                        if (IsSameOrSubdomain(currentUri.Host, prohibitedPathUri.Host))
+                        {
+                            string currentPath = currentUri.AbsolutePath.TrimEnd('/').ToLowerInvariant();
+                            string prohibitedPath = prohibitedPathUri.AbsolutePath.TrimEnd('/').ToLowerInvariant();
+
+                            if (string.IsNullOrEmpty(prohibitedPath) || prohibitedPath == "/")
+                                return true;
+
+                            if (currentPath.Equals(prohibitedPath, StringComparison.Ordinal) ||
+                                currentPath.StartsWith(prohibitedPath + "/", StringComparison.Ordinal))
+                                return true;
+                        }
+                    }
 
                     // 경로가 포함된 금지 URL은 도메인 단독 매칭으로 확장하지 않음
                     continue;
