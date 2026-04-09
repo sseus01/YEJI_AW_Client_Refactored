@@ -60,6 +60,7 @@ namespace YEJI_AW_Client
         private const int OvertimeAlertMinutesBeforeEnd = 5;    // 연장근무 종료 몇 분 전에 알림 표시
         private const int AlertTimeChangeThresholdSeconds = 1;   // 알림 시각 변경 감지 임계값 (초)
         private const int StandardShutdownCountdownMinutes = 3;    // 일반/후속 알림 시 강제 종료까지 카운트다운(분)
+        private static readonly TimeSpan TempDisableCutoffTime = new TimeSpan(18, 0, 0); // 일시해제 허용 마감 시각
 
         private TimeSpan workStartTime;
         private TimeSpan workEndTime;
@@ -129,6 +130,10 @@ namespace YEJI_AW_Client
         // 마지막으로 시도한 업데이트 버전 기록 (중복 시도 방지)
         private readonly string lastAttemptedUpdateFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "last_update_attempt.txt");
+
+        // 일시해제 사용 횟수(일자별) 저장 파일
+        private readonly string tempDisableStateFile =
+            Path.Combine(@"C:\ProgramData\YEJI_AW", "temp_disable_state.json");
 
         private const string ServerBaseUrl = "http://175.106.99.157:3000";
         private const int UserInfoRetryDelayMs = 60 * 1000;
@@ -2425,7 +2430,7 @@ namespace YEJI_AW_Client
 
             if (!pcOffCountInitializedForDay)
             {
-                remainingTempDisableCount = pcOffSettings.TempDisableCount;
+                remainingTempDisableCount = CalculateRemainingTempDisableCount();
                 pcOffCountInitializedForDay = true;
             }
 
@@ -2520,11 +2525,18 @@ namespace YEJI_AW_Client
                 Text = "일시해제신청",
                 Width = 120,
                 Height = 32,
-                Visible = remainingTempDisableCount > 0
+                Visible = CanUseTempDisableNow() && remainingTempDisableCount > 0
             };
 
             extendButton.Click += (s, e) =>
             {
+                if (!CanUseTempDisableNow())
+                {
+                    extendButton.Visible = false;
+                    pcOffStatusLabel!.Text = $"{TempDisableCutoffTime:hh\\:mm} 이후에는 일시해제를 신청할 수 없습니다.";
+                    return;
+                }
+
                 if (remainingTempDisableCount <= 0)
                 {
                     extendButton.Visible = false;
@@ -2533,6 +2545,7 @@ namespace YEJI_AW_Client
                 }
 
                 remainingTempDisableCount--;
+                SaveUsedTempDisableCountForToday(Math.Max(0, pcOffSettings.TempDisableCount - remainingTempDisableCount));
                 shutdownCountdownTimer.Stop();
                 scheduledShutdownTime = null;
                 isTemporaryDisableActive = true;
@@ -2575,6 +2588,11 @@ namespace YEJI_AW_Client
             pcOffAlertForm.Show();
             ClientLogger.LogBalloon($"PC off alert shown (target={offTime:HH:mm}, followUp={isFollowUpAlert}, afterBoot={triggeredAfterBoot}).", "DBG");
             UpdateShutdownCountdownLabel();
+        }
+
+        private bool CanUseTempDisableNow()
+        {
+            return GetCurrentDateTime().TimeOfDay < TempDisableCutoffTime;
         }
 
         private void ScheduleShutdown(DateTime targetTime)
@@ -2881,6 +2899,7 @@ namespace YEJI_AW_Client
                 pcOffCountInitializedForDay = false;
                 remainingTempDisableCount = 0;
                 isTemporaryDisableActive = false;
+                SaveUsedTempDisableCountForToday(0);
                 CloseTempDisableTray();
             }
         }
@@ -3068,7 +3087,7 @@ namespace YEJI_AW_Client
                         pcOffSettings = NormalizePcOffSettings(settings);
                         if (!pcOffCountInitializedForDay)
                         {
-                            remainingTempDisableCount = pcOffSettings.TempDisableCount;
+                            remainingTempDisableCount = CalculateRemainingTempDisableCount();
                         }
                     }
                 }
@@ -3091,6 +3110,67 @@ namespace YEJI_AW_Client
                 TempUsageMinutes = Math.Max(1, source.TempUsageMinutes),
                 TempPopupImage = source.TempPopupImage ?? string.Empty
             };
+        }
+
+        private int CalculateRemainingTempDisableCount()
+        {
+            int usedCount = LoadUsedTempDisableCountForToday();
+            return Math.Max(0, pcOffSettings.TempDisableCount - usedCount);
+        }
+
+        private int LoadUsedTempDisableCountForToday()
+        {
+            try
+            {
+                if (!File.Exists(tempDisableStateFile))
+                {
+                    return 0;
+                }
+
+                string json = File.ReadAllText(tempDisableStateFile, Encoding.UTF8);
+                var state = JsonSerializer.Deserialize<TempDisableUsageState>(json, JsonOptions);
+                if (state == null)
+                {
+                    return 0;
+                }
+
+                string today = GetCurrentDate().ToString("yyyy-MM-dd");
+                if (!string.Equals(state.Date, today, StringComparison.Ordinal))
+                {
+                    return 0;
+                }
+
+                return Math.Max(0, state.UsedCount);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private void SaveUsedTempDisableCountForToday(int usedCount)
+        {
+            try
+            {
+                string? folder = Path.GetDirectoryName(tempDisableStateFile);
+                if (!string.IsNullOrWhiteSpace(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                var state = new TempDisableUsageState
+                {
+                    Date = GetCurrentDate().ToString("yyyy-MM-dd"),
+                    UsedCount = Math.Max(0, usedCount)
+                };
+
+                string json = JsonSerializer.Serialize(state, JsonOptions);
+                File.WriteAllText(tempDisableStateFile, json, Encoding.UTF8);
+            }
+            catch
+            {
+                // 저장 실패 시 무시
+            }
         }
 
         private string GetIdleIntervalKey(DateTime start, DateTime end)
@@ -5416,6 +5496,15 @@ namespace YEJI_AW_Client
         public int TempUsageMinutes { get; set; } = 1;
         [JsonPropertyName("tempPopupImage")]
         public string TempPopupImage { get; set; } = string.Empty;
+    }
+
+    public class TempDisableUsageState
+    {
+        [JsonPropertyName("date")]
+        public string Date { get; set; } = string.Empty;
+
+        [JsonPropertyName("usedCount")]
+        public int UsedCount { get; set; }
     }
 
     // 영업금지 URL API 응답

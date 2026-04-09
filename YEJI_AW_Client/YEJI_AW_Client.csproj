@@ -7,9 +7,9 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>TrayIcon_Y_orange.ico</ApplicationIcon>
-	<Version>2.3.1.4</Version>
-    <FileVersion>2.3.1.4</FileVersion>
-    <InformationalVersion>2.3.1.4</InformationalVersion>
+	<Version>2.3.2.1</Version>
+    <FileVersion>2.3.2.1</FileVersion>
+    <InformationalVersion>2.3.2.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 	<AssemblyTitle>YEJI-On</AssemblyTitle>
     <AssemblyName>YEJI-On</AssemblyName>
