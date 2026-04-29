@@ -159,7 +159,35 @@ namespace YEJI_AW_Client
 
             if (comboBoxLevel1.Items.Count > 0)
             {
-                comboBoxLevel1.SelectedIndex = 0;
+                SetDefaultPersonalReason();
+            }
+        }
+
+
+        private void SetDefaultPersonalReason()
+        {
+            const string defaultReasonCode = "G01";
+
+            var defaultReason = awayReasons.FirstOrDefault(r =>
+                string.Equals(r.ReasonCode, defaultReasonCode, StringComparison.OrdinalIgnoreCase));
+
+            string selectedLevel1 = defaultReason?.Level1
+                ?? comboBoxLevel1.Items[0]?.ToString()
+                ?? string.Empty;
+
+            if (string.IsNullOrEmpty(selectedLevel1))
+            {
+                return;
+            }
+
+            comboBoxLevel1.SelectedItem = selectedLevel1;
+
+            string? selectedLevel2 = defaultReason?.Level2
+                ?? comboBoxLevel2.Items.Cast<object>().Select(item => item?.ToString()).FirstOrDefault();
+
+            if (!string.IsNullOrEmpty(selectedLevel2))
+            {
+                comboBoxLevel2.SelectedItem = selectedLevel2;
             }
         }
 

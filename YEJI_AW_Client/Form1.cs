@@ -2514,7 +2514,7 @@ namespace YEJI_AW_Client
 
             var closeButton = new Button
             {
-                Text = "확인",
+                Text = "PC종료",
                 DialogResult = DialogResult.OK,
                 Width = 120,
                 Height = 32
@@ -2525,47 +2525,30 @@ namespace YEJI_AW_Client
                 Text = "일시해제신청",
                 Width = 120,
                 Height = 32,
-                Visible = CanUseTempDisableNow() && remainingTempDisableCount > 0
+                Visible = remainingTempDisableCount > 0
             };
 
             extendButton.Click += (s, e) =>
             {
-                if (!CanUseTempDisableNow())
+                if (TryApplyTempDisable(out var message))
                 {
-                    extendButton.Visible = false;
-                    pcOffStatusLabel!.Text = $"{TempDisableCutoffTime:hh\\:mm} 이후에는 일시해제를 신청할 수 없습니다.";
+                    MessageBox.Show(message, "일시 해제 신청 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    pcOffAlertForm?.Close();
                     return;
                 }
 
-                if (remainingTempDisableCount <= 0)
-                {
-                    extendButton.Visible = false;
-                    pcOffStatusLabel!.Text = $"{StandardShutdownCountdownMinutes}분 후 PC가 강제종료됩니다.";
-                    return;
-                }
-
-                remainingTempDisableCount--;
-                SaveUsedTempDisableCountForToday(Math.Max(0, pcOffSettings.TempDisableCount - remainingTempDisableCount));
-                shutdownCountdownTimer.Stop();
-                scheduledShutdownTime = null;
-                isTemporaryDisableActive = true;
-                pcOffAlertTargetTime = GetCurrentDateTime().AddMinutes(pcOffSettings.TempUsageMinutes);
-                hasShownPcOffAlert = false;
-                StartTempDisableTrayCountdown();
-
-                MessageBox.Show(
-                    $"{pcOffSettings.TempUsageMinutes}분 후 PC 종료 안내가 다시 표시됩니다. 진행중인 업무를 마무리 해주시기 바랍니다.",
-                    "일시 해제 신청 완료",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-
-                pcOffAlertForm?.Close();
+                extendButton.Visible = false;
+                pcOffStatusLabel!.Text = $"{StandardShutdownCountdownMinutes}분 후 PC가 강제종료됩니다.";
             };
 
             closeButton.Click += (s, e) => pcOffAlertForm?.Close();
 
-            buttonPanel.Controls.Add(closeButton);
             buttonPanel.Controls.Add(extendButton);
+            buttonPanel.Controls.Add(closeButton);
+
+            // 탭/포커스 이동 시에도 일시해제신청이 먼저 선택되도록 순서를 명시
+            extendButton.TabIndex = 0;
+            closeButton.TabIndex = 1;
 
             container.Controls.Add(messagePanel, 0, 0);
             container.Controls.Add(buttonPanel, 0, 1);
@@ -2660,6 +2643,47 @@ namespace YEJI_AW_Client
             UpdateShutdownCountdownTray();
         }
 
+        private bool TryApplyTempDisable(out string completionMessage)
+        {
+            completionMessage = string.Empty;
+
+            if (!CanUseTempDisableNow() || remainingTempDisableCount <= 0)
+            {
+                return false;
+            }
+
+            var now = GetCurrentDateTime();
+            var remainingBeforeDisable = scheduledShutdownTime.HasValue
+                ? scheduledShutdownTime.Value - now
+                : TimeSpan.Zero;
+
+            if (remainingBeforeDisable < TimeSpan.Zero)
+            {
+                remainingBeforeDisable = TimeSpan.Zero;
+            }
+
+            var disableDuration = TimeSpan.FromMinutes(pcOffSettings.TempUsageMinutes) - remainingBeforeDisable;
+            var minimumDuration = TimeSpan.FromMinutes(1);
+            if (disableDuration < minimumDuration)
+            {
+                disableDuration = minimumDuration;
+            }
+
+            remainingTempDisableCount--;
+            SaveUsedTempDisableCountForToday(Math.Max(0, pcOffSettings.TempDisableCount - remainingTempDisableCount));
+            shutdownCountdownTimer.Stop();
+            scheduledShutdownTime = null;
+            CloseShutdownCountdownTray();
+
+            isTemporaryDisableActive = true;
+            pcOffAlertTargetTime = now.Add(disableDuration);
+            hasShownPcOffAlert = false;
+            StartTempDisableTrayCountdown();
+
+            completionMessage = $"기존 남은시간을 반영하여 약 {Math.Ceiling(disableDuration.TotalMinutes)}분 후 PC 종료 안내가 다시 표시됩니다.";
+            return true;
+        }
+
         private void ShowShutdownCountdownTray()
         {
             if (!scheduledShutdownTime.HasValue)
@@ -2690,17 +2714,19 @@ namespace YEJI_AW_Client
                 TopMost = true,
                 MaximizeBox = false,
                 MinimizeBox = false,
-                ClientSize = new Size(260, 80)
+                ClientSize = new Size(380, 90)
             };
 
             var container = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 1,
+                ColumnCount = 2,
                 RowCount = 2,
                 Padding = new Padding(10)
             };
 
+            container.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            container.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             container.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
@@ -2718,8 +2744,36 @@ namespace YEJI_AW_Client
                 Text = "--:--"
             };
 
+            var tempDisableButton = new Button
+            {
+                Text = "일시해제신청",
+                Width = 110,
+                Height = 30,
+                Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
+                Visible = CanUseTempDisableNow() && remainingTempDisableCount > 0
+            };
+
+            tempDisableButton.Click += (s, e) =>
+            {
+                if (TryApplyTempDisable(out var message))
+                {
+                    MessageBox.Show(message, "일시 해제 신청 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                tempDisableButton.Visible = false;
+                MessageBox.Show(
+                    CanUseTempDisableNow()
+                        ? $"일시해제 가능 횟수를 모두 사용했습니다. {StandardShutdownCountdownMinutes}분 후 PC가 강제종료됩니다."
+                        : $"{TempDisableCutoffTime:hh:mm} 이후에는 일시해제를 신청할 수 없습니다.",
+                    "일시 해제 신청 불가",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            };
+
             container.Controls.Add(titleLabel, 0, 0);
             container.Controls.Add(shutdownCountdownTrayLabel, 0, 1);
+            container.Controls.Add(tempDisableButton, 1, 1);
 
             form.Controls.Add(container);
             return form;
@@ -2773,6 +2827,13 @@ namespace YEJI_AW_Client
         {
             try
             {
+                // 디버깅 중에는 실제 OS 종료를 막아 디버거가 비정상 종료 코드(-1 등)로 끊기는 현상을 방지한다.
+                if (Debugger.IsAttached)
+                {
+                    ClientLogger.LogBalloon("Debugger attached: skip real shutdown command.", "DBG");
+                    return;
+                }
+
                 var psi = new ProcessStartInfo
                 {
                     FileName = "shutdown",
