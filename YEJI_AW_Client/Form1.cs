@@ -2525,7 +2525,7 @@ namespace YEJI_AW_Client
                 Text = "일시해제신청",
                 Width = 120,
                 Height = 32,
-                Visible = remainingTempDisableCount > 0
+                Visible = CanUseTempDisableNow() && remainingTempDisableCount > 0
             };
 
             extendButton.Click += (s, e) =>
@@ -2771,9 +2771,44 @@ namespace YEJI_AW_Client
                     MessageBoxIcon.Information);
             };
 
+            var closeButton = new Button
+            {
+                Text = "창닫기",
+                Width = 90,
+                Height = 30,
+                Anchor = AnchorStyles.Right | AnchorStyles.Bottom
+            };
+
+            closeButton.Click += (s, e) => form.Hide();
+
+            var shutdownNowButton = new Button
+            {
+                Text = "PC종료",
+                Width = 90,
+                Height = 30,
+                Anchor = AnchorStyles.Right | AnchorStyles.Bottom
+            };
+
+            shutdownNowButton.Click += (s, e) => ForceShutdown();
+
+            var buttonPanel = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                Dock = DockStyle.Fill,
+                Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
+                Margin = new Padding(0)
+            };
+
+            buttonPanel.Controls.Add(shutdownNowButton);
+            buttonPanel.Controls.Add(closeButton);
+            buttonPanel.Controls.Add(tempDisableButton);
+
             container.Controls.Add(titleLabel, 0, 0);
+            container.SetColumnSpan(titleLabel, 2);
             container.Controls.Add(shutdownCountdownTrayLabel, 0, 1);
-            container.Controls.Add(tempDisableButton, 1, 1);
+            container.Controls.Add(buttonPanel, 1, 1);
 
             form.Controls.Add(container);
             return form;
