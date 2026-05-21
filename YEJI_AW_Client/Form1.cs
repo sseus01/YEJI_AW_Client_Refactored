@@ -2171,6 +2171,13 @@ namespace YEJI_AW_Client
 
                 await EnsurePcOffSettingsAsync();
 
+                // 종료 예외가 최우선 정책이므로 연장근무보다 먼저 확인
+                if (await HasActiveShutdownExceptionAsync())
+                {
+                    CancelAllShutdownUiAndTimers();
+                    return;
+                }
+
                 // 연장근무 종료 시간 확인 (연장근무가 있으면 연장근무 종료 N분 전에 알림)
                 var overtimeEndTime = await GetApprovedOvertimeEndTimeAsync(now);
                 if (overtimeEndTime.HasValue)
@@ -2200,10 +2207,6 @@ namespace YEJI_AW_Client
                     }
                     return;
                 }
-
-                // 종료 예외가 있으면 PC 종료하지 않음
-                if (await HasActiveShutdownExceptionAsync(now))
-                    return;
 
                 if (pcOffAlertTargetTime == null)
                 {
@@ -2312,13 +2315,11 @@ namespace YEJI_AW_Client
             return null;
         }
 
-        private async Task<bool> HasActiveShutdownExceptionAsync(DateTime now)
+        private async Task<bool> HasActiveShutdownExceptionAsync()
         {
             try
             {
-                string fromDate = now.AddDays(-1).ToString("yyyy-MM-dd");
-                string toDate = now.AddDays(1).ToString("yyyy-MM-dd");
-                var url = $"{ServerBaseUrl}/api/shutdown-exceptions?employeeId={Uri.EscapeDataString(employeeId)}&startDate={fromDate}&endDate={toDate}";
+                var url = $"{ServerBaseUrl}/api/shutdown-plan?employeeId={Uri.EscapeDataString(employeeId)}";
                 using var response = await HttpClient.GetAsync(url);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -2328,52 +2329,11 @@ namespace YEJI_AW_Client
                 string json = await response.Content.ReadAsStringAsync();
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
-                foreach (var entry in EnumerateArrayLike(root))
-                {
-                    string targetComputer = GetElementString(entry, "computerName", "computer_name", "pcName", "pc_name", "hostname");
-                    if (!string.IsNullOrWhiteSpace(targetComputer) &&
-                        !string.Equals(targetComputer, computerName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
 
-                    string workDate = GetElementString(entry, "workDate", "work_date", "date", "targetDate", "target_date");
-                    DateTime baseDate = now.Date;
-                    if (DateTime.TryParse(workDate, out var parsedDate))
-                    {
-                        baseDate = parsedDate.Date;
-                    }
+                bool shutdownDisabled = GetElementBool(root, "shutdownDisabled", "shutdown_disabled");
+                string mode = GetElementString(root, "mode", "planMode", "plan_mode");
 
-                    string from = GetElementString(entry, "from_time", "fromTime", "start_time", "startTime", "from");
-                    string to = GetElementString(entry, "to_time", "toTime", "end_time", "endTime", "to");
-
-                    if (!TimeSpan.TryParse(from, out var fromTime) || !TimeSpan.TryParse(to, out var toTime))
-                    {
-                        if (DateTime.TryParse(from, out var startDateTime) && DateTime.TryParse(to, out var endDateTime))
-                        {
-                            if (now >= startDateTime && now <= endDateTime)
-                            {
-                                return true;
-                            }
-
-                            continue;
-                        }
-
-                        return true;
-                    }
-
-                    var start = baseDate.Add(fromTime);
-                    var end = baseDate.Add(toTime);
-                    if (end < start)
-                    {
-                        end = end.AddDays(1);
-                    }
-
-                    if (now >= start && now <= end)
-                    {
-                        return true;
-                    }
-                }
+                return shutdownDisabled || string.Equals(mode, "EXCEPTION", StringComparison.OrdinalIgnoreCase);
             }
             catch
             {
@@ -2381,6 +2341,23 @@ namespace YEJI_AW_Client
             }
 
             return false;
+        }
+
+        private void CancelAllShutdownUiAndTimers()
+        {
+            hasShownPcOffAlert = false;
+            pcOffAlertTargetTime = null;
+            scheduledShutdownTime = null;
+            isTemporaryDisableActive = false;
+
+            shutdownCountdownTimer.Stop();
+            CloseShutdownCountdownTray();
+            CloseTempDisableTray();
+
+            if (pcOffAlertForm != null && !pcOffAlertForm.IsDisposed)
+            {
+                pcOffAlertForm.Close();
+            }
         }
 
         private static IEnumerable<JsonElement> EnumerateArrayLike(JsonElement root)
@@ -2420,6 +2397,39 @@ namespace YEJI_AW_Client
             }
 
             return string.Empty;
+        }
+
+        private static bool GetElementBool(JsonElement element, params string[] propertyNames)
+        {
+            foreach (var name in propertyNames)
+            {
+                if (!element.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+                {
+                    continue;
+                }
+
+                if (value.ValueKind == JsonValueKind.True)
+                {
+                    return true;
+                }
+
+                if (value.ValueKind == JsonValueKind.False)
+                {
+                    return false;
+                }
+
+                if (value.ValueKind == JsonValueKind.String && bool.TryParse(value.GetString(), out var parsedBool))
+                {
+                    return parsedBool;
+                }
+
+                if ((value.ValueKind == JsonValueKind.Number || value.ValueKind == JsonValueKind.String) && int.TryParse(value.ToString(), out var parsedInt))
+                {
+                    return parsedInt != 0;
+                }
+            }
+
+            return false;
         }
 
         private async Task ShowPcOffAlertAsync(DateTime now, DateTime offTime, bool triggeredAfterBoot, bool isFollowUpAlert, bool isOvertimeAlert = false)
