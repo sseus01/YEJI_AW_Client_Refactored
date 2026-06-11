@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -7,44 +7,54 @@ using System.Windows.Forms;
 namespace YEJI_AW_Client
 {
     public class ProhibitedEmailAlertForm : Form
-    {      
+    {
         public ProhibitedEmailAlertForm(List<BanEmailRow> matchedRows, IntPtr browserWindowHandle)
         {
-            Text = "영업 금지 안내";
-            StartPosition = FormStartPosition.Manual;
+            Text            = "영업 금지 안내";
+            StartPosition   = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            TopMost = true;
-            ShowInTaskbar = false;
-            Size = new Size(560, 420);
-            BackColor = Color.White;
+            MaximizeBox     = false;
+            MinimizeBox     = false;
+            TopMost         = true;
+            ShowInTaskbar   = false;
+            ClientSize      = new Size(560, 400);
+            BackColor       = UiTheme.Background;
+
+            // ── 헤더 ──────────────────────────────────────────────────
+            Controls.Add(UiTheme.MakeHeader("영업 금지 안내"));
+
+            // ── 본문 ──────────────────────────────────────────────────
+            var body = new Panel
+            {
+                Dock      = DockStyle.Fill,
+                BackColor = UiTheme.Surface,
+                Padding   = new Padding(UiTheme.Pad, UiTheme.Pad, UiTheme.Pad, 0)
+            };
 
             var titleLabel = new Label
             {
-                Dock = DockStyle.Top,
-                Height = 50,
-                Font = new Font("Segoe UI", 13, FontStyle.Bold),
-                ForeColor = Color.FromArgb(192, 57, 43),
-                TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(20, 8, 20, 0),
-                Text = "영업금지 이메일이 포함되어 있습니다."
+                Dock      = DockStyle.Top,
+                Height    = 36,
+                Font      = UiTheme.H3,
+                ForeColor = UiTheme.Danger,
+                Text      = "영업금지 이메일이 포함되어 있습니다."
             };
 
-            var descriptionLabel = new Label
+            var descLabel = new Label
             {
-                Dock = DockStyle.Top,
-                Height = 62,
-                Font = new Font("Segoe UI", 10F, FontStyle.Regular),
-                ForeColor = Color.FromArgb(51, 51, 51),
-                Padding = new Padding(20, 0, 20, 6),
-                Text = "받는사람/참조/숨은참조에 영업금지 이메일이 포함되어 있습니다.\n해당 광고주에게는 전화, 이메일, SMS 등 모든 컨택을 삼가해 주세요."
+                Dock      = DockStyle.Top,
+                Height    = 48,
+                Font      = UiTheme.Body,
+                ForeColor = UiTheme.TextSecondary,
+                Text      = "받는사람/참조/숨은참조에 영업금지 이메일이 포함되어 있습니다.\n해당 광고주에게는 전화, 이메일, SMS 등 모든 컨택을 삼가해 주세요."
             };
 
+            // 이메일 목록
             var listBox = new ListBox
             {
-                Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", 10F),
+                Dock               = DockStyle.Fill,
+                Font               = UiTheme.Body,
+                BorderStyle        = BorderStyle.FixedSingle,
                 HorizontalScrollbar = true
             };
 
@@ -54,32 +64,23 @@ namespace YEJI_AW_Client
                 listBox.Items.Add($"{row.Email}  (업체명: {company})");
             }
 
-            var closeButton = new Button
-            {
-                Text = "확인",
-                Width = 100,
-                Height = 34,
-                DialogResult = DialogResult.OK
-            };
-            
-            var buttonPanel = new Panel
-            {
-                Dock = DockStyle.Bottom,
-                Height = 56,
-                Padding = new Padding(0, 10, 20, 10)
-            };
+            // 버튼 패널
+            var btnPanel = UiTheme.MakeButtonBar();
+            var closeButton = new Button { Text = "확인", Width = UiTheme.BtnW, DialogResult = DialogResult.OK };
+            UiTheme.StylePrimary(closeButton);
+            btnPanel.Controls.Add(closeButton);
 
-            closeButton.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
-            buttonPanel.Controls.Add(closeButton);
-            buttonPanel.Resize += (_, _) =>
-            {
-                closeButton.Location = new Point(buttonPanel.ClientSize.Width - closeButton.Width, 10);
-            };
+            // 추가 순서: btnPanel(Bottom), 나머지(Top - 역순)
+            body.Controls.Add(btnPanel);
+            body.Controls.Add(listBox);
+            body.Controls.Add(descLabel);
+            body.Controls.Add(titleLabel);
 
-            Controls.Add(listBox);
-            Controls.Add(buttonPanel);
-            Controls.Add(descriptionLabel);
-            Controls.Add(titleLabel);
+            // body(Fill) 먼저, header(Top) 나중에
+            Controls.Add(body);
+            Controls.Add(UiTheme.MakeHeader("영업 금지 안내"));
+
+            AcceptButton = closeButton;
 
             Shown += (_, _) =>
             {
@@ -87,22 +88,15 @@ namespace YEJI_AW_Client
                 BringToFront();
                 Activate();
             };
-
-            AcceptButton = closeButton;
         }
+
         private void CenterOnTargetScreen(IntPtr browserWindowHandle)
         {
             Screen targetScreen;
             if (browserWindowHandle != IntPtr.Zero)
             {
-                try
-                {
-                    targetScreen = Screen.FromHandle(browserWindowHandle);
-                }
-                catch
-                {
-                    targetScreen = Screen.FromPoint(Cursor.Position);
-                }
+                try { targetScreen = Screen.FromHandle(browserWindowHandle); }
+                catch { targetScreen = Screen.FromPoint(Cursor.Position); }
             }
             else
             {
@@ -111,8 +105,8 @@ namespace YEJI_AW_Client
 
             Rectangle area = targetScreen.WorkingArea;
             Location = new Point(
-                area.Left + Math.Max(0, (area.Width - Width) / 2),
-                area.Top + Math.Max(0, (area.Height - Height) / 2));
+                area.Left + Math.Max(0, (area.Width  - Width)  / 2),
+                area.Top  + Math.Max(0, (area.Height - Height) / 2));
         }
     }
 }

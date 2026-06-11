@@ -156,7 +156,6 @@ namespace YEJI_AW_Client
         private bool pcOffCountInitializedForDay;
         private PcOffAlertForm? pcOffAlertForm;
         private UpdateProgressForm? updateProgressForm;
-        private DateTime lastHeartbeatSuccessTime;
         private Form? shutdownCountdownTrayForm;
         private Label? shutdownCountdownTrayLabel;
         private bool isTemporaryDisableActive;
@@ -4053,7 +4052,6 @@ namespace YEJI_AW_Client
             {
                 // /api/client/heartbeat로 변경
                 var result = await PostClientStatusAsync($"{ApiClient.BaseUrl}/api/client/heartbeat");
-                if (result.Success) lastHeartbeatSuccessTime = DateTime.Now;
                 if (result.UserNotFound)
                 {
                     ScheduleUserInfoReentryPrompt();
@@ -4381,35 +4379,9 @@ namespace YEJI_AW_Client
 
             var targetStyle = newCount > 0 ? FontStyle.Bold : FontStyle.Regular;
             if (managerNotificationsMenuItem.Font.Style != targetStyle)
-                managerNotificationsMenuItem.Font = new Font(managerNotificationsMenuItem.Font, targetStyle);
-
-            // 배지 이미지 갱신 (기존 이미지 dispose → 새 이미지 설정)
-            var oldImage = managerNotificationsMenuItem.Image;
-            managerNotificationsMenuItem.Image = CreateNotificationBadge(newCount);
-            oldImage?.Dispose();
-        }
-
-        private static Bitmap? CreateNotificationBadge(int count)
-        {
-            if (count <= 0) return null;
-            const int W = 20, H = 16;
-            var bmp = new Bitmap(W, H);
-            using var g = Graphics.FromImage(bmp);
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            g.Clear(Color.Transparent);
-            using var bgBrush = new SolidBrush(UiTheme.Danger);
-            g.FillEllipse(bgBrush, 0, 0, W - 1, H - 1);
-            string text  = count > 99 ? "99+" : count.ToString();
-            float  fSize = count > 9 ? 6.5f : 7.5f;
-            using var font      = new Font("Segoe UI", fSize, FontStyle.Bold);
-            using var textBrush = new SolidBrush(Color.White);
-            var sf = new StringFormat
             {
-                Alignment     = StringAlignment.Center,
-                LineAlignment = StringAlignment.Center
-            };
-            g.DrawString(text, font, textBrush, new RectangleF(0, 0, W, H), sf);
-            return bmp;
+                managerNotificationsMenuItem.Font = new Font(managerNotificationsMenuItem.Font, targetStyle);
+            }
         }
 
         private void StartManagerNotificationPolling()
@@ -4840,19 +4812,6 @@ namespace YEJI_AW_Client
             userInfoForm.Dispose();
         }
 
-        private void OnShowClientStatus(object? sender, EventArgs e)
-        {
-            var form = new ClientStatusForm(
-                version:         GetCurrentVersion(),
-                employeeId:      employeeId,
-                employeeName:    employeeName,
-                computerName:    computerName,
-                isServerReachable: ApiClient.IsServerReachable,
-                lastHeartbeat:   lastHeartbeatSuccessTime,
-                workEndTime:     workEndTime);
-            ShowTrayMenuForm(form);
-        }
-
         private void OnOpenOvertimeRequest(object? sender, EventArgs e)
         {
             var now = GetCurrentDateTime();
@@ -5021,7 +4980,6 @@ namespace YEJI_AW_Client
             // ── 설정 ─────────────────────────────────────────────────
             trayMenu.Items.Add(new ToolStripSeparator());
             trayMenu.Items.Add("사용자 정보 수정", null, OnEditUserInfo);
-            trayMenu.Items.Add("클라이언트 정보", null, OnShowClientStatus);
 
             // ── 관리자 메뉴 (기본 숨김, EnableManagerNotificationMenu에서 표시) ──
             managerMenuSeparator = new ToolStripSeparator { Visible = false };
