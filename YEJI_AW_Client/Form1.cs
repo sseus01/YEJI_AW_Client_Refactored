@@ -135,7 +135,7 @@ namespace YEJI_AW_Client
         private readonly string tempDisableStateFile =
             Path.Combine(@"C:\ProgramData\YEJI_AW", "temp_disable_state.json");
 
-        private const string ServerBaseUrl = "http://175.106.99.157:3000";
+        private const string ServerBaseUrl = "http://aw.ye-ji.kr";
         private const int UserInfoRetryDelayMs = 60 * 1000;
         private static readonly bool EmailDebugLoggingEnabled =
             string.Equals(Environment.GetEnvironmentVariable("YEJI_EMAIL_DEBUG"), "1", StringComparison.OrdinalIgnoreCase);

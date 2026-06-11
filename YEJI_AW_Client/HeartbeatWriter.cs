@@ -158,27 +158,8 @@ public class HeartbeatWriter : IDisposable
     {
         try
         {
-            // 프로젝트에 ClientLogger가 있으면 사용
-            var loggerType = Type.GetType("YEJI_AW_Client.ClientLogger, YEJI_AW_Client");
-            if (loggerType != null)
-            {
-                var mi = loggerType.GetMethod("LogAgent", new[] { typeof(string), typeof(string) });
-                mi?.Invoke(null, new object[] { msg, "DBG" });
-            }
-            else if (_log != null)
-            {
-                _log(msg);
-            }
-            else
-            {
-                // fallback: 간단한 파일에 기록 (App base dir)
-                var baseDir = AppContext.BaseDirectory;
-                File.AppendAllText(Path.Combine(baseDir, "heartbeat_debug.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {msg}{Environment.NewLine}");
-            }
+            YEJI_AW_Client.ClientLogger.LogAgent(msg, "DBG");
         }
-        catch
-        {
-            // 로깅 실패는 무시
-        }
+        catch { }
     }
 }
