@@ -393,6 +393,8 @@ namespace YEJI_AW_Client
             {
                 this.Hide();
                 this.ShowInTaskbar = false;
+                EnsureAutoStartRegistryKey();
+                EnsureScheduledTask();
                 ShowUpdateCompletionNotificationIfNeeded();
                 heartbeatTimer.Start();
                 updateCheckTimer.Start();
@@ -1446,6 +1448,75 @@ namespace YEJI_AW_Client
             catch (Exception ex)
             {
                 ClientLogger.LogUpdate("Client update check failed.", "Err", ex);
+            }
+        }
+
+        private static void EnsureScheduledTask()
+        {
+            try
+            {
+                string appDir      = Path.GetDirectoryName(System.Windows.Forms.Application.ExecutablePath) ?? "";
+                string watcherPath = Path.Combine(appDir, "YEJI_ON_Watcher.exe");
+                if (!File.Exists(watcherPath)) return;
+
+                var checkInfo = new ProcessStartInfo("schtasks.exe", "/Query /TN \"YEJI-ON Watcher\"")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                    CreateNoWindow = true
+                };
+                using var checkProc = Process.Start(checkInfo);
+                checkProc?.WaitForExit();
+                if (checkProc?.ExitCode == 0) return;
+
+                string username = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+                string script =
+                    $"$a = New-ScheduledTaskAction -Execute '\"{watcherPath}\"'\n" +
+                    $"$t = New-ScheduledTaskTrigger -AtLogOn -User '{username}'\n" +
+                    "$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable\n" +
+                    "Register-ScheduledTask -TaskName 'YEJI-ON Watcher' -Action $a -Trigger $t -Settings $s -RunLevel Limited -Force";
+
+                string scriptPath = Path.Combine(Path.GetTempPath(), "yeji_register_task.ps1");
+                File.WriteAllText(scriptPath, script, System.Text.Encoding.UTF8);
+
+                var psInfo = new ProcessStartInfo("powershell.exe",
+                    $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{scriptPath}\"")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow  = true
+                };
+                using var psProc = Process.Start(psInfo);
+                psProc?.WaitForExit();
+                ClientLogger.LogAgent("Scheduled task 'YEJI-ON Watcher' registered.");
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Failed to register scheduled task: {ex.Message}", "WRN");
+            }
+        }
+
+        private static void EnsureAutoStartRegistryKey()
+        {
+            try
+            {
+                const string runSubKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+                const string valueName = "YEJI-ON";
+                string exePath = System.Windows.Forms.Application.ExecutablePath;
+
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(runSubKey, writable: true);
+                if (key == null) return;
+
+                var existing = key.GetValue(valueName) as string;
+                if (!string.Equals(existing, exePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    key.SetValue(valueName, exePath);
+                    ClientLogger.LogAgent($"Autorun registry key registered: {exePath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                ClientLogger.LogAgent($"Failed to set autorun registry key: {ex.Message}", "WRN");
             }
         }
 
