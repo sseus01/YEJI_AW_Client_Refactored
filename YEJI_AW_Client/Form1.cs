@@ -393,7 +393,6 @@ namespace YEJI_AW_Client
             {
                 this.Hide();
                 this.ShowInTaskbar = false;
-                EnsureAutoStartRegistryKey();
                 EnsureScheduledTask();
                 ShowUpdateCompletionNotificationIfNeeded();
                 heartbeatTimer.Start();
@@ -1496,30 +1495,6 @@ namespace YEJI_AW_Client
             }
         }
 
-        private static void EnsureAutoStartRegistryKey()
-        {
-            try
-            {
-                const string runSubKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
-                const string valueName = "YEJI-ON";
-                string exePath = System.Windows.Forms.Application.ExecutablePath;
-
-                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(runSubKey, writable: true);
-                if (key == null) return;
-
-                var existing = key.GetValue(valueName) as string;
-                if (!string.Equals(existing, exePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    key.SetValue(valueName, exePath);
-                    ClientLogger.LogAgent($"Autorun registry key registered: {exePath}");
-                }
-            }
-            catch (Exception ex)
-            {
-                ClientLogger.LogAgent($"Failed to set autorun registry key: {ex.Message}", "WRN");
-            }
-        }
-
         private void ShowUpdateCompletionNotificationIfNeeded()
         {
             try
@@ -1835,6 +1810,34 @@ namespace YEJI_AW_Client
                     WindowStyle = ProcessWindowStyle.Minimized
                 };
 
+                // Watcher에게 유지보수 모드 진입 + 자가 종료 신호 전송
+                // (외부 kill 없이 파일 잠금 해제 — PROCESS_TERMINATE 보호 우회)
+                try
+                {
+                    string exeDir = Path.GetDirectoryName(System.Windows.Forms.Application.ExecutablePath) ?? "";
+                    string watcherExe = Path.Combine(exeDir, "YEJI_ON_Watcher.exe");
+                    if (File.Exists(watcherExe))
+                    {
+                        var prepInfo = new ProcessStartInfo(watcherExe, "--prepare-update")
+                        { UseShellExecute = false, CreateNoWindow = true };
+                        using var prepProc = Process.Start(prepInfo);
+                        prepProc?.WaitForExit(3000);
+
+                        // Watcher/Guard가 루프에서 maintenance flag를 감지하고 자연 종료할 시간 대기 (최대 12초)
+                        updateProgressForm?.SetProgress("감시 프로세스 종료 중...");
+                        var deadline = DateTime.UtcNow.AddSeconds(12);
+                        while (Process.GetProcessesByName("YEJI_ON_Watcher").Length > 0
+                               && DateTime.UtcNow < deadline)
+                        {
+                            await Task.Delay(500);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ClientLogger.LogUpdate($"Watcher prepare-update failed (non-fatal): {ex.Message}", "WRN");
+                }
+
                 updateProgressForm?.SetProgress("설치를 시작합니다...", 100);
                 ClientLogger.LogUpdate("Launching installer process...");
                 var installerProcess = Process.Start(startInfo);
@@ -1866,6 +1869,15 @@ namespace YEJI_AW_Client
                 // 
                 // 참고: Form1_FormClosing에서 isUpdatingClient 플래그로 LOGOUT 이벤트를 건너뛰지만,
                 // Environment.Exit(0)는 FormClosing 이벤트를 전혀 발생시키지 않아 더 빠르고 확실함
+
+                // 구버전 레지스트리 자동실행 항목 정리 (작업 스케줄러 방식으로 전환)
+                try
+                {
+                    using var runKey = Registry.CurrentUser.OpenSubKey(
+                        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", writable: true);
+                    runKey?.DeleteValue("YEJI-ON", throwOnMissingValue: false);
+                }
+                catch { }
 
                 // 로그가 디스크에 완전히 기록될 시간을 확보하기 위한 짧은 지연
                 // ClientLogger.LogUpdate는 File.AppendAllText를 사용하여 동기적으로 기록하지만,

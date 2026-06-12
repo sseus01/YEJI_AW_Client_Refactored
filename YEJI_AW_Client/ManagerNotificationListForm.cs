@@ -19,18 +19,15 @@ namespace YEJI_AW_Client
         private readonly List<string> initialNotificationsToMark;
 
         private readonly DataGridView dgvNotifications = new();
-        private readonly Button btnRefresh = new();
-        private readonly Button btnApprove = new();
-        private readonly Button btnReject = new();
-        private readonly Button btnClose = new();
+        private readonly RoundButton btnRefresh = new();
+        private readonly RoundButton btnApprove = new();
+        private readonly RoundButton btnReject = new();
+        private readonly RoundButton btnClose = new();
         private readonly Label lblStatus = new();
         private readonly Label lblStartDate = new();
         private readonly Label lblEndDate = new();
         private readonly DateTimePicker startPicker = new();
         private readonly DateTimePicker endPicker = new();
-        private Font? buttonFont;
-        private Font? gridHeaderFont;
-
         private BindingList<ManagerNotificationRow> currentItems = new();
 
         public ManagerNotificationListForm(string serverBaseUrl, HttpClient httpClient, string managerEmployeeId, string managerName, IEnumerable<string>? notificationIdsToMark)
@@ -48,145 +45,99 @@ namespace YEJI_AW_Client
 
         private void BuildLayout()
         {
-            Text = "연장 근무 승인 요청";
-            ClientSize = new System.Drawing.Size(940, 560);
+            Text          = "연장 근무 승인 요청";
+            ClientSize    = new System.Drawing.Size(940, 600);
             StartPosition = FormStartPosition.Manual;
-            TopMost = true;
-            BackColor = Color.FromArgb(247, 247, 247); // 전체 창 기본 배경
+            TopMost       = true;
+            BackColor     = UiTheme.Background;
 
-            // 애플리케이션 아이콘 설정
-            try
+            // ── 필터 바 ─────────────────────────────────────────────
+            var filterPanel = new Panel
             {
-                var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TrayIcon_Y_orange.ico");
-                if (System.IO.File.Exists(iconPath))
-                {
-                    Icon = new System.Drawing.Icon(iconPath);
-                }
-            }
-            catch { /* 아이콘 로드 실패 시 무시 */ }
+                Dock      = DockStyle.Top,
+                Height    = 46,
+                BackColor = UiTheme.Surface
+            };
 
-            // 조회 기간 선택 UI
-            lblStartDate.Text = "시작일";
-            lblStartDate.AutoSize = true;
-            lblStartDate.Location = new System.Drawing.Point(12, 16);
+            lblStartDate.Text      = "시작일";
+            lblStartDate.AutoSize  = true;
+            lblStartDate.Font      = UiTheme.Small;
+            lblStartDate.ForeColor = UiTheme.TextSecondary;
+            lblStartDate.Location  = new System.Drawing.Point(12, 14);
 
-            startPicker.Format = DateTimePickerFormat.Custom;
+            startPicker.Format       = DateTimePickerFormat.Custom;
             startPicker.CustomFormat = "yyyy-MM-dd";
-            startPicker.Width = 110;
-            startPicker.Location = new System.Drawing.Point(56, 12);
-            startPicker.Value = DateTime.Today.AddDays(-7);
+            startPicker.Width        = 110;
+            startPicker.Location     = new System.Drawing.Point(56, 11);
+            startPicker.Value        = DateTime.Today.AddDays(-7);
 
-            lblEndDate.Text = "종료일";
-            lblEndDate.AutoSize = true;
-            lblEndDate.Location = new System.Drawing.Point(176, 16);
+            lblEndDate.Text      = "종료일";
+            lblEndDate.AutoSize  = true;
+            lblEndDate.Font      = UiTheme.Small;
+            lblEndDate.ForeColor = UiTheme.TextSecondary;
+            lblEndDate.Location  = new System.Drawing.Point(174, 14);
 
-            endPicker.Format = DateTimePickerFormat.Custom;
+            endPicker.Format       = DateTimePickerFormat.Custom;
             endPicker.CustomFormat = "yyyy-MM-dd";
-            endPicker.Width = 110;
-            endPicker.Location = new System.Drawing.Point(220, 12);
-            endPicker.Value = DateTime.Today;
+            endPicker.Width        = 110;
+            endPicker.Location     = new System.Drawing.Point(218, 11);
+            endPicker.Value        = DateTime.Today;
 
-            btnRefresh.Text = "조회";
-            btnRefresh.Location = new System.Drawing.Point(340, 11);
-            btnRefresh.Size = new System.Drawing.Size(75, 30);
-            btnRefresh.BackColor = Color.FromArgb(7, 87, 167); // 버튼 파랑
-            btnRefresh.ForeColor = Color.White;
-            btnRefresh.FlatStyle = FlatStyle.Flat;
-            buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
-            btnRefresh.Font = buttonFont;
-            btnRefresh.Cursor = Cursors.Hand;
-            btnRefresh.FlatAppearance.BorderSize = 0;
-            btnRefresh.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
+            btnRefresh.Text     = "조회";
+            btnRefresh.Location = new System.Drawing.Point(336, 6);
+            btnRefresh.Size     = new System.Drawing.Size(68, UiTheme.BtnH);
+            UiTheme.StylePrimary(btnRefresh);
             btnRefresh.Click += async (s, e) => await RefreshNotificationsAsync();
 
-            btnApprove.Text = "승인";
-            btnApprove.Location = new System.Drawing.Point(420, 11);
-            btnApprove.Size = new System.Drawing.Size(75, 30);
-            btnApprove.BackColor = Color.FromArgb(7, 87, 167); // 버튼 파랑
-            btnApprove.ForeColor = Color.White;
-            btnApprove.FlatStyle = FlatStyle.Flat;
-            btnApprove.Font = buttonFont;
-            btnApprove.Cursor = Cursors.Hand;
-            btnApprove.FlatAppearance.BorderSize = 0;
-            btnApprove.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
+            btnApprove.Text     = "승인";
+            btnApprove.Location = new System.Drawing.Point(410, 6);
+            btnApprove.Size     = new System.Drawing.Size(68, UiTheme.BtnH);
+            UiTheme.StylePrimary(btnApprove);
             btnApprove.Click += async (s, e) => await UpdateSelectedStatusAsync("APPROVED");
 
-            btnReject.Text = "반려";
-            btnReject.Location = new System.Drawing.Point(500, 11);
-            btnReject.Size = new System.Drawing.Size(75, 30);
-            btnReject.BackColor = Color.FromArgb(7, 87, 167); // 버튼 파랑
-            btnReject.ForeColor = Color.White;
-            btnReject.FlatStyle = FlatStyle.Flat;
-            btnReject.Font = buttonFont;
-            btnReject.Cursor = Cursors.Hand;
-            btnReject.FlatAppearance.BorderSize = 0;
-            btnReject.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
+            btnReject.Text     = "반려";
+            btnReject.Location = new System.Drawing.Point(484, 6);
+            btnReject.Size     = new System.Drawing.Size(68, UiTheme.BtnH);
+            UiTheme.StyleDanger(btnReject);
             btnReject.Click += async (s, e) => await UpdateSelectedStatusAsync("REJECTED");
 
-            btnClose.Text = "닫기";
-            btnClose.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnClose.Location = new System.Drawing.Point(853, 11);
-            btnClose.Size = new System.Drawing.Size(75, 30);
-            btnClose.BackColor = Color.FromArgb(7, 87, 167); // 버튼 파랑
-            btnClose.ForeColor = Color.White;
-            btnClose.FlatStyle = FlatStyle.Flat;
-            btnClose.Font = buttonFont;
-            btnClose.Cursor = Cursors.Hand;
-            btnClose.FlatAppearance.BorderSize = 0;
-            btnClose.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
+            btnClose.Text     = "닫기";
+            btnClose.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
+            btnClose.Location = new System.Drawing.Point(860, 6);
+            btnClose.Size     = new System.Drawing.Size(68, UiTheme.BtnH);
+            UiTheme.StyleOutline(btnClose);
             btnClose.Click += (s, e) => Close();
 
             lblStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-            lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            lblStatus.Location = new System.Drawing.Point(560, 18);
-            lblStatus.Size = new System.Drawing.Size(285, 15);
+            lblStatus.Anchor    = AnchorStyles.Top | AnchorStyles.Right;
+            lblStatus.Font      = UiTheme.Small;
+            lblStatus.ForeColor = UiTheme.TextSecondary;
+            lblStatus.Location  = new System.Drawing.Point(560, 14);
+            lblStatus.Size      = new System.Drawing.Size(292, 18);
 
-            dgvNotifications.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            dgvNotifications.Location = new System.Drawing.Point(12, 50);
-            dgvNotifications.Size = new System.Drawing.Size(916, 490);
-            dgvNotifications.ReadOnly = true;
-            dgvNotifications.AllowUserToAddRows = false;
-            dgvNotifications.AllowUserToDeleteRows = false;
+            filterPanel.Controls.AddRange(new Control[] { lblStartDate, startPicker, lblEndDate, endPicker, btnRefresh, btnApprove, btnReject, btnClose, lblStatus });
+
+            // ── DataGridView ────────────────────────────────────────
+            dgvNotifications.Dock             = DockStyle.Fill;
             dgvNotifications.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            dgvNotifications.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            dgvNotifications.MultiSelect = false;
+            dgvNotifications.MultiSelect      = false;
             dgvNotifications.DataBindingComplete += (s, e) =>
             {
                 HideInternalColumns();
                 if (dgvNotifications.Rows.Count > 0)
                 {
                     dgvNotifications.ClearSelection();
-                    dgvNotifications.Rows[0].Selected = true;
-                    dgvNotifications.CurrentCell = dgvNotifications.Rows[0].Cells[0];
+                    dgvNotifications.Rows[0].Selected  = true;
+                    dgvNotifications.CurrentCell       = dgvNotifications.Rows[0].Cells[0];
                 }
                 UpdateButtons();
             };
             dgvNotifications.SelectionChanged += (s, e) => UpdateButtons();
-            
-            ImproveDataGridViewStyle(dgvNotifications);
+            UiTheme.StyleDataGridView(dgvNotifications);
 
-            Controls.AddRange(new Control[] { lblStartDate, startPicker, lblEndDate, endPicker, btnRefresh, btnApprove, btnReject, btnClose, lblStatus, dgvNotifications });
-        }
-
-        private void ImproveDataGridViewStyle(DataGridView dgv)
-        {
-            dgv.EnableHeadersVisualStyles = false;
-            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(7, 87, 167); // 헤더 파랑
-            dgv.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
-            gridHeaderFont = new Font(dgv.Font.FontFamily, 9F, FontStyle.Bold);
-            dgv.ColumnHeadersDefaultCellStyle.Font = gridHeaderFont;
-            dgv.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            dgv.ColumnHeadersHeight = 32;
-
-            dgv.DefaultCellStyle.SelectionBackColor = Color.FromArgb(213, 220, 228); // 선택 배경
-            dgv.DefaultCellStyle.SelectionForeColor = Color.Black;
-            dgv.DefaultCellStyle.BackColor = Color.White;
-            dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(249, 250, 251); // 행 배경
-            dgv.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
-            dgv.RowTemplate.Height = 28;
-
-            dgv.GridColor = Color.FromArgb(231, 231, 231); // 테이블 라인
-            dgv.BorderStyle = BorderStyle.Fixed3D;
+            Controls.Add(dgvNotifications);
+            Controls.Add(filterPanel);
+            Controls.Add(UiTheme.MakeFormHeader("연장 근무 승인 요청", null, "!", UiTheme.Accent));
         }
 
         private async void ManagerNotificationListForm_Load(object? sender, EventArgs e)
@@ -757,14 +708,14 @@ namespace YEJI_AW_Client
                 Multiline = true
             };
 
-            var btnOk = new Button
+            var btnOk = new RoundButton
             {
                 Text = "확인",
                 DialogResult = DialogResult.OK,
                 Location = new System.Drawing.Point(206, 110)
             };
 
-            var btnCancel = new Button
+            var btnCancel = new RoundButton
             {
                 Text = "취소",
                 DialogResult = DialogResult.Cancel,
@@ -830,12 +781,7 @@ namespace YEJI_AW_Client
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
-            {
-                components?.Dispose();
-                buttonFont?.Dispose();
-                gridHeaderFont?.Dispose();
-            }
+            if (disposing) components?.Dispose();
             base.Dispose(disposing);
         }
     }

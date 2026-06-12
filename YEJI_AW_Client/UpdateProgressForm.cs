@@ -90,7 +90,7 @@ internal sealed class UpdateProgressForm : Form
 
         // Fill body 먼저, Top 헤더 나중에
         Controls.Add(body);
-        Controls.Add(UiTheme.MakeHeader("YEJI-ON 업데이트"));
+        Controls.Add(UiTheme.MakeFormHeader("YEJI-ON 업데이트", null, "↓", UiTheme.Primary));
     }
 
     /// <summary>

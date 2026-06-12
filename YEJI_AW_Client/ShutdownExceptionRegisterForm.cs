@@ -26,7 +26,7 @@ namespace YEJI_AW_Client
         private TextBox txtToTime = new TextBox();
         private TextBox txtReason = new TextBox();
         private TextBox txtCreatedBy = new TextBox();
-        private Button btnSubmit = new Button();
+        private RoundButton btnSubmit = new RoundButton();
 
         public ShutdownExceptionRegisterForm(string serverBaseUrl, HttpClient httpClient, string employeeId)
         {
@@ -41,85 +41,91 @@ namespace YEJI_AW_Client
 
         private void BuildLayout()
         {
-            Text = "PC 종료 예외 등록";
-            ClientSize = new Size(416, 260);
+            Text            = "PC 종료 예외 등록";
+            ClientSize      = new Size(440, 340);
             FormBorderStyle = FormBorderStyle.FixedDialog;
-            StartPosition = FormStartPosition.CenterParent;
-            MaximizeBox = false;
-            MinimizeBox = false;
+            StartPosition   = FormStartPosition.CenterParent;
+            MaximizeBox     = false;
+            MinimizeBox     = false;
+            BackColor       = UiTheme.Background;
 
-            // 애플리케이션 아이콘 설정
-            try
+            // ── 본문 ────────────────────────────────────────────────
+            var body = new Panel
             {
-                var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TrayIcon_Y_orange.ico");
-                if (System.IO.File.Exists(iconPath))
-                {
-                    Icon = new Icon(iconPath);
-                }
+                Dock      = DockStyle.Fill,
+                BackColor = UiTheme.Surface,
+                Padding   = new Padding(UiTheme.Pad, UiTheme.Pad, UiTheme.Pad, 0)
+            };
+
+            int labelX = 0, fieldX = 106, rowH = 32, y = 4;
+            int fieldW = 290;
+
+            void Row(Label lbl, Control ctrl)
+            {
+                lbl.AutoSize  = true;
+                lbl.Font      = UiTheme.Small;
+                lbl.ForeColor = UiTheme.TextSecondary;
+                lbl.Location  = new Point(labelX, y + 5);
+                ctrl.Location = new Point(fieldX, y);
+                ctrl.Size     = new Size(fieldW, 24);
+                y += rowH;
             }
-            catch { /* 아이콘 로드 실패 시 무시 */ }
 
             lblEmployeeId.Text = "사번(필수)";
-            lblEmployeeId.AutoSize = true;
-            lblEmployeeId.Location = new Point(12, 15);
+            Row(lblEmployeeId, txtEmployeeId);
 
             lblWorkDate.Text = "근무일(선택)";
-            lblWorkDate.AutoSize = true;
-            lblWorkDate.Location = new Point(12, 44);
+            Row(lblWorkDate, txtWorkDate);
+            txtWorkDate.PlaceholderText = "비우면 오늘, YYYY-MM-DD";
 
             lblFromTime.Text = "시작 시각";
-            lblFromTime.AutoSize = true;
-            lblFromTime.Location = new Point(12, 73);
+            Row(lblFromTime, txtFromTime);
+            txtFromTime.PlaceholderText = "HH:mm";
 
             lblToTime.Text = "종료 시각";
-            lblToTime.AutoSize = true;
-            lblToTime.Location = new Point(12, 102);
+            Row(lblToTime, txtToTime);
+            txtToTime.PlaceholderText = "HH:mm";
 
-            lblReason.Text = "사유";
-            lblReason.AutoSize = true;
-            lblReason.Location = new Point(12, 131);
+            lblReason.Text  = "사유";
+            lblReason.AutoSize  = true;
+            lblReason.Font      = UiTheme.Small;
+            lblReason.ForeColor = UiTheme.TextSecondary;
+            lblReason.Location  = new Point(labelX, y + 5);
+            txtReason.Location  = new Point(fieldX, y);
+            txtReason.Size      = new Size(fieldW, 56);
+            txtReason.Multiline = true;
+            y += 64;
 
             lblCreatedBy.Text = "등록자(필수)";
-            lblCreatedBy.AutoSize = true;
-            lblCreatedBy.Location = new Point(12, 196);
+            Row(lblCreatedBy, txtCreatedBy);
 
-            lblHint.Text = "같은 날짜/사번이면 서버에서 업서트 처리";
-            lblHint.AutoSize = true;
-            lblHint.Font = new Font("Segoe UI", 8.25F, FontStyle.Regular, GraphicsUnit.Point);
-            lblHint.Location = new Point(12, 228);
+            lblHint.Text      = "같은 날짜/사번이면 서버에서 업서트 처리됩니다.";
+            lblHint.AutoSize  = true;
+            lblHint.Font      = UiTheme.Small;
+            lblHint.ForeColor = UiTheme.TextSecondary;
+            lblHint.Location  = new Point(0, y + 4);
 
-            txtEmployeeId.Location = new Point(101, 12);
-            txtEmployeeId.Size = new Size(171, 23);
-
-            txtWorkDate.Location = new Point(101, 41);
-            txtWorkDate.Size = new Size(171, 23);
-            txtWorkDate.PlaceholderText = "비우면 오늘, 형식: YYYY-MM-DD";
-
-            txtFromTime.Location = new Point(101, 70);
-            txtFromTime.Size = new Size(171, 23);
-            txtFromTime.PlaceholderText = "HH:mm 또는 HH:mm:ss";
-
-            txtToTime.Location = new Point(101, 99);
-            txtToTime.Size = new Size(171, 23);
-            txtToTime.PlaceholderText = "HH:mm 또는 HH:mm:ss";
-
-            txtReason.Location = new Point(101, 128);
-            txtReason.Size = new Size(303, 60);
-            txtReason.Multiline = true;
-
-            txtCreatedBy.Location = new Point(101, 193);
-            txtCreatedBy.Size = new Size(171, 23);
-
-            btnSubmit.Text = "등록";
-            btnSubmit.Location = new Point(329, 223);
-            btnSubmit.Size = new Size(75, 25);
-            btnSubmit.Click += async (s, e) => await SubmitAsync();
-
-            Controls.AddRange(new Control[]
+            body.Controls.AddRange(new Control[]
             {
-                lblEmployeeId, lblWorkDate, lblFromTime, lblToTime, lblReason, lblCreatedBy, lblHint,
-                txtEmployeeId, txtWorkDate, txtFromTime, txtToTime, txtReason, txtCreatedBy, btnSubmit
+                lblEmployeeId, txtEmployeeId,
+                lblWorkDate,   txtWorkDate,
+                lblFromTime,   txtFromTime,
+                lblToTime,     txtToTime,
+                lblReason,     txtReason,
+                lblCreatedBy,  txtCreatedBy,
+                lblHint
             });
+
+            var btnPanel = UiTheme.MakeButtonBar();
+            btnSubmit.Text  = "등록";
+            btnSubmit.Width = UiTheme.BtnW;
+            UiTheme.StylePrimary(btnSubmit);
+            btnSubmit.Click += async (s, e) => await SubmitAsync();
+            btnPanel.Controls.Add(btnSubmit);
+
+            body.Controls.Add(btnPanel);
+            Controls.Add(body);
+            Controls.Add(UiTheme.MakeFormHeader("PC 종료 예외 등록", null, "+", UiTheme.Primary));
         }
 
         private async System.Threading.Tasks.Task SubmitAsync()

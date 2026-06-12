@@ -20,9 +20,6 @@ namespace YEJI_AW_Client
             ClientSize      = new Size(560, 400);
             BackColor       = UiTheme.Background;
 
-            // ── 헤더 ──────────────────────────────────────────────────
-            Controls.Add(UiTheme.MakeHeader("영업 금지 안내"));
-
             // ── 본문 ──────────────────────────────────────────────────
             var body = new Panel
             {
@@ -66,7 +63,7 @@ namespace YEJI_AW_Client
 
             // 버튼 패널
             var btnPanel = UiTheme.MakeButtonBar();
-            var closeButton = new Button { Text = "확인", Width = UiTheme.BtnW, DialogResult = DialogResult.OK };
+            var closeButton = new RoundButton { Text = "확인", Width = UiTheme.BtnW, DialogResult = DialogResult.OK };
             UiTheme.StylePrimary(closeButton);
             btnPanel.Controls.Add(closeButton);
 
@@ -78,7 +75,7 @@ namespace YEJI_AW_Client
 
             // body(Fill) 먼저, header(Top) 나중에
             Controls.Add(body);
-            Controls.Add(UiTheme.MakeHeader("영업 금지 안내"));
+            Controls.Add(UiTheme.MakeFormHeader("영업 금지 안내", null, "!", UiTheme.Danger));
 
             AcceptButton = closeButton;
 

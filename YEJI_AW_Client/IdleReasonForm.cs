@@ -43,6 +43,10 @@ namespace YEJI_AW_Client
         {
             InitializeComponent();
 
+            BackColor = UiTheme.Background;
+            UiTheme.StylePrimary(buttonSave);
+            UiTheme.StyleOutline(buttonShowAll);
+
             this.serverBaseUrl = serverBaseUrl;
 
             this.StartPosition = FormStartPosition.CenterScreen;

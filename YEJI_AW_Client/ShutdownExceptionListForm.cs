@@ -17,9 +17,9 @@ namespace YEJI_AW_Client
         private TextBox txtStartDate = new TextBox();
         private Label lblEndDate = new Label();
         private TextBox txtEndDate = new TextBox();
-        private Button btnSearch = new Button();
+        private RoundButton btnSearch = new RoundButton();
         private DataGridView dataGridView1 = new DataGridView();
-        private Button btnRegister = new Button();
+        private RoundButton btnRegister = new RoundButton();
         private Label lblStatus = new Label();
         private Label lblEmployeeLabel = new Label();
         private TextBox txtEmployeeId = new TextBox();
@@ -39,76 +39,89 @@ namespace YEJI_AW_Client
 
         private void BuildLayout()
         {
-            Text = "PC 종료 예외 조회";
-            ClientSize = new Size(800, 450);
+            Text          = "PC 종료 예외 조회";
+            ClientSize    = new Size(800, 500);
+            BackColor     = UiTheme.Background;
 
-            // 애플리케이션 아이콘 설정
-            try
+            // ── 필터 바 ─────────────────────────────────────────────
+            var filterPanel = new Panel
             {
-                var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TrayIcon_Y_orange.ico");
-                if (System.IO.File.Exists(iconPath))
-                {
-                    Icon = new Icon(iconPath);
-                }
-            }
-            catch { /* 아이콘 로드 실패 시 무시 */ }
+                Dock      = DockStyle.Top,
+                Height    = 60,
+                BackColor = UiTheme.Surface
+            };
 
-            lblStartDate.Text = "시작일(선택)";
-            lblStartDate.AutoSize = true;
-            lblStartDate.Location = new Point(12, 15);
+            lblStartDate.Text      = "시작일(선택)";
+            lblStartDate.AutoSize  = true;
+            lblStartDate.Font      = UiTheme.Small;
+            lblStartDate.ForeColor = UiTheme.TextSecondary;
+            lblStartDate.Location  = new Point(12, 10);
 
-            txtStartDate.Location = new Point(93, 12);
-            txtStartDate.Size = new Size(110, 23);
+            txtStartDate.Location        = new Point(88, 7);
+            txtStartDate.Size            = new Size(100, 23);
             txtStartDate.PlaceholderText = "YYYY-MM-DD";
 
-            lblEndDate.Text = "종료일(선택)";
-            lblEndDate.AutoSize = true;
-            lblEndDate.Location = new Point(209, 15);
+            lblEndDate.Text      = "종료일(선택)";
+            lblEndDate.AutoSize  = true;
+            lblEndDate.Font      = UiTheme.Small;
+            lblEndDate.ForeColor = UiTheme.TextSecondary;
+            lblEndDate.Location  = new Point(196, 10);
 
-            txtEndDate.Location = new Point(290, 12);
-            txtEndDate.Size = new Size(110, 23);
+            txtEndDate.Location        = new Point(276, 7);
+            txtEndDate.Size            = new Size(100, 23);
             txtEndDate.PlaceholderText = "YYYY-MM-DD";
 
-            btnSearch.Text = "조회";
-            btnSearch.Location = new Point(406, 11);
-            btnSearch.Size = new Size(75, 25);
+            btnSearch.Text     = "조회";
+            btnSearch.Location = new Point(384, 3);
+            btnSearch.Size     = new Size(68, UiTheme.BtnH);
+            UiTheme.StylePrimary(btnSearch);
             btnSearch.Click += btnSearch_Click;
 
-            dataGridView1.Location = new Point(12, 72);
-            dataGridView1.Size = new Size(776, 366);
-            dataGridView1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-
-            btnRegister.Text = "등록/수정";
-            btnRegister.Location = new Point(713, 12);
-            btnRegister.Size = new Size(75, 25);
-            btnRegister.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnRegister.Text     = "등록/수정";
+            btnRegister.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
+            btnRegister.Location = new Point(720, 3);
+            btnRegister.Size     = new Size(68, UiTheme.BtnH);
+            UiTheme.StyleSecondary(btnRegister);
             btnRegister.Click += btnRegister_Click;
 
-            lblStatus.AutoSize = false;
-            lblStatus.TextAlign = ContentAlignment.MiddleRight;
-            lblStatus.Location = new Point(575, 17);
-            lblStatus.Size = new Size(132, 15);
-            lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            lblEmployeeLabel.Text      = "사번";
+            lblEmployeeLabel.AutoSize  = true;
+            lblEmployeeLabel.Font      = UiTheme.Small;
+            lblEmployeeLabel.ForeColor = UiTheme.TextSecondary;
+            lblEmployeeLabel.Location  = new Point(12, 38);
 
-            lblEmployeeLabel.Text = "사번(필수)";
-            lblEmployeeLabel.AutoSize = true;
-            lblEmployeeLabel.Location = new Point(12, 44);
-
-            txtEmployeeId.Location = new Point(93, 41);
+            txtEmployeeId.Location = new Point(52, 35);
             txtEmployeeId.ReadOnly = true;
-            txtEmployeeId.Size = new Size(110, 23);
+            txtEmployeeId.Size     = new Size(100, 23);
 
-            lblDateHint.Text = "입력하지 않으면 최근 30일을 기본으로 조회합니다.";
-            lblDateHint.AutoSize = true;
-            lblDateHint.Font = new Font("Segoe UI", 8.25F, FontStyle.Regular, GraphicsUnit.Point);
-            lblDateHint.Location = new Point(209, 45);
+            lblDateHint.Text      = "날짜 미입력 시 최근 30일 기준";
+            lblDateHint.AutoSize  = true;
+            lblDateHint.Font      = UiTheme.Small;
+            lblDateHint.ForeColor = UiTheme.TextSecondary;
+            lblDateHint.Location  = new Point(160, 38);
 
-            Controls.AddRange(new Control[]
+            lblStatus.AutoSize  = false;
+            lblStatus.TextAlign = ContentAlignment.MiddleRight;
+            lblStatus.Anchor    = AnchorStyles.Top | AnchorStyles.Right;
+            lblStatus.Font      = UiTheme.Small;
+            lblStatus.ForeColor = UiTheme.TextSecondary;
+            lblStatus.Location  = new Point(560, 38);
+            lblStatus.Size      = new Size(228, 18);
+
+            filterPanel.Controls.AddRange(new Control[]
             {
-                lblStartDate, txtStartDate, lblEndDate, txtEndDate, btnSearch, dataGridView1,
-                btnRegister, lblStatus, lblEmployeeLabel, txtEmployeeId, lblDateHint
+                lblStartDate, txtStartDate, lblEndDate, txtEndDate, btnSearch, btnRegister,
+                lblEmployeeLabel, txtEmployeeId, lblDateHint, lblStatus
             });
+
+            // ── DataGridView ────────────────────────────────────────
+            dataGridView1.Dock                = DockStyle.Fill;
+            dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            UiTheme.StyleDataGridView(dataGridView1);
+
+            Controls.Add(dataGridView1);
+            Controls.Add(filterPanel);
+            Controls.Add(UiTheme.MakeFormHeader("PC 종료 예외 조회", null, "≡", UiTheme.Primary));
         }
 
         private async void ShutdownExceptionListForm_Load(object? sender, EventArgs e)

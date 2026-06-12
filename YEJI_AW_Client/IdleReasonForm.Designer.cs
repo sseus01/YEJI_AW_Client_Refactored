@@ -34,8 +34,8 @@
             comboBoxLevel2 = new ComboBox();
             labelLevel3Value = new Label();
             textBoxDetail = new TextBox();
-            buttonSave = new Button();
-            buttonShowAll = new Button();
+            buttonSave = new RoundButton();
+            buttonShowAll = new RoundButton();
             labelIdleTime = new Label();
             label1 = new Label();
             labelLevel1 = new Label();

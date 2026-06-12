@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -14,206 +14,121 @@ namespace YEJI_AW_Client
         private readonly string employeeId;
         private readonly Func<DateTime> currentTimeProvider;
 
-        private DateTimePicker dtpWorkDate = new DateTimePicker();
-        private DateTimePicker dtpEndTime = new DateTimePicker();
-        private TextBox txtReason = new TextBox();
-        private Button btnSubmit = new Button();
+        private readonly DateTimePicker dtpWorkDate;
+        private readonly DateTimePicker dtpEndTime;
+        private readonly TextBox txtReason;
+        private readonly RoundButton btnSubmit;
 
-        private TimeSpan? _pendingStartTimeOverride = null; // 추가 신청 시 기존 종료 시각 이후로 시작
+        private TimeSpan? _pendingStartTimeOverride = null;
 
         public OvertimeRequestForm(string serverBaseUrl, HttpClient httpClient, string employeeId, Func<DateTime> currentTimeProvider)
         {
-            this.serverBaseUrl = serverBaseUrl;
-            this.httpClient = httpClient;
-            this.employeeId = employeeId;
+            this.serverBaseUrl      = serverBaseUrl;
+            this.httpClient         = httpClient;
+            this.employeeId         = employeeId;
             this.currentTimeProvider = currentTimeProvider ?? (() => DateTime.Now);
 
-            InitializeComponents();
-        }
+            Text            = "연장 근무 신청";
+            StartPosition   = FormStartPosition.CenterScreen;
+            ClientSize      = new Size(520, 400);
+            MinimumSize     = new Size(520, 400);
+            BackColor       = UiTheme.Background;
+            MaximizeBox     = false;
 
-        private void InitializeComponents()
-        {
-            Text = "연장 근무 신청";
-            StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(600, 440);
-            MinimumSize = new Size(600, 440);
-            BackColor = Color.FromArgb(247, 247, 247); // 전체 창 기본 배경
-            Load += (_, __) => CenterForm();
-
-            // 애플리케이션 아이콘 설정
-            try
+            // ── 본문 ────────────────────────────────────────────────
+            var body = new Panel
             {
-                var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TrayIcon_Y_orange.ico");
-                if (System.IO.File.Exists(iconPath))
-                {
-                    Icon = new Icon(iconPath);
-                }
-            }
-            catch { /* 아이콘 로드 실패 시 무시 */ }
-
-            // 헤더 영역
-            var headerPanel = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 72,
-                BackColor = Color.FromArgb(7, 87, 167) // 헤더 전체 배경 (파랑)
-            };
-            var headerIcon = new PictureBox
-            {
-                Width = 48,
-                Height = 48,
-                Location = new Point(18, 12),
-                Image = SystemIcons.Information.ToBitmap(),
-                SizeMode = PictureBoxSizeMode.StretchImage
-            };
-            var headerTitle = new Label
-            {
-                Text = "연장 근무 신청",
-                Font = new Font(FontFamily.GenericSansSerif, 14, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(74, 16),
-                ForeColor = Color.White // 헤더 텍스트 흰색
-            };
-            var headerSubtitle = new Label
-            {
-                Text = "업무 종료 이후 필요 시간을 신청해주세요",
-                Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Regular),
-                ForeColor = Color.White, // 헤더 텍스트 흰색
-                AutoSize = true,
-                Location = new Point(76, 42)
-            };
-            headerPanel.Controls.Add(headerIcon);
-            headerPanel.Controls.Add(headerTitle);
-            headerPanel.Controls.Add(headerSubtitle);
-
-            // 입력 그룹
-            var group = new GroupBox
-            {
-                Dock = DockStyle.Fill,
-                Text = "신청 정보",
-                Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Bold)
+                Dock      = DockStyle.Fill,
+                BackColor = UiTheme.Surface,
+                Padding   = new Padding(UiTheme.Pad)
             };
 
             var layout = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock        = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount = 5,
-                Padding = new Padding(16),
-                AutoSize = false
+                RowCount    = 4
             };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 68));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, UiTheme.BtnH + UiTheme.Pad + 8));
 
-            var lblWorkDate = new Label { Text = "근무일", AutoSize = true, Anchor = AnchorStyles.Left };
+            // 근무일
+            var lblWorkDate = new Label { Text = "근무일", Font = UiTheme.Small, ForeColor = UiTheme.TextSecondary, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
             dtpWorkDate = new DateTimePicker
             {
-                Format = DateTimePickerFormat.Custom,
+                Format       = DateTimePickerFormat.Custom,
                 CustomFormat = "yyyy-MM-dd",
-                Value = currentTimeProvider().Date,
-                Anchor = AnchorStyles.Left | AnchorStyles.Right,
-                Width = 160
+                Value        = currentTimeProvider().Date,
+                Dock         = DockStyle.Fill
             };
 
-            var lblEndTime = new Label { Text = "연장 종료 시각", AutoSize = true, Anchor = AnchorStyles.Left };
+            // 연장 종료 시각
+            var lblEndTime = new Label { Text = "연장 종료 시각", Font = UiTheme.Small, ForeColor = UiTheme.TextSecondary, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
             dtpEndTime = new DateTimePicker
             {
-                Format = DateTimePickerFormat.Custom,
+                Format       = DateTimePickerFormat.Custom,
                 CustomFormat = "HH:mm",
-                ShowUpDown = true,
-                Width = 120,
-                Anchor = AnchorStyles.Left | AnchorStyles.Right,
-                Value = currentTimeProvider().Date.AddHours(18)
+                ShowUpDown   = true,
+                Dock         = DockStyle.Fill,
+                Value        = currentTimeProvider().Date.AddHours(18)
             };
 
-            var lblReason = new Label { Text = "사유 (필수)", AutoSize = true, Anchor = AnchorStyles.Left };
+            // 사유
+            var lblReason = new Label { Text = "사유 (필수)", Font = UiTheme.Small, ForeColor = UiTheme.TextSecondary, Dock = DockStyle.Top, Height = 20 };
             txtReason = new TextBox
             {
-                Multiline = true,
-                Height = 180,
-                MinimumSize = new Size(200, 120),
-                ScrollBars = ScrollBars.Vertical,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Multiline       = true,
+                Dock            = DockStyle.Fill,
+                ScrollBars      = ScrollBars.Vertical,
                 PlaceholderText = "사유를 입력하세요(필수)",
-                Margin = new Padding(0, 4, 0, 4)
+                Font            = UiTheme.Body
             };
+            var reasonCell = new Panel { Dock = DockStyle.Fill };
+            reasonCell.Controls.Add(txtReason);
+            reasonCell.Controls.Add(lblReason);
 
-            var buttonPanel = new FlowLayoutPanel
+            // 버튼 바
+            var btnPanel = UiTheme.MakeButtonBar();
+
+            btnSubmit = new RoundButton { Text = "신청", Width = UiTheme.BtnW };
+            UiTheme.StylePrimary(btnSubmit);
+            btnSubmit.Click += async (_, _) => await SubmitAsync();
+
+            var btnCancel = new RoundButton { Text = "닫기", Width = UiTheme.BtnW };
+            UiTheme.StyleOutline(btnCancel);
+            btnCancel.Click += (_, _) => Close();
+
+            btnPanel.Controls.Add(btnSubmit);
+            btnPanel.Controls.Add(btnCancel);
+
+            layout.Controls.Add(lblWorkDate,  0, 0);
+            layout.Controls.Add(dtpWorkDate,  1, 0);
+            layout.Controls.Add(lblEndTime,   0, 1);
+            layout.Controls.Add(dtpEndTime,   1, 1);
+            layout.Controls.Add(reasonCell,   0, 2);
+            layout.SetColumnSpan(reasonCell, 2);
+            layout.Controls.Add(btnPanel,     0, 3);
+            layout.SetColumnSpan(btnPanel, 2);
+
+            body.Controls.Add(layout);
+
+            Controls.Add(body);
+            Controls.Add(UiTheme.MakeFormHeader("연장 근무 신청", null, "◷", UiTheme.Primary));
+
+            Load += (_, _) =>
             {
-                FlowDirection = FlowDirection.RightToLeft,
-                Dock = DockStyle.Fill,
-                Padding = new Padding(0, 12, 0, 12),
-                AutoSize = true
+                if (Owner != null) CenterToParent();
+                else CenterToScreen();
             };
-
-            btnSubmit = new Button
-            {
-                Text = "신청",
-                Width = 120,
-                Height = 36,
-                BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Margin = new Padding(8, 0, 0, 0)
-            };
-            btnSubmit.FlatAppearance.BorderSize = 0;
-            btnSubmit.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
-            btnSubmit.Click += async (s, e) => await SubmitAsync();
-
-            var btnCancel = new Button
-            {
-                Text = "닫기",
-                Width = 96,
-                Height = 36,
-                Margin = new Padding(8, 0, 0, 0),
-                BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat
-            };
-            btnCancel.FlatAppearance.BorderSize = 0;
-            btnCancel.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
-            btnCancel.Click += (s, e) => Close();
-
-            buttonPanel.Controls.Add(btnSubmit);
-            buttonPanel.Controls.Add(btnCancel);
-
-            layout.Controls.Add(lblWorkDate, 0, 0);
-            layout.Controls.Add(dtpWorkDate, 1, 0);
-            layout.Controls.Add(lblEndTime, 0, 1);
-            layout.Controls.Add(dtpEndTime, 1, 1);
-            layout.Controls.Add(lblReason, 0, 2);
-            layout.Controls.Add(txtReason, 0, 3);
-            layout.SetColumnSpan(txtReason, 2);
-            layout.Controls.Add(buttonPanel, 0, 4);
-            layout.SetColumnSpan(buttonPanel, 2);
-
-            group.Controls.Add(layout);
-
-            Controls.Clear();
-            Controls.Add(group);
-            Controls.Add(headerPanel);
-        }
-
-        private void CenterForm()
-        {
-            if (this.Owner != null)
-            {
-                this.CenterToParent();
-            }
-            else
-            {
-                this.CenterToScreen();
-            }
         }
 
         private async System.Threading.Tasks.Task SubmitAsync()
         {
-            var now = currentTimeProvider();
+            var now        = currentTimeProvider();
             var cutoffTime = new TimeSpan(17, 30, 0);
 
             if (now.TimeOfDay >= cutoffTime)
@@ -223,7 +138,6 @@ namespace YEJI_AW_Client
                 return;
             }
 
-            // 사유 필수 입력
             var reasonText = txtReason.Text.Trim();
             if (string.IsNullOrWhiteSpace(reasonText))
             {
@@ -232,57 +146,48 @@ namespace YEJI_AW_Client
                 return;
             }
 
-            // 기존 신청과 겹치는지 확인 (같은 날짜의 최대 종료 시각과 비교)
             try
             {
                 string date = dtpWorkDate.Value.ToString("yyyy-MM-dd");
-                string url = $"{serverBaseUrl}/api/overtime-requests?employeeId={Uri.EscapeDataString(employeeId)}&startDate={date}&endDate={date}";
+                string url  = $"{serverBaseUrl}/api/overtime-requests?employeeId={Uri.EscapeDataString(employeeId)}&startDate={date}&endDate={date}";
                 string json = await httpClient.GetStringAsync(url);
 
-                TimeSpan ParseTime(string s)
-                {
-                    return TimeSpan.TryParse(s, out var t) ? t : TimeSpan.Zero;
-                }
+                TimeSpan ParseTime(string s) => TimeSpan.TryParse(s, out var t) ? t : TimeSpan.Zero;
 
                 TimeSpan newEnd = TimeSpan.Parse(dtpEndTime.Value.ToString("HH:mm"));
                 TimeSpan maxExistingEnd = TimeSpan.Zero;
                 TimeSpan newStartForAdditional = new TimeSpan(17, 30, 0);
 
-                using (var doc = JsonDocument.Parse(json))
+                using (var doc = System.Text.Json.JsonDocument.Parse(json))
                 {
                     var root = doc.RootElement;
-                    IEnumerable<JsonElement> Enumerate(JsonElement el)
+                    IEnumerable<System.Text.Json.JsonElement> Enumerate(System.Text.Json.JsonElement el)
                     {
-                        if (el.ValueKind == JsonValueKind.Array) return el.EnumerateArray();
-                        if (el.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.Array) return dataEl.EnumerateArray();
-                        if (el.TryGetProperty("items", out var itemsEl) && itemsEl.ValueKind == JsonValueKind.Array) return itemsEl.EnumerateArray();
-                        return Array.Empty<JsonElement>();
+                        if (el.ValueKind == System.Text.Json.JsonValueKind.Array) return el.EnumerateArray();
+                        if (el.TryGetProperty("data",  out var d) && d.ValueKind  == System.Text.Json.JsonValueKind.Array) return d.EnumerateArray();
+                        if (el.TryGetProperty("items", out var i) && i.ValueKind == System.Text.Json.JsonValueKind.Array) return i.EnumerateArray();
+                        return Array.Empty<System.Text.Json.JsonElement>();
                     }
 
                     foreach (var item in Enumerate(root))
                     {
-                        // 상태 확인: 반려된 신청은 중복 체크에서 제외
-                        var statusStr = item.TryGetProperty("status", out var statusProp) ? statusProp.ToString() :
-                                        item.TryGetProperty("approvalStatus", out var statusProp2) ? statusProp2.ToString() :
-                                        item.TryGetProperty("approval_status", out var statusProp3) ? statusProp3.ToString() :
-                                        item.TryGetProperty("result", out var statusProp4) ? statusProp4.ToString() : string.Empty;
+                        var statusStr =
+                            item.TryGetProperty("status",          out var sp1) ? sp1.ToString() :
+                            item.TryGetProperty("approvalStatus",  out var sp2) ? sp2.ToString() :
+                            item.TryGetProperty("approval_status", out var sp3) ? sp3.ToString() :
+                            item.TryGetProperty("result",          out var sp4) ? sp4.ToString() : string.Empty;
 
-                        // 반려(REJECTED) 상태인 경우 무시
-                        if (string.Equals(statusStr?.Trim(), "REJECTED", StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
+                        if (string.Equals(statusStr?.Trim(), "REJECTED", StringComparison.OrdinalIgnoreCase)) continue;
 
-                        var startStr = item.TryGetProperty("startTime", out var st) ? st.ToString() :
+                        var startStr = item.TryGetProperty("startTime", out var st)  ? st.ToString()  :
                                        item.TryGetProperty("start_time", out var st2) ? st2.ToString() : "17:30";
-                        var endStr = item.TryGetProperty("endTime", out var et) ? et.ToString() :
-                                     item.TryGetProperty("end_time", out var et2) ? et2.ToString() : string.Empty;
-                        var startTs = ParseTime(startStr);
-                        var endTs = ParseTime(endStr);
+                        var endStr   = item.TryGetProperty("endTime",   out var et)  ? et.ToString()  :
+                                       item.TryGetProperty("end_time",   out var et2) ? et2.ToString() : string.Empty;
+                        var endTs    = ParseTime(endStr);
                         if (endTs > maxExistingEnd)
                         {
-                            maxExistingEnd = endTs;
-                            newStartForAdditional = endTs; // 추가 신청은 기존 종료 이후부터 시작
+                            maxExistingEnd        = endTs;
+                            newStartForAdditional = endTs;
                         }
                     }
                 }
@@ -294,40 +199,35 @@ namespace YEJI_AW_Client
                 }
                 else if (maxExistingEnd > TimeSpan.Zero && newEnd > maxExistingEnd)
                 {
-                    var added = newEnd - maxExistingEnd;
-                    var confirm = MessageBox.Show($"이미 신청한 시간을 제외한 {added.Hours:D2}:{added.Minutes:D2} 만큼 추가 신청됩니다. 계속 진행하시겠습니까?",
+                    var added   = newEnd - maxExistingEnd;
+                    var confirm = MessageBox.Show(
+                        $"이미 신청한 시간을 제외한 {added.Hours:D2}:{added.Minutes:D2} 만큼 추가 신청됩니다. 계속 진행하시겠습니까?",
                         "추가 신청", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                    if (confirm != DialogResult.Yes)
-                    {
-                        return;
-                    }
-
-                    // 추가 시간은 신규 등록: 시작 시각을 기존 종료 시각으로 설정
+                    if (confirm != DialogResult.Yes) return;
                     _pendingStartTimeOverride = newStartForAdditional;
                 }
             }
-            catch
-            {
-                // 겹침 확인 실패 시 계속 진행 (서버에서 검증)
-            }
+            catch { }
 
             btnSubmit.Enabled = false;
 
-            var startOverride = _pendingStartTimeOverride.HasValue ? _pendingStartTimeOverride.Value.ToString(@"hh\:mm") : "17:30";
+            var startOverride = _pendingStartTimeOverride.HasValue
+                ? _pendingStartTimeOverride.Value.ToString(@"hh\:mm")
+                : "17:30";
 
             var payload = new
             {
                 employeeId = employeeId,
-                workDate = dtpWorkDate.Value.ToString("yyyy-MM-dd"),
-                startTime = startOverride,
-                endTime = dtpEndTime.Value.ToString("HH:mm"),
-                reason = reasonText
+                workDate   = dtpWorkDate.Value.ToString("yyyy-MM-dd"),
+                startTime  = startOverride,
+                endTime    = dtpEndTime.Value.ToString("HH:mm"),
+                reason     = reasonText
             };
 
             try
             {
                 string jsonOut = JsonSerializer.Serialize(payload);
-                using var content = new StringContent(jsonOut, Encoding.UTF8, "application/json");
+                using var content  = new StringContent(jsonOut, Encoding.UTF8, "application/json");
                 using var response = await httpClient.PostAsync($"{serverBaseUrl}/api/overtime-requests", content);
 
                 if (!response.IsSuccessStatusCode)
@@ -356,15 +256,11 @@ namespace YEJI_AW_Client
             string message = statusCode switch
             {
                 System.Net.HttpStatusCode.BadRequest => "필수 입력이 누락되었거나 형식이 잘못되었습니다.",
-                System.Net.HttpStatusCode.NotFound => "대상 데이터를 찾을 수 없습니다.",
-                _ => "서버 처리 중 문제가 발생했습니다."
+                System.Net.HttpStatusCode.NotFound   => "대상 데이터를 찾을 수 없습니다.",
+                _                                    => "서버 처리 중 문제가 발생했습니다."
             };
-
             if (!string.IsNullOrWhiteSpace(serverMessage))
-            {
                 message += $"\n서버 메시지: {serverMessage}";
-            }
-
             MessageBox.Show(message, "신청 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }

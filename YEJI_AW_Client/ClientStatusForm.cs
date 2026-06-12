@@ -119,7 +119,7 @@ internal sealed class ClientStatusForm : Form
 
         // 버튼 바
         var btnPanel = UiTheme.MakeButtonBar();
-        var closeBtn = new Button { Text = "닫기", Width = UiTheme.BtnW, DialogResult = DialogResult.OK };
+        var closeBtn = new RoundButton { Text = "닫기", Width = UiTheme.BtnW, DialogResult = DialogResult.OK };
         UiTheme.StylePrimary(closeBtn);
         btnPanel.Controls.Add(closeBtn);
 
@@ -127,7 +127,7 @@ internal sealed class ClientStatusForm : Form
         body.Controls.Add(table);
 
         Controls.Add(body);
-        Controls.Add(UiTheme.MakeHeader("클라이언트 정보"));
+        Controls.Add(UiTheme.MakeFormHeader("클라이언트 정보", null, "i", UiTheme.Primary));
 
         AcceptButton = closeBtn;
         CancelButton = closeBtn;

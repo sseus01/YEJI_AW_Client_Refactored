@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -9,96 +9,82 @@ namespace YEJI_AW_Client
     public partial class ReasonSelectionForm : Form
     {
         private readonly ListView listViewReasons;
-        private readonly Button buttonSelect;
-        private readonly Button buttonCancel;
 
         public AwayReason? SelectedReason { get; private set; }
 
         public ReasonSelectionForm(IEnumerable<AwayReason> reasons, AwayReason? currentSelection)
         {
-            Text = "사유 전체보기";
-            StartPosition = FormStartPosition.CenterParent;
-            Size = new Size(520, 400);
+            Text            = "사유 전체보기";
+            StartPosition   = FormStartPosition.CenterParent;
+            ClientSize      = new Size(520, 440);
+            MaximizeBox     = false;
+            BackColor       = UiTheme.Background;
 
+            // ── ListView ────────────────────────────────────────────
             listViewReasons = new ListView
             {
-                View = View.Details,
-                FullRowSelect = true,
-                GridLines = true,
-                Dock = DockStyle.Top,
-                Height = 300
+                View          = View.Details,
+                FullRowSelect  = true,
+                GridLines      = true,
+                Dock           = DockStyle.Fill,
+                BackColor      = UiTheme.Surface,
+                BorderStyle    = BorderStyle.Fixed3D,
+                Font           = UiTheme.Body
             };
+            listViewReasons.Columns.Add("구분",   120);
+            listViewReasons.Columns.Add("세부유형", 120);
+            listViewReasons.Columns.Add("예시",   240);
 
-            listViewReasons.Columns.Add("구분", 120, HorizontalAlignment.Left);
-            listViewReasons.Columns.Add("세부유형", 120, HorizontalAlignment.Left);
-            listViewReasons.Columns.Add("예시", 200, HorizontalAlignment.Left);
+            // ── 버튼 바 ─────────────────────────────────────────────
+            var btnPanel = UiTheme.MakeButtonBar();
+
+            var buttonSelect = new RoundButton { Text = "선택", Width = UiTheme.BtnW, DialogResult = DialogResult.OK };
+            UiTheme.StylePrimary(buttonSelect);
+
+            var buttonCancel = new RoundButton { Text = "취소", Width = UiTheme.BtnW, DialogResult = DialogResult.Cancel };
+            UiTheme.StyleOutline(buttonCancel);
+
+            btnPanel.Controls.Add(buttonSelect);
+            btnPanel.Controls.Add(buttonCancel);
+
+            Controls.Add(listViewReasons);
+            Controls.Add(btnPanel);
+            Controls.Add(UiTheme.MakeFormHeader("사유 전체보기", null, "≡", UiTheme.Primary));
+
+            AcceptButton = buttonSelect;
+            CancelButton = buttonCancel;
 
             PopulateList(reasons, currentSelection);
 
-            buttonSelect = new Button
-            {
-                Text = "선택",
-                DialogResult = DialogResult.OK,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-                Location = new Point(320, 320),
-                Size = new Size(80, 30)
-            };
-
-            buttonCancel = new Button
-            {
-                Text = "취소",
-                DialogResult = DialogResult.Cancel,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-                Location = new Point(410, 320),
-                Size = new Size(80, 30)
-            };
-
-            Controls.Add(listViewReasons);
-            Controls.Add(buttonSelect);
-            Controls.Add(buttonCancel);
-
             listViewReasons.ItemActivate += (_, _) => ConfirmSelection();
-            buttonSelect.Click += (_, _) => ConfirmSelection();
+            buttonSelect.Click           += (_, _) => ConfirmSelection();
         }
 
         public void PositionNextToOwner(Form owner)
         {
             StartPosition = FormStartPosition.Manual;
-
             var screen = Screen.FromControl(owner).WorkingArea;
 
             int x = owner.Right + 10;
-            if (x + Width > screen.Right)
-            {
-                x = owner.Left - Width - 10;
-            }
+            if (x + Width > screen.Right)  x = owner.Left - Width - 10;
 
             int y = owner.Top;
-            if (y + Height > screen.Bottom)
-            {
-                y = screen.Bottom - Height - 10;
-            }
-
-            if (y < screen.Top)
-            {
-                y = screen.Top + 10;
-            }
+            if (y + Height > screen.Bottom) y = screen.Bottom - Height - 10;
+            if (y < screen.Top)             y = screen.Top + 10;
 
             Location = new Point(x, y);
-            TopMost = owner.TopMost;
+            TopMost  = owner.TopMost;
         }
 
         private void PopulateList(IEnumerable<AwayReason> reasons, AwayReason? currentSelection)
         {
             listViewReasons.Items.Clear();
-
             foreach (var reason in reasons)
             {
                 var item = new ListViewItem(new[] { reason.Level1, reason.Level2, reason.Level3 })
                 {
                     Tag = reason
                 };
-
                 listViewReasons.Items.Add(item);
             }
 
@@ -106,10 +92,10 @@ namespace YEJI_AW_Client
             {
                 foreach (ListViewItem item in listViewReasons.Items)
                 {
-                    if (item.Tag is AwayReason reason &&
-                        reason.Level1 == currentSelection.Level1 &&
-                        reason.Level2 == currentSelection.Level2 &&
-                        reason.Level3 == currentSelection.Level3)
+                    if (item.Tag is AwayReason r &&
+                        r.Level1 == currentSelection.Level1 &&
+                        r.Level2 == currentSelection.Level2 &&
+                        r.Level3 == currentSelection.Level3)
                     {
                         item.Selected = true;
                         item.EnsureVisible();
@@ -127,9 +113,8 @@ namespace YEJI_AW_Client
                 DialogResult = DialogResult.None;
                 return;
             }
-
             SelectedReason = listViewReasons.SelectedItems[0].Tag as AwayReason;
-            DialogResult = DialogResult.OK;
+            DialogResult   = DialogResult.OK;
             Close();
         }
     }

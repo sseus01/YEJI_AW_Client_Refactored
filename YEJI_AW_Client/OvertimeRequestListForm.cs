@@ -19,12 +19,10 @@ namespace YEJI_AW_Client
         private DateTimePicker dtpStartDate = new DateTimePicker();
         private Label lblEndDate = new Label();
         private DateTimePicker dtpEndDate = new DateTimePicker();
-        private Button btnSearch = new Button();
-        private Button btnDelete = new Button();
+        private RoundButton btnSearch = new RoundButton();
+        private RoundButton btnDelete = new RoundButton();
         private DataGridView dgvRequests = new DataGridView();
         private Label lblStatus = new Label();
-        private Font? buttonFont;
-        private Font? gridHeaderFont;
 
         private BindingList<OvertimeRequestEntry> currentItems = new BindingList<OvertimeRequestEntry>();
 
@@ -41,118 +39,80 @@ namespace YEJI_AW_Client
 
         private void BuildLayout()
         {
-            Text = "연장근무신청 확인";
-            ClientSize = new Size(820, 480);
+            Text          = "연장근무신청 확인";
+            ClientSize    = new Size(820, 520);
             StartPosition = FormStartPosition.Manual;
-            BackColor = Color.FromArgb(247, 247, 247); // 전체 창 기본 배경
+            BackColor     = UiTheme.Background;
 
-            // 애플리케이션 아이콘 설정
-            try
+            // ── 필터 바 ─────────────────────────────────────────────
+            var filterPanel = new Panel
             {
-                var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TrayIcon_Y_orange.ico");
-                if (System.IO.File.Exists(iconPath))
-                {
-                    Icon = new Icon(iconPath);
-                }
-            }
-            catch { /* 아이콘 로드 실패 시 무시 */ }
+                Dock      = DockStyle.Top,
+                Height    = 46,
+                BackColor = UiTheme.Surface
+            };
 
-            lblStartDate.Text = "시작일";
-            lblStartDate.AutoSize = true;
-            lblStartDate.Location = new Point(12, 15);
+            lblStartDate.Text      = "시작일";
+            lblStartDate.AutoSize  = true;
+            lblStartDate.Font      = UiTheme.Small;
+            lblStartDate.ForeColor = UiTheme.TextSecondary;
+            lblStartDate.Location  = new Point(12, 14);
 
-            dtpStartDate.Format = DateTimePickerFormat.Custom;
+            dtpStartDate.Format       = DateTimePickerFormat.Custom;
             dtpStartDate.CustomFormat = "yyyy-MM-dd";
-            dtpStartDate.Location = new Point(73, 12);
-            dtpStartDate.Size = new Size(120, 23);
-            dtpStartDate.Value = DateTime.Today; // 기본 오늘
+            dtpStartDate.Location     = new Point(62, 11);
+            dtpStartDate.Size         = new Size(110, 24);
+            dtpStartDate.Value        = DateTime.Today;
 
-            lblEndDate.Text = "종료일";
-            lblEndDate.AutoSize = true;
-            lblEndDate.Location = new Point(199, 15);
+            lblEndDate.Text      = "종료일";
+            lblEndDate.AutoSize  = true;
+            lblEndDate.Font      = UiTheme.Small;
+            lblEndDate.ForeColor = UiTheme.TextSecondary;
+            lblEndDate.Location  = new Point(182, 14);
 
-            dtpEndDate.Format = DateTimePickerFormat.Custom;
+            dtpEndDate.Format       = DateTimePickerFormat.Custom;
             dtpEndDate.CustomFormat = "yyyy-MM-dd";
-            dtpEndDate.Location = new Point(256, 12);
-            dtpEndDate.Size = new Size(120, 23);
-            dtpEndDate.Value = DateTime.Today; // 기본 오늘
+            dtpEndDate.Location     = new Point(232, 11);
+            dtpEndDate.Size         = new Size(110, 24);
+            dtpEndDate.Value        = DateTime.Today;
 
-            btnSearch.Text = "조회";
-            btnSearch.Location = new Point(382, 11);
-            btnSearch.Size = new Size(75, 30);
-            btnSearch.BackColor = Color.FromArgb(7, 87, 167); // 버튼 파랑
-            btnSearch.ForeColor = Color.White;
-            btnSearch.FlatStyle = FlatStyle.Flat;
-            buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
-            btnSearch.Font = buttonFont;
-            btnSearch.Cursor = Cursors.Hand;
-            btnSearch.FlatAppearance.BorderSize = 0;
-            btnSearch.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
+            btnSearch.Text     = "조회";
+            btnSearch.Location = new Point(352, 6);
+            btnSearch.Size     = new Size(70, UiTheme.BtnH);
+            UiTheme.StylePrimary(btnSearch);
             btnSearch.Click += BtnSearch_Click;
 
-            btnDelete.Text = "취소"; // 삭제 → 취소
-            btnDelete.Location = new Point(463, 11);
-            btnDelete.Size = new Size(75, 30);
-            btnDelete.BackColor = Color.FromArgb(7, 87, 167); // 버튼 파랑
-            btnDelete.ForeColor = Color.White;
-            btnDelete.FlatStyle = FlatStyle.Flat;
-            btnDelete.Font = buttonFont;
-            btnDelete.Cursor = Cursors.Hand;
-            btnDelete.FlatAppearance.BorderSize = 0;
-            btnDelete.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
+            btnDelete.Text     = "취소";
+            btnDelete.Location = new Point(428, 6);
+            btnDelete.Size     = new Size(70, UiTheme.BtnH);
+            UiTheme.StyleDanger(btnDelete);
             btnDelete.Enabled = false;
             btnDelete.Click += BtnDelete_Click;
 
-            dgvRequests.Location = new Point(12, 50);
-            dgvRequests.Size = new Size(796, 418);
-            dgvRequests.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            dgvRequests.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            dgvRequests.ReadOnly = true;
-            dgvRequests.AllowUserToAddRows = false;
-            dgvRequests.AllowUserToDeleteRows = false;
-            dgvRequests.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            dgvRequests.MultiSelect = false;
-            dgvRequests.DataBindingComplete += DgvRequests_DataBindingComplete;
-            dgvRequests.SelectionChanged += DgvRequests_SelectionChanged;
-
-            // DataGridView 스타일 개선
-            ImproveDataGridViewStyle(dgvRequests);
-
-            lblStatus.AutoSize = false;
+            lblStatus.AutoSize  = false;
             lblStatus.TextAlign = ContentAlignment.MiddleRight;
-            lblStatus.Location = new Point(585, 17);
-            lblStatus.Size = new Size(223, 15);
-            lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            lblStatus.Anchor    = AnchorStyles.Top | AnchorStyles.Right;
+            lblStatus.Font      = UiTheme.Small;
+            lblStatus.ForeColor = UiTheme.TextSecondary;
+            lblStatus.Location  = new Point(550, 14);
+            lblStatus.Size      = new Size(258, 18);
 
-            Controls.AddRange(new Control[]
+            filterPanel.Controls.AddRange(new Control[]
             {
-                lblStartDate, dtpStartDate, lblEndDate, dtpEndDate, btnSearch, btnDelete,
-                dgvRequests, lblStatus
+                lblStartDate, dtpStartDate, lblEndDate, dtpEndDate, btnSearch, btnDelete, lblStatus
             });
-        }
 
-        private void ImproveDataGridViewStyle(DataGridView dgv)
-        {
-            // 헤더 스타일
-            dgv.EnableHeadersVisualStyles = false;
-            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(7, 87, 167); // 헤더 파랑
-            dgv.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
-            gridHeaderFont = new Font(dgv.Font.FontFamily, 9F, FontStyle.Bold);
-            dgv.ColumnHeadersDefaultCellStyle.Font = gridHeaderFont;
-            dgv.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            dgv.ColumnHeadersHeight = 32;
+            // ── DataGridView ────────────────────────────────────────
+            dgvRequests.Dock                 = DockStyle.Fill;
+            dgvRequests.AutoSizeColumnsMode  = DataGridViewAutoSizeColumnsMode.Fill;
+            dgvRequests.MultiSelect          = false;
+            dgvRequests.DataBindingComplete += DgvRequests_DataBindingComplete;
+            dgvRequests.SelectionChanged    += DgvRequests_SelectionChanged;
+            UiTheme.StyleDataGridView(dgvRequests);
 
-            // 셀 스타일
-            dgv.DefaultCellStyle.SelectionBackColor = Color.FromArgb(213, 220, 228); // 선택 배경
-            dgv.DefaultCellStyle.SelectionForeColor = Color.Black;
-            dgv.DefaultCellStyle.BackColor = Color.White;
-            dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(249, 250, 251); // 행 배경
-            dgv.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
-            dgv.RowTemplate.Height = 28;
-
-            // 그리드 라인
-            dgv.GridColor = Color.FromArgb(231, 231, 231); // 테이블 라인
-            dgv.BorderStyle = BorderStyle.Fixed3D;
+            Controls.Add(dgvRequests);
+            Controls.Add(filterPanel);
+            Controls.Add(UiTheme.MakeFormHeader("연장근무신청 확인", null, "≡", UiTheme.Primary));
         }
 
         private async void OvertimeRequestListForm_Load(object? sender, EventArgs e)
@@ -476,12 +436,7 @@ namespace YEJI_AW_Client
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
-            {
-                components?.Dispose();
-                buttonFont?.Dispose();
-                gridHeaderFont?.Dispose();
-            }
+            if (disposing) components?.Dispose();
             base.Dispose(disposing);
         }
     }

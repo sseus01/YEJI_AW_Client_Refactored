@@ -35,21 +35,21 @@ namespace YEJI_AW_Client
 
             dialogPanel = new Panel
             {
-                Size        = new Size(520, 360),
+                Size        = new Size(520, 380),
                 BackColor   = UiTheme.Surface,
                 BorderStyle = BorderStyle.FixedSingle
             };
 
             // ── 헤더 ────────────────────────────────────────────────────
-            var headerPanel = UiTheme.MakeHeader("영업 금지 안내");
+            var headerPanel = UiTheme.MakeFormHeader("영업 금지 안내", null, "!", UiTheme.Danger);
             headerPanel.Dock = DockStyle.None;
-            headerPanel.Size = new Size(dialogPanel.Width, UiTheme.HeaderH);
+            headerPanel.Size = new Size(dialogPanel.Width, UiTheme.FormTitleH);
 
             // ── 본문 ────────────────────────────────────────────────────
             var bodyPanel = new Panel
             {
-                Location  = new Point(0, UiTheme.HeaderH),
-                Size      = new Size(dialogPanel.Width, dialogPanel.Height - UiTheme.HeaderH),
+                Location  = new Point(0, UiTheme.FormTitleH),
+                Size      = new Size(dialogPanel.Width, dialogPanel.Height - UiTheme.FormTitleH),
                 Padding   = new Padding(24, 18, 24, 20),
                 BackColor = UiTheme.Surface
             };
@@ -97,7 +97,7 @@ namespace YEJI_AW_Client
             };
 
             // ── 버튼 ────────────────────────────────────────────────────
-            var backButton = new Button
+            var backButton = new RoundButton
             {
                 Text     = "뒤로가기",
                 AutoSize = true,
@@ -111,7 +111,7 @@ namespace YEJI_AW_Client
                 Close();
             };
 
-            var closeButton = new Button
+            var closeButton = new RoundButton
             {
                 Text         = "닫기",
                 AutoSize     = true,

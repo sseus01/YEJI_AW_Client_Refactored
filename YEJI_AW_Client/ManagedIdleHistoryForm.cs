@@ -24,14 +24,11 @@ namespace YEJI_AW_Client
         private ComboBox userCombo;
         private DateTimePicker startPicker;
         private DateTimePicker endPicker;
-        private Button searchButton;
-        private Button orgViewButton;
+        private RoundButton searchButton;
+        private RoundButton orgViewButton;
         private ListView listView;
         private Label emptyLabel;
-        private Panel headerPanel;
         private Panel filterPanel;
-        private Font? buttonFont;
-        private Font? headerFont;
 
         private static readonly TimeZoneInfo KoreaTz = SafeGetKoreaTz();
         private string? managerDisplayName;
@@ -54,187 +51,95 @@ namespace YEJI_AW_Client
 
         private void InitializeUi()
         {
-            Text = "관리: 조직 자리비움 이력";
-            ClientSize = new Size(980, 600);
-            StartPosition = FormStartPosition.Manual;
+            Text            = "관리: 조직 자리비움 이력";
+            ClientSize      = new Size(980, 600);
+            StartPosition   = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            BackColor = Color.FromArgb(247, 247, 247); // 전체 창 기본 배경
+            MaximizeBox     = false;
+            BackColor       = UiTheme.Background;
 
-            // 애플리케이션 아이콘 설정
-            try
-            {
-                var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TrayIcon_Y_orange.ico");
-                if (System.IO.File.Exists(iconPath))
-                {
-                    Icon = new Icon(iconPath);
-                }
-            }
-            catch { /* 아이콘 로드 실패 시 무시 */ }
-
-            headerPanel = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 56,
-                BackColor = Color.FromArgb(7, 87, 167), // 헤더 전체 배경 (파랑)
-                Padding = new Padding(12, 8, 12, 8),
-                Visible = false // 헤더 패널 숨김
-            };
-            var headerTitleLabel = new Label
-            {
-                Text = "조직 자리비움 이력",
-                Font = new Font(Font.FontFamily, 14F, FontStyle.Bold),
-                Dock = DockStyle.Fill,
-                ForeColor = Color.White, // 헤더 텍스트 흰색
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-            headerPanel.Controls.Add(headerTitleLabel);
-            Controls.Add(headerPanel);
-
+            // ── 필터 바 ─────────────────────────────────────────────
             filterPanel = new Panel
             {
-                Dock = DockStyle.Top,
-                Height = 64,
-                Padding = new Padding(12, 8, 12, 8),
-                BackColor = Color.FromArgb(249, 250, 251) // 상단 정보 영역 배경
+                Dock      = DockStyle.Top,
+                Height    = 46,
+                BackColor = UiTheme.Surface
             };
-            Controls.Add(filterPanel);
 
-            orgCombo = new ComboBox { Left = 12, Top = 12, Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
-            userCombo = new ComboBox { Left = 280, Top = 12, Width = 240, DropDownStyle = ComboBoxStyle.DropDownList };
+            orgCombo  = new ComboBox { Left = 12,  Top = 11, Width = 220, DropDownStyle = ComboBoxStyle.DropDownList };
+            userCombo = new ComboBox { Left = 240, Top = 11, Width = 200, DropDownStyle = ComboBoxStyle.DropDownList };
 
-            startPicker = new DateTimePicker { Left = 530, Top = 12, Width = 110, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd" };
-            endPicker = new DateTimePicker { Left = 650, Top = 12, Width = 110, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd" };
+            startPicker = new DateTimePicker { Left = 448, Top = 11, Width = 110, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd" };
+            endPicker   = new DateTimePicker { Left = 566, Top = 11, Width = 110, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd" };
             startPicker.Value = DateTime.Today;
-            endPicker.Value = DateTime.Today;
+            endPicker.Value   = DateTime.Today;
 
-            buttonFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
-
-            searchButton = new Button
-            {
-                Left = 770,
-                Top = 12,
-                Width = 80,
-                Height = 28,
-                Text = "조회",
-                BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = buttonFont
-            };
-            searchButton.FlatAppearance.BorderSize = 0;
-            searchButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
+            searchButton = new RoundButton { Left = 684, Top = 6, Width = 72, Height = UiTheme.BtnH, Text = "조회" };
+            UiTheme.StylePrimary(searchButton);
             searchButton.Click += async (s, e) => await LoadIdleEventsAsync();
 
-            orgViewButton = new Button
-            {
-                Left = 860,
-                Top = 12,
-                Width = 80,
-                Height = 28,
-                Text = "전체보기",
-                BackColor = Color.FromArgb(7, 87, 167), // 버튼 파랑
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Visible = false,
-                Font = buttonFont
-            };
-            orgViewButton.FlatAppearance.BorderSize = 0;
-            orgViewButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 110, 190);
+            orgViewButton = new RoundButton { Left = 764, Top = 6, Width = 80, Height = UiTheme.BtnH, Text = "전체보기", Visible = false };
+            UiTheme.StylePrimary(orgViewButton);
             orgViewButton.Click += async (s, e) => await LoadOrgIdleEventsAsync();
 
-            headerPanel.Controls.Add(headerTitleLabel);
-            Controls.Add(headerPanel);
+            filterPanel.Controls.AddRange(new Control[] { orgCombo, userCombo, startPicker, endPicker, searchButton, orgViewButton });
 
-            filterPanel.Controls.Add(orgCombo);
-            filterPanel.Controls.Add(userCombo);
-            filterPanel.Controls.Add(startPicker);
-            filterPanel.Controls.Add(endPicker);
-            filterPanel.Controls.Add(searchButton);
-            filterPanel.Controls.Add(orgViewButton);
-
+            // ── ListView ────────────────────────────────────────────
             listView = new ListView
             {
-                Dock = DockStyle.Fill,
-                View = View.Details,
+                Dock        = DockStyle.Fill,
+                View        = View.Details,
                 FullRowSelect = true,
-                GridLines = true,
-                BackColor = Color.White,
-                ForeColor = Color.Black,
+                GridLines   = true,
+                BackColor   = UiTheme.Surface,
+                BorderStyle = BorderStyle.Fixed3D,
+                Font        = UiTheme.Body,
+                OwnerDraw   = true
             };
-            listView.Columns.Add("사번", 100);
-            listView.Columns.Add("이름", 140);
-            listView.Columns.Add("시작시간", 170);
-            listView.Columns.Add("종료시간", 170);
+            listView.Columns.Add("사번",       100);
+            listView.Columns.Add("이름",       140);
+            listView.Columns.Add("시작시간",   170);
+            listView.Columns.Add("종료시간",   170);
             listView.Columns.Add("자리비움시간", 120);
-            listView.Columns.Add("상세사유", 220);
+            listView.Columns.Add("상세사유",   220);
 
-            // ListView 스타일 개선
-            listView.BackColor = Color.White;
-            listView.BorderStyle = BorderStyle.Fixed3D;
-            listView.Font = new Font(Font.FontFamily, 9F);
-            listView.OwnerDraw = true;
-            headerFont = new Font(Font.FontFamily, 9F, FontStyle.Bold);
+            var headerDrawFont = new Font(UiTheme.Body.FontFamily, 9F, FontStyle.Bold);
             listView.DrawColumnHeader += (s, e) =>
             {
-                using (var headerBrush = new SolidBrush(Color.FromArgb(7, 87, 167))) // 헤더 파랑
-                {
-                    e.Graphics.FillRectangle(headerBrush, e.Bounds);
-                }
-                using (var textBrush = new SolidBrush(Color.White))
-                {
-                    var sf = new StringFormat
-                    {
-                        Alignment = StringAlignment.Center,
-                        LineAlignment = StringAlignment.Center
-                    };
-                    e.Graphics.DrawString(e.Header.Text, headerFont, textBrush, e.Bounds, sf);
-                }
+                using var bg   = new SolidBrush(UiTheme.Primary);
+                using var fg   = new SolidBrush(UiTheme.TextOnPrimary);
+                e.Graphics.FillRectangle(bg, e.Bounds);
+                var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                e.Graphics.DrawString(e.Header.Text, headerDrawFont, fg, e.Bounds, sf);
             };
-            listView.DrawItem += (s, e) =>
-            {
-                e.DrawDefault = true;
-            };
+            listView.DrawItem += (s, e) => { e.DrawDefault = true; };
             listView.DrawSubItem += (s, e) =>
             {
-                var backColor = e.ItemIndex % 2 == 0 ? Color.White : Color.FromArgb(249, 250, 251); // 행 배경
-                if ((e.ItemState & ListViewItemStates.Selected) != 0)
-                {
-                    backColor = Color.FromArgb(213, 220, 228); // 선택 배경 (왼쪽 패널 색상 활용)
-                }
-                using (var brush = new SolidBrush(backColor))
-                {
-                    e.Graphics.FillRectangle(brush, e.Bounds);
-                }
-                var textColor = Color.Black;
-                TextRenderer.DrawText(e.Graphics, e.SubItem.Text, e.Item.Font, e.Bounds, textColor,
+                var backColor = (e.ItemState & ListViewItemStates.Selected) != 0
+                    ? UiTheme.Selection
+                    : e.ItemIndex % 2 == 0 ? UiTheme.Surface : UiTheme.Background;
+                using var brush = new SolidBrush(backColor);
+                e.Graphics.FillRectangle(brush, e.Bounds);
+                TextRenderer.DrawText(e.Graphics, e.SubItem.Text, e.Item.Font, e.Bounds, UiTheme.TextPrimary,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             };
 
             emptyLabel = new Label
             {
-                Text = "자리비움 이력이 없습니다.",
-                AutoSize = false,
+                Text      = "자리비움 이력이 없습니다.",
+                AutoSize  = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Fill,
-                Visible = false,
-                ForeColor = Color.Gray,
-                BackColor = Color.White,
-                Font = new Font(Font, FontStyle.Regular)
+                Dock      = DockStyle.Fill,
+                Visible   = false,
+                ForeColor = UiTheme.TextSecondary,
+                BackColor = UiTheme.Surface,
+                Font      = UiTheme.Body
             };
 
             Controls.Add(listView);
             Controls.Add(emptyLabel);
-            
-            // Z-order adjustment for correct docking:
-            // Controls at the bottom of Z-order are docked first.
-            // We want filterPanel to dock Top first, reserving space.
-            // Then listView docks Fill in the remaining space.
-            headerPanel.SendToBack();
-            filterPanel.SendToBack();
-            listView.BringToFront();
-            emptyLabel.BringToFront();
+            Controls.Add(filterPanel);
+            Controls.Add(UiTheme.MakeFormHeader("조직 자리비움 이력", null, "≡", UiTheme.Primary));
 
             orgCombo.SelectedIndexChanged += async (s, e) => await LoadUsersForSelectedOrgAsync();
             PositionNearTray();
@@ -1416,11 +1321,6 @@ namespace YEJI_AW_Client
 #endif
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
-            {
-                buttonFont?.Dispose();
-                headerFont?.Dispose();
-            }
             base.Dispose(disposing);
         }
     }
