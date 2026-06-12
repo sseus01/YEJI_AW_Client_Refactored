@@ -27,6 +27,10 @@ internal class RoundButton : Button
         g.SmoothingMode   = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
+        // 라운드 코너 바깥 영역을 부모 배경색으로 채워 아티팩트 제거
+        using (var bgBrush = new SolidBrush(GetParentBackground()))
+            g.FillRectangle(bgBrush, 0, 0, Width, Height);
+
         var rc = new Rectangle(0, 0, Width - 1, Height - 1);
         using var path = RoundedPath(rc, Radius);
 
@@ -54,6 +58,19 @@ internal class RoundButton : Button
     protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
     protected override void OnMouseEnter(EventArgs e) { _hovered = true;  Invalidate(); base.OnMouseEnter(e); }
     protected override void OnMouseLeave(EventArgs e) { _hovered = false; Invalidate(); base.OnMouseLeave(e); }
+
+    /// <summary>부모 체인을 따라 올라가며 첫 번째 비투명 배경색을 반환합니다.</summary>
+    private Color GetParentBackground()
+    {
+        Control? p = Parent;
+        while (p != null)
+        {
+            if (p.BackColor != Color.Transparent && p.BackColor != Color.Empty)
+                return p.BackColor;
+            p = p.Parent;
+        }
+        return SystemColors.Control;
+    }
 
     private static Color Darken(Color c, int amount)
         => Color.FromArgb(c.A,

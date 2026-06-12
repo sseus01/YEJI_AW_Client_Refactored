@@ -18,7 +18,6 @@ namespace YEJI_AW_Client
         private const int ColEnd     = 1;
         private const int ColElapsed = 2;
         private const int ColReason  = 3;
-        private const int ColStatus  = 4;
 
         public IdleHistoryForm(
             List<IdleEventData> history,
@@ -188,14 +187,14 @@ namespace YEJI_AW_Client
             {
                 Name            = "StartTime",
                 HeaderText      = "시작 시각",
-                Width           = 85,
+                Width           = 100,
                 DataPropertyName = "StartTime"
             });
             _dgv.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name            = "EndTime",
                 HeaderText      = "종료 시각",
-                Width           = 85,
+                Width           = 100,
                 DataPropertyName = "EndTime"
             });
             _dgv.Columns.Add(new DataGridViewTextBoxColumn
@@ -212,14 +211,6 @@ namespace YEJI_AW_Client
                 AutoSizeMode     = DataGridViewAutoSizeColumnMode.Fill,
                 DataPropertyName = "Reason"
             });
-            _dgv.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name            = "Status",
-                HeaderText      = "상태",
-                Width           = 80,
-                DataPropertyName = "Status"
-            });
-
             foreach (DataGridViewColumn col in _dgv.Columns)
             {
                 col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -230,6 +221,10 @@ namespace YEJI_AW_Client
 
         private void LoadData(List<IdleEventData> history)
         {
+            // 날짜 범위가 하루를 넘으면 날짜도 표시
+            bool multiDay = _pickerFrom.Value.Date != _pickerTo.Value.Date;
+            string fmt    = multiDay ? "M/d HH:mm" : "HH:mm";
+
             var rows = history.ConvertAll(item =>
             {
                 DateTime start = DateTime.TryParse(item.IdleStartTime, out var s) ? s : DateTime.MinValue;
@@ -243,11 +238,10 @@ namespace YEJI_AW_Client
                         : item.ReasonLevel2 ?? item.ReasonCategory ?? "";
 
                 return new HistoryRow(
-                    StartTime  : start == DateTime.MinValue ? item.IdleStartTime : start.ToString("HH:mm"),
-                    EndTime    : ongoing ? "--:--" : end.ToString("HH:mm"),
+                    StartTime  : start == DateTime.MinValue ? item.IdleStartTime : start.ToString(fmt),
+                    EndTime    : ongoing ? "--" : end.ToString(fmt),
                     ElapsedMin : ongoing ? "" : $"{(int)(end - start).TotalMinutes}분",
-                    Reason     : reason,
-                    Status     : ongoing ? "진행중" : "완료"
+                    Reason     : reason
                 );
             });
 
@@ -269,24 +263,14 @@ namespace YEJI_AW_Client
         private void DgvCellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
-            if (e.ColumnIndex != ColElapsed && e.ColumnIndex != ColStatus) return;
+            if (e.ColumnIndex != ColElapsed) return;
 
             string? text = e.Value?.ToString();
             if (string.IsNullOrEmpty(text)) return;
 
             e.Paint(e.CellBounds, DataGridViewPaintParts.All & ~DataGridViewPaintParts.ContentForeground);
 
-            Color bg, fg;
-            if (e.ColumnIndex == ColStatus)
-            {
-                if (text == "완료") { bg = UiTheme.SuccessLight; fg = UiTheme.Success; }
-                else                 { bg = UiTheme.WarningLight; fg = UiTheme.Warning; }
-            }
-            else
-            {
-                bg = UiTheme.PrimaryLight;
-                fg = UiTheme.Primary;
-            }
+            Color bg = UiTheme.PrimaryLight, fg = UiTheme.Primary;
 
             var sz  = TextRenderer.MeasureText(e.Graphics, text, UiTheme.BadgeFont);
             int bw  = sz.Width + 12;
@@ -310,7 +294,6 @@ namespace YEJI_AW_Client
             string StartTime,
             string EndTime,
             string ElapsedMin,
-            string Reason,
-            string Status);
+            string Reason);
     }
 }
