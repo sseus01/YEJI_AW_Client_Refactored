@@ -2364,7 +2364,7 @@ namespace YEJI_AW_Client
                 : $"업무시간이 종료되어 PC가 종료됩니다 (기준 시각: {offTime:HH:mm}).\n일시해제 후 진행 업무는 연장근무에 해당되지 않습니다.";
 
             bool showTempDisable = !triggeredAfterBoot && CanUseTempDisableNow();
-            pcOffAlertForm = new PcOffAlertForm(headline, showTempDisable, remainingTempDisableCount);
+            pcOffAlertForm = new PcOffAlertForm(headline, showTempDisable, remainingTempDisableCount, offTime);
 
             pcOffAlertForm.TempDisableClicked += (s, e) =>
             {
@@ -4880,7 +4880,11 @@ namespace YEJI_AW_Client
                 };
             }
 
-            var form = new IdleHistoryForm(history, hasHistoryViewPermission, onViewOrgHistory);
+            var today = GetCurrentDate();
+            var form = new IdleHistoryForm(
+                history, today, today,
+                async (from, to) => await FetchIdleHistoryForDateRangeAsync(employeeId, from, to),
+                hasHistoryViewPermission, onViewOrgHistory);
             ShowTrayMenuForm(form);
             form.Dispose(); // ShowDialog() is synchronous, so this happens after the form closes
         }

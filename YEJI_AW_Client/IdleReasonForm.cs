@@ -60,6 +60,10 @@ namespace YEJI_AW_Client
 
             labelIdleTime.Text = $"{idleStartTime:HH:mm} ~ {idleEndTime:HH:mm}";
 
+            int totalMin = (int)Math.Max(0, (idleEndTime - idleStartTime).TotalMinutes);
+            _durationBadge.Text  = $"{totalMin}분";
+            _durationBadge.Width = TextRenderer.MeasureText(_durationBadge.Text, UiTheme.BadgeFont).Width + 16;
+
             this.FormClosing += IdleReasonForm_FormClosing;
 
             buttonSave.Click += ButtonSave_Click;

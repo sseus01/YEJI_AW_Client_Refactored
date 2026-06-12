@@ -7,7 +7,8 @@ namespace YEJI_AW_Client;
 internal sealed class PcOffAlertForm : Form
 {
     private readonly Label       _countdownLabel;
-    private readonly Label       _statusLabel;
+    private readonly Label       _tempDisableBadge;
+    private readonly Label       _urgentBadge;
     private readonly RoundButton _tempDisableBtn;
     private readonly Panel       _progressFill;
     private double               _totalSeconds = -1;
@@ -15,7 +16,7 @@ internal sealed class PcOffAlertForm : Form
     /// <summary>사용자가 '일시해제 신청' 버튼을 클릭했을 때 발생합니다.</summary>
     internal event EventHandler? TempDisableClicked;
 
-    internal PcOffAlertForm(string headline, bool canUseTempDisable, int remainingTempDisableCount)
+    internal PcOffAlertForm(string headline, bool canUseTempDisable, int remainingTempDisableCount, DateTime shutdownTime)
     {
         Text            = "PC 종료 알림";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -28,18 +29,8 @@ internal sealed class PcOffAlertForm : Form
         BackColor       = UiTheme.Background;
 
         // ── 버튼 패널 (하단) ─────────────────────────────────────────
-        var btnPanel = new Panel
-        {
-            Dock      = DockStyle.Bottom,
-            Height    = 60,
-            BackColor = UiTheme.Surface
-        };
-        btnPanel.Controls.Add(new Panel
-        {
-            Dock      = DockStyle.Top,
-            Height    = 1,
-            BackColor = UiTheme.Border
-        });
+        var btnPanel = new Panel { Dock = DockStyle.Bottom, Height = 60, BackColor = UiTheme.Surface };
+        btnPanel.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = UiTheme.Border });
 
         var closeBtn = new RoundButton { Text = "지금 종료", Width = 110, Height = UiTheme.BtnH };
         UiTheme.StyleDanger(closeBtn);
@@ -56,7 +47,6 @@ internal sealed class PcOffAlertForm : Form
         UiTheme.StylePrimary(_tempDisableBtn);
         _tempDisableBtn.Click += (_, _) => TempDisableClicked?.Invoke(this, EventArgs.Empty);
 
-        // 버튼들을 우측에 배치
         var btnFlow = new FlowLayoutPanel
         {
             AutoSize      = true,
@@ -69,14 +59,9 @@ internal sealed class PcOffAlertForm : Form
         btnFlow.Controls.Add(closeBtn);
         btnFlow.Controls.Add(_tempDisableBtn);
         btnPanel.Controls.Add(btnFlow);
-
-        // Layout 이벤트로 버튼 패널 우측에 고정
-        btnPanel.Layout += (_, _) =>
-        {
-            btnFlow.Location = new Point(
-                btnPanel.ClientSize.Width - btnFlow.Width - UiTheme.Pad,
-                (btnPanel.ClientSize.Height - btnFlow.Height) / 2 + 2);
-        };
+        btnPanel.Layout += (_, _) => btnFlow.Location = new Point(
+            btnPanel.ClientSize.Width - btnFlow.Width - UiTheme.Pad,
+            (btnPanel.ClientSize.Height - btnFlow.Height) / 2 + 2);
 
         // ── 본문 ─────────────────────────────────────────────────────
         var body = new Panel
@@ -86,67 +71,131 @@ internal sealed class PcOffAlertForm : Form
             Padding   = new Padding(UiTheme.Pad, 12, UiTheme.Pad, 8)
         };
 
-        // 카운트다운 박스
+        // ── 상태 배지 행 (카드 아래) ──────────────────────────────────
+        var badgeRow = new FlowLayoutPanel
+        {
+            Dock          = DockStyle.Top,
+            Height        = 36,
+            BackColor     = Color.Transparent,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents  = false,
+            Padding       = new Padding(0, 8, 0, 0)
+        };
+        _urgentBadge = UiTheme.MakeStatusBadge("강제종료 예정", UiTheme.BadgeStyle.Danger);
+        _urgentBadge.Visible = false;
+        var scheduleBadge = UiTheme.MakeStatusBadge($"{shutdownTime:HH:mm} 설정됨", UiTheme.BadgeStyle.Gray);
+        badgeRow.Controls.Add(_urgentBadge);
+        badgeRow.Controls.Add(scheduleBadge);
+
+        // ── 카운트다운 카드 ───────────────────────────────────────────
         var cdBox = new Panel
         {
             Dock      = DockStyle.Top,
-            Height    = 110,
-            BackColor = UiTheme.PrimaryLight,
-            Padding   = new Padding(20, 14, 20, 0)
+            Height    = 100,
+            BackColor = UiTheme.Surface
         };
-
-        _countdownLabel = new Label
+        cdBox.Paint += (s, e) =>
         {
-            Dock      = DockStyle.Fill,
-            Text      = "--:--",
-            Font      = UiTheme.CountdownLg,
-            ForeColor = UiTheme.Primary,
-            BackColor = Color.Transparent,
-            TextAlign = ContentAlignment.MiddleLeft
+            using var pen = new Pen(UiTheme.Border);
+            e.Graphics.DrawRectangle(pen, 0, 0, cdBox.Width - 1, cdBox.Height - 1);
         };
 
-        // 커스텀 진행 바 (진행 트랙 + 채움 패널)
+        // 진행 바 (카드 하단)
         var progressTrack = new Panel
         {
             Dock      = DockStyle.Bottom,
             Height    = 6,
-            BackColor = Color.FromArgb(196, 212, 248)
+            BackColor = UiTheme.AccentLight
         };
         _progressFill = new Panel
         {
             Location  = Point.Empty,
             Height    = 6,
             Width     = 0,
-            BackColor = UiTheme.Primary
+            BackColor = UiTheme.Accent
         };
         progressTrack.Controls.Add(_progressFill);
-        // 트랙 크기 변경 시 채움 너비도 재계산 (초기 레이아웃 후)
         progressTrack.Resize += (_, _) =>
         {
-            if (_totalSeconds > 0)
-                _progressFill.Height = progressTrack.ClientSize.Height;
+            if (_totalSeconds > 0) _progressFill.Height = progressTrack.ClientSize.Height;
         };
+
+        // 카드 내부: 좌(카운트다운) / 우(배지 정보) 2열
+        var cdTable = new TableLayoutPanel
+        {
+            Dock            = DockStyle.Fill,
+            ColumnCount     = 2,
+            RowCount        = 1,
+            BackColor       = Color.Transparent,
+            CellBorderStyle = TableLayoutPanelCellBorderStyle.None
+        };
+        cdTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        cdTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180F));
+
+        // 왼쪽: 카운트다운 숫자 + "남은 시간"
+        var leftFlow = new FlowLayoutPanel
+        {
+            Dock          = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            BackColor     = Color.Transparent,
+            Padding       = new Padding(20, 10, 0, 0),
+            WrapContents  = false
+        };
+        _countdownLabel = new Label
+        {
+            Text      = "--:--",
+            Font      = UiTheme.CountdownLg,
+            ForeColor = UiTheme.Accent,
+            BackColor = Color.Transparent,
+            AutoSize  = true
+        };
+        var remainingLbl = new Label
+        {
+            Text      = "남은 시간",
+            Font      = UiTheme.Small,
+            ForeColor = UiTheme.TextSecondary,
+            BackColor = Color.Transparent,
+            AutoSize  = true,
+            Margin    = new Padding(3, 0, 0, 0)
+        };
+        leftFlow.Controls.Add(_countdownLabel);
+        leftFlow.Controls.Add(remainingLbl);
+
+        // 오른쪽: 일시해제 배지 + 퇴근 기준 레이블
+        var rightPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+        _tempDisableBadge = UiTheme.MakeStatusBadge(
+            showTempDisable ? $"일시해제 {remainingTempDisableCount}회 남음" : "　",
+            UiTheme.BadgeStyle.Warning);
+        _tempDisableBadge.Visible = showTempDisable;
+
+        var scheduleInfoLbl = new Label
+        {
+            Text      = $"오늘 {shutdownTime:HH:mm} 퇴근 기준",
+            Font      = UiTheme.Small,
+            ForeColor = UiTheme.TextSecondary,
+            BackColor = Color.Transparent,
+            AutoSize  = true
+        };
+
+        rightPanel.Controls.Add(_tempDisableBadge);
+        rightPanel.Controls.Add(scheduleInfoLbl);
+        rightPanel.Layout += (_, _) =>
+        {
+            int rightEdge = rightPanel.ClientSize.Width - 16;
+            _tempDisableBadge.Location = new Point(rightEdge - _tempDisableBadge.Width, 14);
+            scheduleInfoLbl.Location   = new Point(rightEdge - scheduleInfoLbl.PreferredWidth, _tempDisableBadge.Bottom + 4);
+        };
+
+        cdTable.Controls.Add(leftFlow,   0, 0);
+        cdTable.Controls.Add(rightPanel, 1, 0);
 
         cdBox.Controls.Add(progressTrack);
-        cdBox.Controls.Add(_countdownLabel);
+        cdBox.Controls.Add(cdTable);
 
-        // 상태 레이블
-        _statusLabel = new Label
-        {
-            Dock      = DockStyle.Top,
-            Height    = 30,
-            Padding   = new Padding(0, 8, 0, 0),
-            Text      = showTempDisable ? $"일시해제 {remainingTempDisableCount}회 남음" : "",
-            Font      = UiTheme.Small,
-            ForeColor = UiTheme.Primary,
-            BackColor = Color.Transparent
-        };
-
-        // Top 컨트롤은 나중에 추가될수록 위에 배치
-        body.Controls.Add(_statusLabel);
+        // Dock=Top는 나중에 추가될수록 위에 배치됨
+        body.Controls.Add(badgeRow);
         body.Controls.Add(cdBox);
 
-        // Form: Bottom → Fill → Top 순서
         var header = UiTheme.MakeFormHeader("PC 종료 예정 안내", headline, "⏻", UiTheme.Danger);
         Controls.Add(btnPanel);
         Controls.Add(body);
@@ -164,7 +213,7 @@ internal sealed class PcOffAlertForm : Form
         CancelButton = closeBtn;
     }
 
-    /// <summary>매 초 Form1의 카운트다운 타이머에서 호출하여 남은 시간 표시를 갱신합니다.</summary>
+    /// <summary>매 초 호출하여 남은 시간 표시를 갱신합니다.</summary>
     internal void UpdateCountdown(TimeSpan remaining, int remainingTempDisableCount)
     {
         if (IsDisposed || !IsHandleCreated) return;
@@ -172,35 +221,34 @@ internal sealed class PcOffAlertForm : Form
         if (_totalSeconds < 0)
             _totalSeconds = Math.Max(remaining.TotalSeconds, 1);
 
-        // 카운트다운 텍스트 (MM:SS 또는 HH:MM:SS)
         _countdownLabel.Text = remaining.TotalHours >= 1
             ? $"{(int)remaining.TotalHours:D2}:{remaining.Minutes:D2}:{remaining.Seconds:D2}"
             : $"{remaining.Minutes:D2}:{remaining.Seconds:D2}";
 
-        // 1분 미만 → 빨간색으로 전환
         bool urgent = remaining < TimeSpan.FromMinutes(1);
-        _countdownLabel.ForeColor = urgent ? UiTheme.Danger   : UiTheme.Primary;
+        _countdownLabel.ForeColor = urgent ? UiTheme.Danger : UiTheme.Accent;
 
-        // 진행 바 업데이트
         double pct    = Math.Max(0, Math.Min(1, remaining.TotalSeconds / _totalSeconds));
         int    trackW = _progressFill.Parent?.ClientSize.Width ?? 0;
         if (trackW > 0)
         {
             _progressFill.Width     = (int)(trackW * pct);
             _progressFill.Height    = _progressFill.Parent!.ClientSize.Height;
-            _progressFill.BackColor = urgent ? UiTheme.Danger : UiTheme.Primary;
+            _progressFill.BackColor = urgent ? UiTheme.Danger : UiTheme.Accent;
         }
 
-        // 상태 텍스트
-        if (urgent && remainingTempDisableCount <= 0)
+        if (urgent) _urgentBadge.Visible = true;
+
+        if (remainingTempDisableCount > 0)
         {
-            _statusLabel.Text      = $"{(int)remaining.TotalSeconds}초 후 PC가 강제 종료됩니다.";
-            _statusLabel.ForeColor = UiTheme.Danger;
+            string badgeText = $"일시해제 {remainingTempDisableCount}회 남음";
+            _tempDisableBadge.Text    = badgeText;
+            _tempDisableBadge.Width   = TextRenderer.MeasureText(badgeText, UiTheme.BadgeFont).Width + 16;
+            _tempDisableBadge.Visible = true;
         }
-        else if (remainingTempDisableCount > 0)
+        else
         {
-            _statusLabel.Text      = $"일시해제 {remainingTempDisableCount}회 남음";
-            _statusLabel.ForeColor = urgent ? UiTheme.Warning : UiTheme.Primary;
+            _tempDisableBadge.Visible = false;
         }
     }
 
@@ -208,8 +256,8 @@ internal sealed class PcOffAlertForm : Form
     internal void OnTempDisableFailed(string message)
     {
         if (IsDisposed) return;
-        _tempDisableBtn.Visible = false;
-        _statusLabel.Text       = message;
-        _statusLabel.ForeColor  = UiTheme.Danger;
+        _tempDisableBtn.Visible   = false;
+        _tempDisableBadge.Visible = false;
+        _urgentBadge.Visible      = true;
     }
 }
